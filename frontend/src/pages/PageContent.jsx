@@ -18,7 +18,8 @@ import SettingsPage from '../components/portals/SettingsPage.jsx';
 import { SETTINGS_PAGE } from '../utils/access.js';
 
 export default function PageContent({
-  page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange
+  page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange,
+  getPurchaseOrder, updatePurchaseOrder
 }) {
   const documentId = query.view || query.request;
   const report = reportForPage(page);
@@ -37,6 +38,7 @@ export default function PageContent({
   } else if (page === PROCUREMENT_PROCESSING_PAGE) {
     content = <ProcurementProcessingPage
       data={data} query={query} actions={actions} portalApi={portalApi} navigate={navigate}
+      getPurchaseOrder={getPurchaseOrder} updatePurchaseOrder={updatePurchaseOrder}
     />;
   } else if (page === 'Requisitions' || page === 'Approvals') {
     content = <RequisitionsPage page={page} requisitions={data.requisitions} user={data.user} search={data.search} onCreate={actions.onCreateRequisition} onDecision={actions.onRequisitionDecision} />;
@@ -66,7 +68,12 @@ export default function PageContent({
       onResendRfqEmail={actions.onResendRfqEmail}
     />;
   } else if (page === 'Purchase orders') {
-    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO} />;
+    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} query={query}
+      onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO}
+      getPurchaseOrder={getPurchaseOrder} updatePurchaseOrder={updatePurchaseOrder}
+      loadApprovers={actions.getPurchaseOrderApprovers}
+      onSendForApproval={actions.sendPurchaseOrderForApproval}
+      onRevokeApproval={actions.revokePurchaseOrderApproval} />;
   } else if (page === 'Goods receipts') {
     content = <GoodsReceiptsPage receipts={data.goodsReceipts} />;
   } else if (page === 'Invoices') {

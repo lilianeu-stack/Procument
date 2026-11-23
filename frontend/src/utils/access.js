@@ -4,10 +4,17 @@ export const PORTALS = {
   REQUESTER: 'requester',
   STOCKKEEPER: 'stockkeeper',
   // Public, signed-link portal used by Suppliers. It has no staff login.
-  SUPPLIER: 'supplier'
+  SUPPLIER: 'supplier',
+  // Public, token-gated portal where a Supplier supplies prices for a purchase
+  // order. The token itself authorizes exactly one pricing response.
+  SUPPLIER_PRICING: 'supplier-pricing',
+  // Token-gated Purchase Order review page. The link is public, but a decision
+  // requires the intended registered account to sign in.
+  PURCHASE_ORDER_APPROVAL: 'po-approval'
 };
 
 export const SUPPLIER_PAGES = ['RFQ'];
+export const SUPPLIER_PRICING_PAGES = ['Quote'];
 export const STOCKKEEPER_PAGES = [
   'Dashboard',
   'List of Requesters',
@@ -127,6 +134,7 @@ export function defaultPageForPortal(portal) {
   if (portal === PORTALS.REQUESTER) return 'Requester Dashboard';
   if (portal === PORTALS.STOCKKEEPER) return 'Dashboard';
   if (portal === PORTALS.SUPPLIER) return 'RFQ';
+  if (portal === PORTALS.SUPPLIER_PRICING) return 'Quote';
   return null;
 }
 
@@ -134,8 +142,15 @@ export function defaultPageForRole(role) {
   return defaultPageForPortal(portalForRole(role));
 }
 
+// The public pricing link is authorized by its token, never by a staff role.
+const SUPPLIER_PRICING_PAGE_NAMES = new Set(SUPPLIER_PRICING_PAGES.flatMap((page) => [page, page.toLowerCase()]));
+
 export function canAccessPage(role, page) {
   const target = canonicalPage(page);
+  if (role === PORTALS.SUPPLIER_PRICING) return SUPPLIER_PRICING_PAGE_NAMES.has(target);
+  // No back-office role may open the public supplier pricing page through the
+  // staff shell; the signed token is the only credential for that portal.
+  if (SUPPLIER_PRICING_PAGE_NAMES.has(target)) return false;
   const portal = portalForRole(role);
   // Department portals use their own page lists; the admin-side restricted
   // pages only apply to Administrator-side roles.

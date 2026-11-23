@@ -4,6 +4,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import Modal from '../ui/Modal.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import DownloadButton from '../ui/DownloadButton.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
@@ -12,6 +13,7 @@ import {
   EmptyState, ErrorState, KeyValue, LoadingState, TableScroll,
   primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
+import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
 import { downloadBinary, previewBinary } from '../../utils/attachments.js';
 import { PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
@@ -64,6 +66,7 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showOfficial, setShowOfficial] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -147,6 +150,9 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <StatusBadge value={request.status} />
+        <button type="button" onClick={() => setShowOfficial(true)} className={secondaryButtonClass()}>
+          <FileText size={14} />Official form
+        </button>
         <button type="button" onClick={() => document.getElementById('received-attachments')?.scrollIntoView({ behavior: 'smooth' })} className={secondaryButtonClass()}>
           <Paperclip size={14} />View Attachments
         </button>
@@ -176,6 +182,7 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           <KeyValue label="Request title">{request.title}</KeyValue>
           <KeyValue label="Request date">{dateTimeLabel(request.createdAt)}</KeyValue>
           <KeyValue label="Department">{request.department || '—'}</KeyValue>
+          <KeyValue label="Location">{request.location || '—'}</KeyValue>
           <KeyValue label="Priority">{request.priority || 'Medium'}</KeyValue>
           <KeyValue label="Requester name">{request.requester}</KeyValue>
           <KeyValue label="Requester email">{request.requesterEmail || '—'}</KeyValue>
@@ -218,7 +225,7 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
         <table className="w-full text-left text-xs">
           <thead className="bg-slate-50 text-[10px] uppercase text-muted">
             <tr>
-              {['Item name', 'Description / specifications', 'Quantity', 'Unit of measurement', 'Estimated unit price', 'Estimated total price'].map((heading) =>
+              {['Item name', 'Description / specifications', 'Quantity', 'Unit of measurement', 'Estimated unit price', 'Remarks', 'Estimated total price'].map((heading) =>
                 <th key={heading} className="whitespace-nowrap px-3 py-2.5 font-bold">{heading}</th>)}
             </tr>
           </thead>
@@ -229,6 +236,7 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
               <td className="whitespace-nowrap px-3 py-3">{item.quantity}</td>
               <td className="whitespace-nowrap px-3 py-3">{item.unit || 'unit'}</td>
               <td className="whitespace-nowrap px-3 py-3">{currency(item.estimatedUnitCost)}</td>
+              <td className="px-3 py-3 text-muted">{item.remarks || '—'}</td>
               <td className="whitespace-nowrap px-3 py-3 text-right font-bold">{currency(item.lineTotal)}</td>
             </tr>)}
           </tbody>
@@ -299,5 +307,15 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
       <button type="button" onClick={back} className={secondaryButtonClass()}><ArrowLeft size={14} />Back to Received Requests</button>
       <button type="button" onClick={continueProcessing} className={primaryButtonClass()}>Continue Procurement Processing</button>
     </div>
+
+    {showOfficial && <Modal title="Official material request form" size="xl" onClose={() => setShowOfficial(false)}>
+      <div className="no-print mb-4 flex flex-wrap justify-end gap-2">
+        <PrintButton label="Print official form" />
+        <DownloadButton type="requisition" id={id} format="pdf" label="Download official PDF" />
+      </div>
+      <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <MaterialRequestDocument requisition={request} />
+      </div>
+    </Modal>}
   </div>;
 }

@@ -13,7 +13,10 @@ export async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     if (response.status === 401) localStorage.removeItem('pims-token');
-    throw new Error(data.message || `Request failed (${response.status}).`);
+    const error = new Error(data.message || `Request failed (${response.status}).`);
+    error.status = response.status;
+    error.data = data;
+    throw error;
   }
   return data;
 }

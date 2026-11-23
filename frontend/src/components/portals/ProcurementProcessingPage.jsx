@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, FileText, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, FileText, Inbox, ShoppingCart } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import {
@@ -7,18 +7,22 @@ import {
 } from './PortalUi.jsx';
 import RfqsPage from '../../pages/RfqsPage.jsx';
 import PurchaseOrdersPage from '../../pages/PurchaseOrdersPage.jsx';
+import SupplierResponsesPage from './SupplierResponsesPage.jsx';
 import { currency, dateTimeLabel } from '../../utils/format.js';
 import { PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 
 const TABS = [
   { id: 'rfqs', label: 'RFQs', icon: FileText, hint: 'Invite suppliers, compare quotes and award.' },
-  { id: 'purchase-orders', label: 'Purchase orders', icon: ShoppingCart, hint: 'Prepare, approve and receive orders for this request.' }
+  { id: 'purchase-orders', label: 'Purchase orders', icon: ShoppingCart, hint: 'Prepare, approve and receive orders for this request.' },
+  { id: 'supplier-responses', label: 'Supplier responses', icon: Inbox, hint: 'Review private price responses and compare quotations.' }
 ];
 
 // Continuation of one forwarded department request. It is deliberately not a
 // sidebar destination: it reuses the existing RFQ and Purchase Order screens
 // but scopes both to the selected requisition.
-export default function ProcurementProcessingPage({ data, query = {}, actions, portalApi, navigate }) {
+export default function ProcurementProcessingPage({
+  data, query = {}, actions, portalApi, navigate, getPurchaseOrder, updatePurchaseOrder
+}) {
   const requestId = Number(query.request || query.view);
   const validRequestId = Number.isInteger(requestId) && requestId > 0;
   const [request, setRequest] = useState(null);
@@ -45,7 +49,8 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
 
   useEffect(() => { load(); }, [load]);
 
-  const activeTab = query.tab === 'purchase-orders' ? 'purchase-orders' : 'rfqs';
+  const activeTab = query.tab === 'purchase-orders' || query.tab === 'supplier-responses'
+    ? query.tab : 'rfqs';
 
   const scopedRfqs = useMemo(
     () => (data.rfqs || []).filter((rfq) => Number(rfq.requisitionId) === requestId),
@@ -134,15 +139,29 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
         query={{}}
         initialRequisitionId={requestId}
         {...rfqActions}
-      /> : <PurchaseOrdersPage
+      /> : activeTab === 'purchase-orders' ? <PurchaseOrdersPage
         orders={scopedOrders}
         rfqs={scopedRfqs}
         items={data.items || []}
+        suppliers={data.suppliers || []}
         user={data.user}
-        requisition={{ id: requestId, reference: request.reference }}
+        requisition={request ? { ...request, id: requestId } : { id: requestId, reference: '', items: [] }}
         onCreate={actions.onCreatePO}
         onDecision={actions.onPODecision}
         onReceive={actions.onReceivePO}
+        getPurchaseOrder={getPurchaseOrder}
+        updatePurchaseOrder={updatePurchaseOrder}
+        loadApprovers={actions.getPurchaseOrderApprovers}
+        onSendForApproval={actions.sendPurchaseOrderForApproval}
+        onRevokeApproval={actions.revokePurchaseOrderApproval}
+        sendPurchaseOrderToSuppliers={actions.sendPurchaseOrderToSuppliers}
+      /> : <SupplierResponsesPage
+        orders={scopedOrders}
+        rfqs={scopedRfqs}
+        request={request}
+        actions={actions}
+        portalApi={portalApi}
+        query={query}
       />}
     </> : null}
   </div>;

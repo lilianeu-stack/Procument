@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { CheckCircle2, Info, MessageSquare, Send, XCircle } from 'lucide-react';
+import { CheckCircle2, FileText, Info, MessageSquare, Pencil, Send, XCircle } from 'lucide-react';
 import Modal from '../ui/Modal.jsx';
+import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import DownloadButton from '../ui/DownloadButton.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
@@ -23,7 +24,7 @@ function DetailSection({ title, children }) {
 }
 
 export default function RequestDetail({
-  requisition, portal = 'requester', onClose, portalApi, onMessage, onChanged
+  requisition, portal = 'requester', onClose, portalApi, onMessage, onChanged, onEdit
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -32,6 +33,7 @@ export default function RequestDetail({
   const [response, setResponse] = useState('');
   const [files, setFiles] = useState([]);
   const [pendingDecision, setPendingDecision] = useState('');
+  const [showOfficial, setShowOfficial] = useState(false);
 
   if (!requisition) return null;
   const isSupervisor = portal === 'supervisor';
@@ -83,6 +85,12 @@ export default function RequestDetail({
         <PortalBadge tone={decisionTone(requisition.supervisorDecision)}>
           Supervisor: {decisionLabel(requisition.supervisorDecision)}
         </PortalBadge>
+        <button type="button" onClick={() => setShowOfficial(true)} className={secondaryButtonClass()}>
+          <FileText size={14} />Official form
+        </button>
+        {!isSupervisor && isDraft(status) && onEdit && <button type="button" onClick={onEdit} className={secondaryButtonClass()}>
+          <Pencil size={14} />Edit official form
+        </button>}
         <PrintButton label="Print Request" />
         <DownloadButton type="requisition" id={requisition.id} format="pdf" label="PDF" />
         <DownloadButton type="requisition" id={requisition.id} format="xlsx" label="Excel" />
@@ -102,6 +110,7 @@ export default function RequestDetail({
           <KeyValue label="Priority">{requisition.priority || 'Medium'}</KeyValue>
           <KeyValue label="Requester">{requisition.requester || '—'}</KeyValue>
           <KeyValue label="Department">{requisition.department || '—'}</KeyValue>
+          <KeyValue label="Location">{requisition.location || '—'}</KeyValue>
           <KeyValue label="Submitted">{dateTimeLabel(requisition.submittedAt || requisition.createdAt)}</KeyValue>
           <KeyValue label="Required by">{dateLabel(requisition.requiredBy)}</KeyValue>
           <KeyValue label="Budget code">{requisition.budgetCode || '—'}</KeyValue>
@@ -125,13 +134,14 @@ export default function RequestDetail({
         {items.length ? <TableScroll minWidth={460}>
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase text-muted">
-              <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2 text-right">Total</th></tr>
+              <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2">Remarks</th><th className="px-2 py-2 text-right">Total</th></tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item) => <tr key={item.id}>
                 <td className="px-2 py-2 font-bold">{item.itemName}{item.description && <div className="text-[10px] font-normal text-muted">{item.description}</div>}</td>
                 <td className="px-2 py-2">{item.quantity} {item.unit}</td>
                 <td className="px-2 py-2">{currency(item.estimatedUnitCost)}</td>
+                <td className="px-2 py-2 text-muted">{item.remarks || '—'}</td>
                 <td className="px-2 py-2 text-right font-bold">{currency(item.lineTotal ?? item.quantity * item.estimatedUnitCost)}</td>
               </tr>)}
             </tbody>
@@ -214,5 +224,15 @@ export default function RequestDetail({
         <p className="text-[10px] text-muted">A decision can only be recorded once. Already-decided requests cannot be actioned again.</p>
       </div>
     </DetailSection>}
+
+    {showOfficial && <Modal title="Official material request form" size="xl" onClose={() => setShowOfficial(false)}>
+      <div className="no-print mb-4 flex flex-wrap justify-end gap-2">
+        <PrintButton label="Print official form" />
+        <DownloadButton type="requisition" id={requisition.id} format="pdf" label="Download official PDF" />
+      </div>
+      <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <MaterialRequestDocument requisition={requisition} />
+      </div>
+    </Modal>}
   </Modal>;
 }

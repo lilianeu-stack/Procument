@@ -33,20 +33,66 @@ function htmlParagraphs(lines) {
   return lines.map((line) => `<p style="margin:0 0 12px;line-height:1.55">${escapeHtml(line)}</p>`).join('');
 }
 
-export function supplierLink(token) {
+function appUrl(path) {
   const config = emailConfigStatus();
-  const base = config.appBaseUrl.replace(/\/+$/, '');
-  return `${base}/#/supplier/RFQ?token=${encodeURIComponent(token)}`;
+  return `${config.appBaseUrl.replace(/\/+$/, '')}${path}`;
 }
 
-function wrapHtml(title, lines, action = null) {
+export function supplierLink(token) {
+  return appUrl(`/#/supplier/RFQ?token=${encodeURIComponent(token)}`);
+}
+
+export function purchaseOrderReviewLink(token) {
+  return appUrl(`/#/po-approval/review?token=${encodeURIComponent(token)}`);
+}
+
+export function supplierPricingLink(token) {
+  return appUrl(`/#/supplier-pricing/quote?token=${encodeURIComponent(token)}`);
+}
+
+// This invitation deliberately contains no administrative prices or financial
+// totals. The supplier creates every figure on the private response page.
+export function buildSupplierPricingEmail({
+  supplierName, recipientEmail, reference, purchaseOrderReference,
+  items = [], deliveryDate, submissionDeadline, message = '',
+  rawToken, currency = 'RWF'
+}) {
+  const link = supplierPricingLink(rawToken);
+  const itemLines = (Array.isArray(items) ? items : []).map((item) => (
+    `${item.itemNo ? `${item.itemNo}. ` : ''}${item.description || item.itemName || 'Purchase order item'} — ${item.quantity} ${item.unit || 'unit'}`
+  ));
+  const lines = [
+    `Dear ${supplierName || 'Supplier'},`,
+    `Hope Haven invites you to submit prices for purchase order ${purchaseOrderReference}${reference ? ` (pricing request ${reference})` : ''}.`,
+    'Requested items:',
+    ...itemLines,
+    deliveryDate ? `Expected delivery date: ${deliveryDate}.` : '',
+    submissionDeadline ? `Submission deadline: ${submissionDeadline}.` : '',
+    currency ? `Quotation currency: ${currency}.` : '',
+    message ? `Message from Procurement: ${message}` : '',
+    'Use the secure link below to open the purchase order and submit your prices.'
+  ].filter(Boolean);
+  return {
+    to: recipientEmail,
+    subject: `Submit supplier prices for purchase order ${purchaseOrderReference} · Hope Haven`,
+    text: `${lines.join('\n\n')}\n\nOpen Purchase Order / Submit Prices:\n${link}\n`,
+    html: wrapHtml(`Supplier pricing request · ${purchaseOrderReference}`, lines,
+      { label: 'Open Purchase Order / Submit Prices', url: link })
+  };
+}
+
+export function procurementWorkspaceLink() {
+  return appUrl('/#/admin/Procurement%20Processing');
+}
+
+function wrapHtml(title, lines, action = null, footer = null) {
   return `<!doctype html><html><body style="margin:0;background:#f4f7f6;padding:24px;font-family:Arial,sans-serif;color:#172a39">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;margin:auto;background:#fff;border-radius:12px;overflow:hidden">
       <tr><td style="background:#123d3a;padding:20px 28px;color:#fff;font-size:16px;font-weight:bold">Hope Haven · Procurement &amp; Stores</td></tr>
       <tr><td style="padding:28px"><h1 style="font-size:20px;margin:0 0 18px">${escapeHtml(title)}</h1>
         ${htmlParagraphs(lines)}
         ${action ? `<p style="margin:24px 0"><a href="${escapeHtml(action.url)}" style="background:#123d3a;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">${escapeHtml(action.label)}</a></p><p style="font-size:12px;color:#5b6b73;word-break:break-all">${escapeHtml(action.url)}</p>` : ''}
-        <p style="margin-top:24px;font-size:12px;color:#5b6b73">This message was sent only to the Supplier named above. Do not forward the link; it is unique to your organization.</p>
+        <p style="margin-top:24px;font-size:12px;color:#5b6b73">${escapeHtml(footer || 'This message was sent only to the Supplier named above. Do not forward the link; it is unique to your organization.')}</p>
       </td></tr>
     </table></body></html>`;
 }
@@ -65,6 +111,49 @@ export function buildRfqEmail({ supplierName, reference, requisitionReference, t
     subject: `Request for Quotation ${reference} · Hope Haven`,
     text: `${lines.join('\n\n')}\n\nView RFQ & Submit Quotation:\n${link}\n`,
     html: wrapHtml(`Request for Quotation ${reference}`, lines, { label: 'View RFQ & Submit Quotation', url: link })
+  };
+}
+
+export function buildPurchaseOrderReviewEmail({
+  recipientName, recipientEmail, reference, supplier, totalAmount, deliveryDate, message = '', rawToken
+}) {
+  const link = purchaseOrderReviewLink(rawToken);
+  const lines = [
+    `Dear ${recipientName || 'Reviewer'},`,
+    `You have been asked to review purchase order ${reference}.`,
+    supplier ? `Supplier: ${supplier}.` : '',
+    totalAmount ? `Total amount: ${totalAmount}.` : '',
+    deliveryDate ? `Expected delivery date: ${deliveryDate}.` : '',
+    message ? `Message from the sender: ${message}` : '',
+    'Sign in with your registered account to open the secure review page and record your approval or rejection.'
+  ].filter(Boolean);
+  return {
+    to: recipientEmail,
+    subject: `Purchase order ${reference} awaiting your review · Hope Haven`,
+    text: `${lines.join('\n\n')}\n\nView Purchase Order:\n${link}\n`,
+    html: wrapHtml(`Purchase order ${reference} awaiting your review`, lines,
+      { label: 'View Purchase Order', url: link },
+      'This secure link is reserved for the named reviewer. Sign in with your registered account; do not forward the link.')
+  };
+}
+
+export function buildPurchaseOrderDecisionEmail({
+  recipientName, recipientEmail, reference, decision, comment = '', poNumber = reference, reviewerName = 'the designated reviewer'
+}) {
+  const link = procurementWorkspaceLink();
+  const lines = [
+    `Dear ${recipientName || 'Sender'},`,
+    `Purchase order ${poNumber} (${reference}) has been ${String(decision).toLowerCase()} by ${reviewerName}.`,
+    comment ? `Decision comment: ${comment}` : '',
+    'Open the Procurement Processing workspace to see the updated approval status and full history.'
+  ].filter(Boolean);
+  return {
+    to: recipientEmail,
+    subject: `Purchase order ${poNumber} ${String(decision).toLowerCase()} · Hope Haven`,
+    text: `${lines.join('\n\n')}\n\nOpen Procurement Processing:\n${link}\n`,
+    html: wrapHtml(`Purchase order ${poNumber} ${String(decision).toLowerCase()}`, lines,
+      { label: 'Open Procurement Processing', url: link },
+      'This notification was sent to the registered sender of the purchase order.')
   };
 }
 

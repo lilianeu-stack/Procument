@@ -25,6 +25,8 @@ import StockKeeperBinCards from './components/portals/StockKeeperBinCards.jsx';
 import ReceivedRequests from './components/portals/ReceivedRequests.jsx';
 import ProcurementDocumentView from './components/portals/ProcurementDocumentView.jsx';
 import SupplierRfqPage from './components/portals/SupplierRfqPage.jsx';
+import SupplierPricingPage from './components/portals/SupplierPricingPage.jsx';
+import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprovalPage.jsx';
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { api } from './services/api.js';
 import {
@@ -270,6 +272,7 @@ export default function App() {
         const settings = result.settings || {};
         localStorage.setItem('pims-currency', settings.default_currency || 'USD');
         localStorage.setItem('pims-currency-precision', String(settings.decimal_precision ?? 2));
+        localStorage.setItem('pims-tax-rate', String(settings.tax_rate ?? 0));
         localStorage.setItem('pims-date-format', settings.date_format || 'DD/MM/YYYY');
         localStorage.setItem('pims-time-format', settings.time_format || '24');
         localStorage.setItem('pims-timezone', settings.timezone || 'Africa/Kigali');
@@ -321,12 +324,18 @@ export default function App() {
       await loadData();
       return result;
     };
+    const patch = async (path, body) => {
+      const result = await api(path, { method: 'PATCH', body: JSON.stringify(body || {}) });
+      await loadData();
+      return result;
+    };
     return {
       reload: () => loadData(),
       navigate: (page, query) => go(portal, page, query),
       getRequesterRequests: (params = {}) => api(`/portal/requester/requisitions${toQuery(params)}`),
       getRequesterRequest: (id) => api(`/portal/requester/requisitions/${id}`),
       createRequesterRequest: (payload) => post('/portal/requester/requisitions', payload),
+      updateRequesterRequest: (id, payload) => patch(`/portal/requester/requisitions/${id}`, payload),
       submitRequesterRequest: (id, payload = {}) => post(`/portal/requester/requisitions/${id}/submit`, payload),
       resubmitRequesterRequest: (id, payload = {}) => post(`/portal/requester/requisitions/${id}/resubmit`, payload),
       getSupervisorRequests: (params = {}) => api(`/portal/supervisor/requisitions${toQuery(params)}`),
@@ -428,6 +437,20 @@ export default function App() {
     return <ErrorBoundary key="supplier-rfq"><SupplierRfqPage token={route.query?.token || ''} /></ErrorBoundary>;
   }
 
+  // Supplier pricing links are public. The signed token authorizes exactly one
+  // purchase order pricing response, so no staff session or portal page check
+  // may stand in front of this page.
+  if (activePortal === PORTALS.SUPPLIER_PRICING) {
+    return <ErrorBoundary key="supplier-pricing"><SupplierPricingPage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+
+  // The Purchase Order approval link is also reachable without dashboard
+  // navigation. The backend still requires the intended signed-in recipient
+  // before the document is revealed or a decision is accepted.
+  if (activePortal === PORTALS.PURCHASE_ORDER_APPROVAL) {
+    return <ErrorBoundary key="purchase-order-approval"><PurchaseOrderApprovalPage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+
   if (authLoading) return <main className="grid min-h-screen place-items-center bg-canvas">
     <div role="status" className="flex flex-col items-center gap-4">
       <BrandLogo variant="loading" />
@@ -463,6 +486,18 @@ export default function App() {
     onQuote: (id, form) => mutate(`/rfqs/${id}/quotations`, form),
     onAward: (id, quotationId) => mutate(`/rfqs/${id}/award`, { quotationId }),
     onCreatePO: (form) => mutate('/purchase-orders', form),
+    getPurchaseOrder: (id) => api(`/purchase-orders/${id}`),
+    updatePurchaseOrder: (id, form) => mutate(`/purchase-orders/${id}`, form, 'PATCH'),
+    getPurchaseOrderApprovers: () => api('/purchase-orders/approvers'),
+    sendPurchaseOrderForApproval: (id, form) => mutate(`/purchase-orders/${id}/send-for-approval`, form),
+    revokePurchaseOrderApproval: (id, approvalId) => mutate(`/purchase-orders/${id}/approvals/${approvalId}/revoke`, {}, 'PATCH'),
+    sendPurchaseOrderToSuppliers: (id, form) => mutate(`/purchase-orders/${id}/send-to-suppliers`, form),
+    getPurchaseOrderSupplierResponses: (id) => api(`/purchase-orders/${id}/supplier-responses`),
+    getSupplierQuoteComparison: (requestId) => api(`/purchase-order-pricing/requests/${requestId}/comparison`),
+    revokeSupplierPricingResponse: (id) => mutate(`/purchase-order-pricing/responses/${id}/revoke`, {}, 'PATCH'),
+    retrySupplierPricingEmails: (requestId) => mutate(`/purchase-order-pricing/requests/${requestId}/deliveries/retry-failed`, {}),
+    awardSupplierPricingResponse: (requestId, form) => mutate(`/purchase-order-pricing/requests/${requestId}/award`, form),
+    updateRequesterRequest: (id, form) => mutate(`/portal/requester/requisitions/${id}`, form, 'PATCH'),
     onPODecision: (id, decision) => mutate(`/purchase-orders/${id}/decision`, { decision }, 'PATCH'),
     onReceivePO: (form) => mutate('/goods-receipts', form),
     onCreateInvoice: (form) => mutate('/invoices', form),
@@ -521,6 +556,8 @@ export default function App() {
           query={route.query || {}}
           actions={actions}
           portalApi={portalApi}
+          getPurchaseOrder={actions.getPurchaseOrder}
+          updatePurchaseOrder={actions.updatePurchaseOrder}
           navigate={(nextPage, nextQuery) => go('admin', nextPage, nextQuery)}
           dateFilter={activeFilter}
           onDateFilterChange={setDateFilter}
@@ -585,7 +622,7 @@ export default function App() {
         initial={activePage === 'My Request History' ? null : extras.requesterRequests}
       />;
     } else if (activePage === 'Create Purchase Request') {
-      portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} />;
+      portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} user={displayUser} />;
     } else if (activePage === 'Messages') {
       portalContent = <PortalMessages
         portal="requester"

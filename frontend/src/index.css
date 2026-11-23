@@ -75,3 +75,83 @@ button { cursor: pointer; }
   tfoot { display: table-footer-group; }
   a { color: inherit; text-decoration: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Official template documents (Material Request / Purchase Order).
+   The on-screen copy lives in the modal; the portalled print copy is hidden
+   until printing, when every other element is removed from the page.
+   --------------------------------------------------------------------------- */
+.official-print-root { display: none; }
+
+.official-document {
+  width: 100%;
+  max-width: 210mm;
+  margin: 0 auto;
+  padding: 14mm 12mm;
+  background: #fff;
+  color: #172638;
+  font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 10pt;
+  line-height: 1.35;
+}
+
+.official-header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #172638; padding-bottom: 10px; }
+.official-logo { width: 54px; height: 54px; object-fit: contain; }
+.official-header-text { display: flex; flex: 1; flex-direction: column; line-height: 1.2; }
+.official-header-text strong { font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 15pt; letter-spacing: .02em; }
+.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: #475569; }
+.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: #475569; }
+.official-title { margin: 18px 0 16px; text-align: center; font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 16pt; font-weight: 800; letter-spacing: .08em; }
+
+.official-label { display: block; font-size: 9pt; font-weight: 800; color: #334155; }
+.official-value { display: block; min-height: 18px; font-size: 10pt; font-weight: 600; }
+.official-strong { font-weight: 800; }
+.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: #475569; white-space: pre-wrap; }
+.official-center { text-align: center; }
+.official-right { text-align: right; }
+
+.official-details { margin-bottom: 14px; }
+.official-field { display: grid; grid-template-columns: 45mm 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
+.official-field .official-value { border-bottom: 1px solid #94a3b8; }
+
+.official-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.official-table th, .official-table td { border: 1px solid #94a3b8; padding: 6px 7px; font-size: 9pt; vertical-align: top; }
+.official-table th { background: #f1f5f9; font-weight: 800; text-align: left; text-transform: none; }
+.official-blank-row td { height: 24px; }
+
+.official-purpose { margin-top: 14px; border: 1px solid #94a3b8; }
+.official-purpose .official-label { padding: 6px 8px; border-bottom: 1px solid #94a3b8; background: #f1f5f9; }
+.official-purpose p { min-height: 42px; margin: 0; padding: 8px; white-space: pre-wrap; }
+
+.official-approval-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; margin-top: 16px; border-top: 1px solid #94a3b8; border-left: 1px solid #94a3b8; }
+.official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid #94a3b8; border-bottom: 1px solid #94a3b8; }
+.official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid #64748b; }
+
+.official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
+.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
+.official-po-field-wide { grid-column: 1 / -1; }
+.official-po-field .official-value { border-bottom: 1px solid #94a3b8; }
+.official-po-table { margin-top: 4px; }
+.official-po-totals { margin-top: 14px; margin-left: auto; width: 75%; }
+.official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
+.official-po-totals .official-po-words { display: block; }
+.official-po-totals .official-po-words .official-value { margin-top: 3px; font-weight: 700; }
+.official-po-approval { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 22px; }
+.official-po-approval > div { display: flex; flex-direction: column; gap: 4px; }
+
+@media print {
+  /* When an official form modal is open, only its print copy reaches the PDF. */
+  body:has(.official-print-root) > :not(.official-print-root) { display: none !important; }
+  body:has(.official-print-root) .official-print-root { display: block !important; }
+  .official-print-root .official-document {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    box-shadow: none !important;
+    border: 0;
+  }
+  .official-document th, .official-document td { border: 1px solid #94a3b8; }
+  .official-document tr, .official-document .official-purpose, .official-document .official-approval-grid > div { break-inside: avoid; page-break-inside: avoid; }
+  .official-title { break-after: avoid; page-break-after: avoid; }
+}

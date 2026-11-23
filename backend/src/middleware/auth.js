@@ -39,6 +39,32 @@ export async function authenticate(req, res, next) {
   }
 }
 
+// Used only by token-gated public pages. A missing or invalid staff session is
+// not an error here: the route itself decides whether the signed link may be
+// opened and whether the caller is the intended recipient.
+export async function optionalAuthenticate(req, res, next) {
+  const authorization = req.headers.authorization;
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : null;
+  if (!token) return next();
+  try {
+    const claims = jwt.verify(token, process.env.JWT_SECRET);
+    const id = Number(claims.id);
+    if (!Number.isInteger(id) || id <= 0) return next();
+    const [rows] = await pool.execute(
+      `SELECT u.id, u.name, u.email, u.phone, u.role, u.active,
+        u.department_id AS departmentId, d.name AS department
+       FROM users u LEFT JOIN departments d ON d.id = u.department_id
+       WHERE u.id = ? LIMIT 1`,
+      [id]
+    );
+    const account = rows[0];
+    if (account?.active) req.user = withPortalIdentity(account);
+    return next();
+  } catch {
+    return next();
+  }
+}
+
 export function allowRoles(...roles) {
   return (req, res, next) => {
     // Role is taken from the freshly loaded database record, never the token.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Eye, MessageSquare, Plus } from 'lucide-react';
+import { Eye, MessageSquare, Pencil, Plus } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import ReportToolbar from '../ui/ReportToolbar.jsx';
@@ -9,7 +9,7 @@ import {
   SearchField, TableScroll, TextLink, primaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
-import { REQUEST_STATUS_OPTIONS, normalizeStatus } from '../../utils/status.js';
+import { REQUEST_STATUS_OPTIONS, isDraft, normalizeStatus } from '../../utils/status.js';
 
 const REPORT = {
   exportKey: 'portalRequisitions',
@@ -180,6 +180,11 @@ export default function RequesterRequests({
                   <td className="whitespace-nowrap px-4 py-3">
                     <div className="flex items-center gap-3">
                       <TextLink onClick={() => openRequest(request.id)}><span className="inline-flex items-center gap-1"><Eye size={13} />View</span></TextLink>
+                      {!history && isDraft(request.status) && <TextLink
+                        onClick={() => navigate('Create Purchase Request', { request: request.id })}
+                        title="Edit this draft in the official form">
+                        <span className="inline-flex items-center gap-1"><Pencil size={13} />Edit</span>
+                      </TextLink>}
                       {request.supervisorId && <button type="button" title="Message your Supervisor"
                         onClick={() => navigate('Messages', { userId: request.supervisorId, request: request.id })}
                         className="text-muted hover:text-brand"><MessageSquare size={14} /></button>}
@@ -206,6 +211,9 @@ export default function RequesterRequests({
       portalApi={portalApi}
       onClose={closeRequest}
       onMessage={(userId, request) => navigate('Messages', { userId, request })}
+      onEdit={!history && isDraft(detail.status)
+        ? () => navigate('Create Purchase Request', { request: detail.id })
+        : undefined}
       onChanged={async () => { await loadDetail(); await load(); }}
     />}
   </>;

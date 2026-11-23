@@ -14,6 +14,8 @@ import portal from './portal.js';
 import inventoryWorkflows from './inventory-workflows.js';
 import workflows from './workflows.js';
 import supplier from './supplier.js';
+import purchaseOrderApprovals from './purchase-order-approvals.js';
+import purchaseOrderPricing, { publicRouter as supplierPricingPublicRouter } from './purchase-order-pricing.js';
 import emails from './emails.js';
 
 const router = Router();
@@ -56,6 +58,12 @@ router.post('/auth/login', async (req, res, next) => {
 // Token-gated Supplier quotation links and provider delivery webhooks must be
 // reachable without a staff session. They are mounted before authenticate().
 router.use(supplier);
+// Token-gated Purchase Order review links. They are public URLs but require the
+// intended registered account before any decision can be recorded.
+router.use(purchaseOrderApprovals);
+// Token-gated supplier pricing links are public URLs; the 256-bit token is the
+// only credential and is looked up as a hash.
+router.use(supplierPricingPublicRouter);
 
 router.use(authenticate);
 
@@ -258,7 +266,7 @@ const RECEIVED_SORT_FIELDS = {
 
 function receivedListQuery() {
   return `
-    SELECT r.id, r.reference, r.title, r.justification, r.status, r.priority,
+    SELECT r.id, r.reference, r.title, r.location, r.justification, r.status, r.priority,
       r.budget_code AS budgetCode, r.required_by AS requiredBy,
       r.created_at AS createdAt, r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
       r.supervisor_decision AS supervisorDecision,
@@ -372,7 +380,7 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
     }
     await markReceivedByProcurement(connection, requisitionId, req.user.id);
     const [items] = await connection.execute(
-      `SELECT id, item_name AS itemName, description, quantity, unit,
+      `SELECT id, item_name AS itemName, description, remarks, quantity, unit,
         estimated_unit_cost AS estimatedUnitCost,
         (quantity * estimated_unit_cost) AS lineTotal
        FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
@@ -657,6 +665,7 @@ router.post('/suppliers', allowRoles(...procurementRoles), async (req, res, next
 });
 
 router.use(emails);
+router.use(purchaseOrderPricing);
 router.use(workflows);
 router.use(inventoryWorkflows);
 router.use('/admin', admin);
