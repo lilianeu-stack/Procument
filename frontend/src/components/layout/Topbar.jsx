@@ -1,11 +1,12 @@
 import { Bell, ChevronDown, ChevronRight, Menu } from 'lucide-react';
+import BrandLogo from '../ui/BrandLogo.jsx';
 import { dateLabel } from '../../utils/format.js';
 
 export default function Topbar({ page, user, notifications, onToggle, onNotification, onMenu, onLogout, open }) {
   return <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-slate-200/80 bg-white/95 px-5 backdrop-blur sm:px-8">
     <div className="flex items-center gap-3">
       <button className="text-muted lg:hidden" onClick={onMenu} aria-label="Open navigation"><Menu size={20} /></button>
-      <div className="hidden items-center gap-2 text-[11px] text-muted sm:flex"><span>Hope Haven</span><ChevronRight size={13} /><span className="font-bold text-ink">{page}</span></div>
+      <div className="hidden items-center gap-2 text-[11px] text-muted sm:flex"><BrandLogo variant="topbar" /><ChevronRight size={13} /><span className="font-bold text-ink">{page}</span></div>
       <span className="font-bold sm:hidden">{page}</span>
     </div>
     <div className="flex items-center gap-3">

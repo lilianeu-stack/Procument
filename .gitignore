@@ -1,6 +1,9 @@
 node_modules/
 dist/
+
+# Local secrets - never commit
 .env
 .env.local
+backend/.env
 coverage/
 npm-debug.log*

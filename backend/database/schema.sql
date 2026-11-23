@@ -3,10 +3,17 @@ CREATE DATABASE IF NOT EXISTS Procument
   COLLATE utf8mb4_unicode_ci;
 USE Procument;
 
+-- Timestamps are stored in UTC. MySQL converts TIMESTAMP values from the
+-- session timezone on write and back to the session timezone on read, so every
+-- application connection pins the session to UTC.
+SET time_zone = '+00:00';
+
 CREATE TABLE IF NOT EXISTS departments (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL UNIQUE,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  description VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -14,10 +21,13 @@ CREATE TABLE IF NOT EXISTS users (
   department_id INT UNSIGNED NULL,
   name VARCHAR(150) NOT NULL,
   email VARCHAR(190) NOT NULL UNIQUE,
+  phone VARCHAR(50) NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('admin','requestor','approver','procurement','storekeeper','finance','committee') NOT NULL DEFAULT 'requestor',
+  role ENUM('admin','supervisor','requestor','approver','procurement','storekeeper','finance','committee') NOT NULL DEFAULT 'requestor',
   active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  last_login_at DATETIME NULL,
   CONSTRAINT fk_users_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
 );
 
@@ -29,11 +39,13 @@ CREATE TABLE IF NOT EXISTS suppliers (
   phone VARCHAR(50) NULL,
   rating DECIMAL(2,1) NOT NULL DEFAULT 0,
   status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS items (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  department_id INT UNSIGNED NULL,
   sku VARCHAR(50) NOT NULL UNIQUE,
   name VARCHAR(180) NOT NULL,
   category VARCHAR(100) NOT NULL,
@@ -41,7 +53,8 @@ CREATE TABLE IF NOT EXISTS items (
   quantity INT UNSIGNED NOT NULL DEFAULT 0,
   reorder_level INT UNSIGNED NOT NULL DEFAULT 10,
   unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_items_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS requisitions (
@@ -49,24 +62,115 @@ CREATE TABLE IF NOT EXISTS requisitions (
   reference VARCHAR(30) NOT NULL UNIQUE,
   requester_id INT UNSIGNED NOT NULL,
   department_id INT UNSIGNED NULL,
+  title VARCHAR(180) NULL,
   justification TEXT NOT NULL,
   budget_code VARCHAR(60) NOT NULL,
-  status ENUM('Pending','Approved','Rejected','In procurement') NOT NULL DEFAULT 'Pending',
+  required_by DATE NULL,
+  priority ENUM('Low','Medium','High','Urgent') NOT NULL DEFAULT 'Medium',
+  status ENUM(
+    'Draft','Submitted','Pending Supervisor Approval','Information Required',
+    'Approved by Supervisor','Rejected by Supervisor','Forwarded to Procurement',
+    'Under Procurement Review','Procurement Approved','Procurement Rejected',
+    'Processing','Completed','Cancelled',
+    'Pending','Approved','Rejected','In procurement'
+  ) NOT NULL DEFAULT 'Pending',
   reviewed_by INT UNSIGNED NULL,
   reviewed_at DATETIME NULL,
+  supervisor_id INT UNSIGNED NULL,
+  supervisor_decision ENUM('Approved','Rejected','Information Required') NULL,
+  supervisor_decision_at DATETIME NULL,
+  supervisor_notes TEXT NULL,
+  information_response TEXT NULL,
+  submitted_at DATETIME NULL,
+  forwarded_at DATETIME NULL,
+  forwarded_by_supervisor INT UNSIGNED NULL,
+  procurement_decision_at DATETIME NULL,
+  completed_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_req_requester FOREIGN KEY (requester_id) REFERENCES users(id),
   CONSTRAINT fk_req_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
-  CONSTRAINT fk_req_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_req_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_req_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_req_forwarded_by FOREIGN KEY (forwarded_by_supervisor) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_req_requester_status (requester_id, status),
+  INDEX idx_req_department_status (department_id, status)
 );
 
 CREATE TABLE IF NOT EXISTS requisition_items (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   requisition_id INT UNSIGNED NOT NULL,
   item_name VARCHAR(180) NOT NULL,
+  description TEXT NULL,
   quantity INT UNSIGNED NOT NULL,
+  unit VARCHAR(30) NOT NULL DEFAULT 'unit',
   estimated_unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
   CONSTRAINT fk_req_items_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS requisition_attachments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  uploader_id INT UNSIGNED NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(150) NOT NULL,
+  file_size INT UNSIGNED NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_req_attach_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_req_attach_user FOREIGN KEY (uploader_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS requisition_activity (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NULL,
+  action VARCHAR(100) NOT NULL,
+  details JSON NULL,
+  previous_status VARCHAR(80) NULL,
+  new_status VARCHAR(80) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_req_activity_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_req_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_req_activity_date (requisition_id, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  department_id INT UNSIGNED NOT NULL,
+  requisition_id INT UNSIGNED NULL,
+  sender_id INT UNSIGNED NOT NULL,
+  recipient_id INT UNSIGNED NULL,
+  body TEXT NOT NULL,
+  is_announcement BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_messages_department FOREIGN KEY (department_id) REFERENCES departments(id),
+  CONSTRAINT fk_messages_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE SET NULL,
+  CONSTRAINT fk_messages_sender FOREIGN KEY (sender_id) REFERENCES users(id),
+  CONSTRAINT fk_messages_recipient FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_messages_thread (department_id, sender_id, recipient_id, created_at)
+);
+
+CREATE TABLE IF NOT EXISTS message_recipients (
+  message_id BIGINT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at DATETIME NULL,
+  PRIMARY KEY (message_id, user_id),
+  CONSTRAINT fk_msg_recipient_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  CONSTRAINT fk_msg_recipient_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS message_attachments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  message_id BIGINT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(150) NOT NULL,
+  file_size INT UNSIGNED NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  CONSTRAINT fk_msg_attach_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS inventory_movements (
@@ -74,24 +178,53 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   item_id INT UNSIGNED NOT NULL,
   user_id INT UNSIGNED NULL,
   movement_type ENUM('Receipt','Issue','Adjustment') NOT NULL,
+  direction ENUM('In','Out') NOT NULL DEFAULT 'In',
   quantity INT UNSIGNED NOT NULL,
+  reference_no VARCHAR(40) NULL,
   source VARCHAR(180) NOT NULL,
+  description TEXT NULL,
+  requester_id INT UNSIGNED NULL,
+  received_by VARCHAR(150) NULL,
+  department_id INT UNSIGNED NULL,
+  store_request_id INT UNSIGNED NULL,
+  idempotency_key VARCHAR(80) NULL,
   balance_after INT UNSIGNED NOT NULL,
+  movement_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_movement_item FOREIGN KEY (item_id) REFERENCES items(id),
   CONSTRAINT fk_movement_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
-  INDEX idx_movements_item_date (item_id, created_at)
+  CONSTRAINT fk_movement_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_movement_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
+  INDEX idx_movements_item_date (item_id, created_at),
+  UNIQUE KEY uq_inventory_movement_reference (reference_no),
+  UNIQUE KEY uq_inventory_movement_idempotency (idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_movement_attachments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  movement_id BIGINT UNSIGNED NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  mime_type VARCHAR(150) NOT NULL,
+  file_size INT UNSIGNED NOT NULL,
+  file_data LONGBLOB NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_movement_attachment_movement FOREIGN KEY (movement_id) REFERENCES inventory_movements(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS rfqs (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   reference VARCHAR(30) NOT NULL UNIQUE,
+  idempotency_key VARCHAR(80) NULL,
   requisition_id INT UNSIGNED NOT NULL,
   due_date DATE NULL,
   status ENUM('Sent','Evaluating','Awarded','Closed') NOT NULL DEFAULT 'Sent',
   selected_quotation_id INT UNSIGNED NULL,
+  issued_at DATETIME NULL,
+  closed_at DATETIME NULL,
   created_by INT UNSIGNED NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uq_rfqs_idempotency UNIQUE (idempotency_key),
   CONSTRAINT fk_rfq_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id),
   CONSTRAINT fk_rfq_creator FOREIGN KEY (created_by) REFERENCES users(id)
 );
@@ -104,6 +237,29 @@ CREATE TABLE IF NOT EXISTS rfq_suppliers (
   CONSTRAINT fk_rfq_supplier_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
 );
 
+CREATE TABLE IF NOT EXISTS rfq_email_deliveries (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rfq_id INT UNSIGNED NOT NULL,
+  supplier_id INT UNSIGNED NOT NULL,
+  recipient_email VARCHAR(190) NOT NULL,
+  rfq_reference VARCHAR(30) NOT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'Pending',
+  provider_message_id VARCHAR(255) NULL,
+  provider_response VARCHAR(255) NULL,
+  error_details TEXT NULL,
+  attempts INT UNSIGNED NOT NULL DEFAULT 0,
+  sent_at DATETIME NULL,
+  accepted_at DATETIME NULL,
+  delivered_at DATETIME NULL,
+  bounced_at DATETIME NULL,
+  opened_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_rfq_email_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_email_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+  INDEX idx_rfq_email_status (rfq_id, status)
+);
+
 CREATE TABLE IF NOT EXISTS quotations (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   rfq_id INT UNSIGNED NOT NULL,
@@ -113,7 +269,9 @@ CREATE TABLE IF NOT EXISTS quotations (
   quality_score DECIMAL(3,1) NOT NULL DEFAULT 0,
   rating_score DECIMAL(3,1) NOT NULL DEFAULT 0,
   notes TEXT NULL,
+  submitted_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_quotation_supplier (rfq_id, supplier_id),
   CONSTRAINT fk_quote_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
   CONSTRAINT fk_quote_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
@@ -130,7 +288,9 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   status ENUM('Pending approval','Approved','Rejected','Partially received','Received') NOT NULL DEFAULT 'Pending approval',
   created_by INT UNSIGNED NOT NULL,
   reviewed_by INT UNSIGNED NULL,
+  approved_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_po_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id),
   CONSTRAINT fk_po_quotation FOREIGN KEY (quotation_id) REFERENCES quotations(id),
   CONSTRAINT fk_po_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
@@ -154,7 +314,9 @@ CREATE TABLE IF NOT EXISTS goods_receipts (
   purchase_order_id INT UNSIGNED NULL,
   source VARCHAR(180) NOT NULL,
   received_by INT UNSIGNED NOT NULL,
+  expected_at DATETIME NULL,
   received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_grn_po FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE SET NULL,
   CONSTRAINT fk_grn_user FOREIGN KEY (received_by) REFERENCES users(id)
 );
@@ -174,9 +336,15 @@ CREATE TABLE IF NOT EXISTS invoices (
   purchase_order_id INT UNSIGNED NOT NULL,
   amount DECIMAL(12,2) NOT NULL,
   status ENUM('Pending','Approved','Paid','Rejected') NOT NULL DEFAULT 'Pending',
+  invoice_date DATE NULL,
+  due_date DATE NULL,
   submitted_by INT UNSIGNED NOT NULL,
   reviewed_by INT UNSIGNED NULL,
+  submitted_at DATETIME NULL,
+  approved_at DATETIME NULL,
+  paid_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_invoice_po_reference (purchase_order_id, reference),
   CONSTRAINT fk_invoice_po FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id),
   CONSTRAINT fk_invoice_submitter FOREIGN KEY (submitted_by) REFERENCES users(id),
@@ -191,7 +359,12 @@ CREATE TABLE IF NOT EXISTS store_requests (
   purpose TEXT NOT NULL,
   status ENUM('Pending','Approved','Rejected','Issued') NOT NULL DEFAULT 'Pending',
   reviewed_by INT UNSIGNED NULL,
+  submitted_at DATETIME NULL,
+  approved_at DATETIME NULL,
+  issued_at DATETIME NULL,
+  required_by DATE NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_store_requester FOREIGN KEY (requester_id) REFERENCES users(id),
   CONSTRAINT fk_store_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
   CONSTRAINT fk_store_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
@@ -212,9 +385,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   user_id INT UNSIGNED NULL,
   title VARCHAR(180) NOT NULL,
   body VARCHAR(500) NOT NULL,
-  link VARCHAR(180) NULL,
+  link VARCHAR(255) NULL,
+  category VARCHAR(40) NOT NULL DEFAULT 'general',
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_notifications_user_date (user_id, created_at)
 );
@@ -226,6 +401,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   entity_type VARCHAR(80) NOT NULL,
   entity_id VARCHAR(80) NOT NULL,
   details JSON NULL,
+  previous_status VARCHAR(80) NULL,
+  new_status VARCHAR(80) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_audit_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_audit_entity_date (entity_type, entity_id, created_at)

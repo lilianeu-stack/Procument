@@ -1,69 +1,550 @@
-import { useState } from 'react';
-import { Plus } from 'lucide-react';
-import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
+import { useRef, useState } from 'react';
+import {
+  AlertTriangle, Ban, Building2, CheckCircle2, ChevronLeft, Download, Eye,
+  FileSpreadsheet, KeyRound, LoaderCircle, MoreHorizontal, Pencil, Plus, RefreshCw,
+  Search, Trash2, Upload, Users, X
+} from 'lucide-react';
+import PageCard, { EmptyState, ErrorMessage } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import { dateLabel } from '../utils/format.js';
+import { csvRowsToUsers, downloadCsv, parseCsv } from '../utils/csv.js';
 
-function UserForm({ departments, onClose, onSubmit }) {
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'requestor', departmentId: '' });
+const ROLES = ['supervisor', 'requestor', 'approver', 'procurement', 'committee', 'storekeeper', 'finance', 'admin'];
+const ROLE_LABELS = {
+  supervisor: 'Department Supervisor',
+  requestor: 'Requester',
+  storekeeper: 'Stock Keeper',
+  admin: 'Administrator'
+};
+const TEMPLATE_HEADERS = ['First Name', 'Last Name', 'Email', 'Role', 'Department', 'Phone Number'];
+const USERS_PAGE_SIZE = 8;
+
+function Notice({ notice, onClose }) {
+  if (!notice) return null;
+  return <div role="status" className={`fixed right-4 top-4 z-[60] flex max-w-sm items-start gap-3 rounded-lg border px-4 py-3 text-xs shadow-lg ${notice.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+    <span className="flex-1">{notice.message}</span>
+    <button onClick={onClose} aria-label="Dismiss" className="rounded p-0.5 hover:bg-white/60"><X size={14} /></button>
+  </div>;
+}
+
+function UserForm({ departments, initial, defaultDepartmentId, onClose, onSubmit }) {
+  const editing = Boolean(initial);
+  const [form, setForm] = useState({
+    name: initial?.name || '',
+    email: initial?.email || '',
+    phone: initial?.phone || '',
+    password: '',
+    role: initial?.role || 'requestor',
+    departmentId: initial?.departmentId
+      ? String(initial.departmentId)
+      : defaultDepartmentId ? String(defaultDepartmentId) : '',
+    replaceSupervisor: false
+  });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  async function submit(event) {
-    event.preventDefault(); setBusy(true); setError('');
-    try { await onSubmit({ ...form, departmentId: form.departmentId ? Number(form.departmentId) : null }); onClose(); }
-    catch (exception) { setError(exception.message); }
-    finally { setBusy(false); }
-  }
-  return <Modal title="Create user account" onClose={onClose}><form onSubmit={submit} className="space-y-4">
-    <label className="block text-xs font-bold">Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="field" /></label>
-    <label className="block text-xs font-bold">Work email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="field" /></label>
-    <label className="block text-xs font-bold">Temporary password (12+ characters)<input required minLength="12" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="field" /></label>
-    <div className="grid grid-cols-2 gap-3">
-      <label className="block text-xs font-bold">Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} className="field">{['requestor', 'approver', 'procurement', 'committee', 'storekeeper', 'finance', 'admin'].map((role) => <option key={role}>{role}</option>)}</select></label>
-      <label className="block text-xs font-bold">Department<select value={form.departmentId} onChange={(event) => setForm({ ...form, departmentId: event.target.value })} className="field"><option value="">None</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
-    </div>
-    <ErrorMessage>{error}</ErrorMessage><FormActions busy={busy} close={onClose} label="Create account" />
-  </form></Modal>;
-}
 
-function DepartmentForm({ onClose, onSubmit }) {
-  const [name, setName] = useState('');
-  const [error, setError] = useState('');
   async function submit(event) {
     event.preventDefault();
-    try { await onSubmit({ name }); onClose(); }
-    catch (exception) { setError(exception.message); }
+    setBusy(true);
+    setError('');
+    const payload = {
+      name: form.name.trim(),
+      email: form.email.trim().toLowerCase(),
+      phone: form.phone.trim(),
+      role: form.role,
+      departmentId: form.departmentId ? Number(form.departmentId) : null,
+      replaceSupervisor: form.role === 'supervisor' ? form.replaceSupervisor : false
+    };
+    if (!editing) payload.password = form.password;
+    try {
+      await onSubmit(payload, initial?.id);
+      onClose();
+    } catch (exception) {
+      setError(exception.message);
+    } finally { setBusy(false); }
   }
-  return <Modal title="Add department" onClose={onClose}><form onSubmit={submit} className="space-y-4">
-    <label className="block text-xs font-bold">Department name<input required value={name} onChange={(event) => setName(event.target.value)} className="field" /></label>
-    <ErrorMessage>{error}</ErrorMessage>
-    <div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button><button className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Add department</button></div>
-  </form></Modal>;
+
+  return <Modal title={editing ? `Edit account · ${initial.name}` : 'Add User'} onClose={onClose}>
+    <form onSubmit={submit} className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-bold">Full name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="field" /></label>
+        <label className="block text-xs font-bold">Work email<input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="field" /></label>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-xs font-bold">Phone number <span className="font-normal text-muted">(optional)</span><input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="field" /></label>
+        <label className="block text-xs font-bold">Role<select value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} className="field">{ROLES.map((role) => <option key={role} value={role}>{ROLE_LABELS[role] || role}</option>)}</select></label>
+      </div>
+      <label className="block text-xs font-bold">Department<select required={['supervisor', 'requestor', 'storekeeper'].includes(form.role)} value={form.departmentId} onChange={(event) => setForm({ ...form, departmentId: event.target.value })} className="field"><option value="">Select a department…</option>{departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
+      {['supervisor', 'requestor', 'storekeeper'].includes(form.role) && <p className="-mt-2 text-[11px] text-muted">
+        {form.role === 'supervisor'
+          ? 'Each Department can have only one active Supervisor. The Supervisor must belong to the Department they oversee.'
+          : form.role === 'requestor'
+            ? 'The Requester must belong to the Department where they work.'
+            : 'The Stock Keeper must be assigned to the Department they support.'}
+      </p>}
+      {form.role === 'supervisor' && <label className="flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-[11px] text-amber-900">
+        <input type="checkbox" checked={form.replaceSupervisor} onChange={(event) => setForm({ ...form, replaceSupervisor: event.target.checked })} className="mt-0.5" />
+        <span><span className="font-bold">Replace existing Supervisor</span> — deactivate the current Supervisor in this Department when saving.</span>
+      </label>}
+      {!editing && <label className="block text-xs font-bold">Temporary password (12+ characters)<input required minLength="12" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="field" /></label>}
+      <ErrorMessage>{error}</ErrorMessage>
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save changes' : 'Create account'}</button>
+      </div>
+    </form>
+  </Modal>;
 }
 
-export function UsersPage({ users, departments, onCreateUser, onToggleUser, onCreateDepartment }) {
-  const [dialog, setDialog] = useState('');
+function DepartmentForm({ initial, onClose, onSubmit }) {
+  const editing = Boolean(initial);
+  const [form, setForm] = useState({ name: initial?.name || '', description: initial?.description || '' });
   const [error, setError] = useState('');
-  async function toggle(id, active) {
-    try { await onToggleUser(id, active); setError(''); }
-    catch (exception) { setError(exception.message); }
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await onSubmit({ name: form.name.trim(), description: form.description.trim() }, initial?.id);
+      onClose();
+    } catch (exception) { setError(exception.message); }
+    finally { setBusy(false); }
   }
-  return <>
-    <PageCard title="User administration" description={`${users.length} accounts · Manage roles and departments`} action={<div className="flex gap-2">
-      <button onClick={() => setDialog('department')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand">Add department</button>
-      <button onClick={() => setDialog('user')} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add user</button>
-    </div>}>
-      {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
-      {users.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Name', 'Email', 'Department', 'Role', 'Status', ''].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{users.map((person) => <tr key={person.id}><td className="px-5 py-4 font-bold">{person.name}</td><td className="px-5 py-4">{person.email}</td><td className="px-5 py-4">{person.department || '—'}</td><td className="px-5 py-4 capitalize">{person.role}</td><td className="px-5 py-4">{person.active ? 'Active' : 'Inactive'}</td><td className="px-5 py-4"><button onClick={() => toggle(person.id, !person.active)} className="rounded border px-2.5 py-1.5 font-bold">{person.active ? 'Deactivate' : 'Activate'}</button></td></tr>)}</tbody></table></div> : <EmptyState>No user accounts are available.</EmptyState>}
-    </PageCard>
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{departments.map((department) => <div key={department.id} className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-xs font-bold shadow-card">{department.name}</div>)}</div>
-    {dialog === 'user' && <UserForm departments={departments} onClose={() => setDialog('')} onSubmit={onCreateUser} />}
-    {dialog === 'department' && <DepartmentForm onClose={() => setDialog('')} onSubmit={onCreateDepartment} />}
-  </>;
+
+  return <Modal title={editing ? `Edit department · ${initial.name}` : 'Add department'} onClose={onClose}>
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block text-xs font-bold">Department name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="field" /></label>
+      <label className="block text-xs font-bold">Description <span className="font-normal text-muted">(optional)</span><textarea rows="3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="field h-auto py-2" /></label>
+      <ErrorMessage>{error}</ErrorMessage>
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save department' : 'Add department'}</button>
+      </div>
+    </form>
+  </Modal>;
 }
 
-export function AuditLogsPage({ auditLogs }) {
-  return <PageCard title="Audit log" description="Recent administrative and workflow activity">
-    {auditLogs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['When', 'Actor', 'Action', 'Record', 'Details'].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{auditLogs.map((log) => <tr key={log.id}><td className="px-5 py-4">{dateLabel(log.createdAt)}</td><td className="px-5 py-4">{log.actor || 'System'}</td><td className="px-5 py-4 font-bold capitalize">{log.action}</td><td className="px-5 py-4">{log.entityType} · {log.entityId}</td><td className="max-w-[260px] truncate px-5 py-4 text-muted">{typeof log.details === 'string' ? log.details : JSON.stringify(log.details || {})}</td></tr>)}</tbody></table></div> : <EmptyState>No audit events have been recorded.</EmptyState>}
-  </PageCard>;
+function ConfirmDialog({ title, message, confirmLabel = 'Delete', onClose, onConfirm, busy, children }) {
+  return <Modal title={title} onClose={onClose}>
+    <div className="space-y-4">
+      <p className="text-sm text-slate-600">{message}</p>
+      {children}
+      <ErrorMessage />
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Working…' : confirmLabel}</button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+function ResetPasswordDialog({ user, onClose, onSubmit }) {
+  const [password, setPassword] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      setResult(await onSubmit(user.id, password || undefined));
+    } catch (exception) { setError(exception.message); }
+    finally { setBusy(false); }
+  }
+
+  return <Modal title={`Reset password · ${user.name}`} onClose={onClose}>
+    {result ? <div className="space-y-4">
+      <p className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700"><CheckCircle2 size={16} /> Password reset successfully. Hash and audit event were saved.</p>
+      {result.temporaryPassword ? <>
+        <p className="text-xs text-slate-600">Copy this one-time temporary password and share it securely. It will not be shown again.</p>
+        <div className="flex gap-2">
+          <input readOnly value={result.temporaryPassword} className="field font-mono text-xs" />
+          <button type="button" onClick={() => navigator.clipboard?.writeText(result.temporaryPassword)} className="rounded-lg border px-3 text-xs font-bold">Copy</button>
+        </div>
+      </> : <p className="text-xs text-slate-600">The supplied password is now active.</p>}
+      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button></div>
+    </div> : <form onSubmit={submit} className="space-y-4">
+      <p className="text-xs text-slate-600">Leave blank to generate a secure temporary password, or enter one of at least 12 characters.</p>
+      <label className="block text-xs font-bold">Temporary password <span className="font-normal text-muted">(optional)</span><input type="password" minLength="12" value={password} onChange={(event) => setPassword(event.target.value)} className="field" /></label>
+      <ErrorMessage>{error}</ErrorMessage>
+      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Resetting…' : 'Reset password'}</button>
+      </div>
+    </form>}
+  </Modal>;
+}
+
+function UserDetailsDialog({ data, onClose }) {
+  const { account, activity } = data;
+  return <Modal title={`Account details · ${account.name}`} onClose={onClose}>
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-3 text-xs">
+        {[['Email', account.email], ['Role', account.role], ['Status', account.active ? 'Active' : 'Inactive'], ['Created', dateLabel(account.createdAt)]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-[10px] uppercase text-muted">{label}</dt><dd className="mt-1 font-bold">{value}</dd></div>)}
+      </dl>
+      <div>
+        <h3 className="mb-2 text-xs font-bold">Recent activity</h3>
+        <div className="max-h-56 space-y-2 overflow-y-auto">
+          {activity.length ? activity.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-xs"><span className="capitalize">{item.action.replace(/_/g, ' ')}</span><span className="text-muted">{dateLabel(item.createdAt)}</span></div>) : <EmptyState>No activity recorded.</EmptyState>}
+        </div>
+      </div>
+      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Close</button></div>
+    </div>
+  </Modal>;
+}
+
+function BulkImportDialog({ departments, defaultDepartment, onValidate, onImport, onClose }) {
+  const inputRef = useRef(null);
+  const [report, setReport] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function downloadTemplate() {
+    downloadCsv('procurement-users-template.csv', [
+      TEMPLATE_HEADERS,
+      ['Jane', 'Doe', 'jane.doe@example.org', 'requestor', defaultDepartment?.name || departments[0]?.name || 'Administration', '+250 700 000 000']
+    ]);
+  }
+
+  async function handleFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError('');
+    setSummary(null);
+    setBusy(true);
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length < 2) throw new Error('The file contains no user rows.');
+      const parsed = csvRowsToUsers(rows);
+      const users = defaultDepartment?.name
+        ? parsed.map((user) => ({ ...user, department: String(user.department || '').trim() || defaultDepartment.name }))
+        : parsed;
+      setReport(await onValidate(users));
+    } catch (exception) { setError(exception.message); }
+    finally { setBusy(false); }
+  }
+
+  async function importValid() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await onImport(report.rows.map(({ name, email, role, department, phone }) => ({
+        name, email, role, department, phone
+      })));
+      setSummary(result);
+    } catch (exception) { setError(exception.message); }
+    finally { setBusy(false); }
+  }
+
+  function downloadErrors() {
+    downloadCsv('procurement-users-import-errors.csv', [
+      ['Row', 'Name', 'Email', 'Role', 'Department', 'Errors'],
+      ...report.rows.filter((row) => !row.valid).map((row) => [row.row, row.name, row.email, row.role, row.department, row.errors.join('; ')])
+    ]);
+  }
+
+  function downloadCredentials() {
+    downloadCsv('procurement-users-credentials.csv', [
+      ['Row', 'Name', 'Email', 'Temporary password'],
+      ...summary.imported.map((row) => [row.row, row.name, row.email, row.temporaryPassword])
+    ]);
+  }
+
+  return <Modal title="Add users by template" onClose={onClose}>
+    <div className="space-y-4">
+      {!summary && <>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={downloadTemplate} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><Download size={14} />Download CSV template</button>
+          <button onClick={() => inputRef.current?.click()} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Upload size={14} />Choose completed file</button>
+          <input ref={inputRef} type="file" accept=".csv,text/csv" onChange={handleFile} className="hidden" />
+        </div>
+        <p className="text-xs text-muted">CSV opens in Excel. Required columns: First Name, Last Name, Email, Role, Department. Phone Number is optional. A secure temporary password is generated for every imported account.{defaultDepartment?.name ? ` Rows with a blank Department will be assigned to ${defaultDepartment.name}.` : ''}</p>
+        <ErrorMessage>{error}</ErrorMessage>
+        {busy && <p className="text-xs text-muted">Validating file…</p>}
+        {report && <div className="space-y-3">
+          <div className="flex flex-wrap gap-3 text-xs font-bold">
+            <span className="text-emerald-700">{report.validCount} valid</span>
+            <span className="text-red-700">{report.invalidCount} invalid</span>
+            {report.invalidCount > 0 && <button onClick={downloadErrors} className="flex items-center gap-1 text-brand underline"><FileSpreadsheet size={13} />Download error report</button>}
+          </div>
+          <div className="max-h-64 overflow-auto rounded-lg border border-slate-100">
+            <table className="w-full min-w-[560px] text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr><th className="px-3 py-2">Row</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Result</th></tr></thead>
+              <tbody className="divide-y">{report.rows.map((row) => <tr key={row.row}><td className="px-3 py-2">{row.row}</td><td className="px-3 py-2"><div className="font-bold">{row.name || '—'}</div><div className="text-muted">{row.email}</div></td><td className="px-3 py-2">{row.role}</td><td className="px-3 py-2">{row.department}</td><td className="px-3 py-2">{row.valid ? <span className="text-emerald-700">Ready</span> : <span className="text-red-700">{row.errors.join(', ')}</span>}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+            <button onClick={onClose} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button>
+            <button disabled={!report.validCount || busy} onClick={importValid} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Importing…' : `Import ${report.validCount} user(s)`}</button>
+          </div>
+        </div>}
+      </>}
+      {summary && <div className="space-y-4">
+        <div className="rounded-lg bg-emerald-50 px-3 py-3 text-xs text-emerald-700"><strong>{summary.imported.length} user(s) imported.</strong> {summary.failed.length ? `${summary.failed.length} row(s) failed validation and were skipped.` : 'All rows were imported.'}</div>
+        <div className="flex flex-wrap gap-2">
+          {summary.imported.length > 0 && <button onClick={downloadCredentials} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><Download size={14} />Download temporary passwords</button>}
+          {summary.failed.length > 0 && <button onClick={downloadErrors} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><FileSpreadsheet size={14} />Download error report</button>}
+        </div>
+        {summary.failed.length > 0 && <div className="max-h-40 overflow-auto rounded-lg border border-slate-100 text-xs">{summary.failed.map((row) => <div key={row.row} className="border-b px-3 py-2 last:border-0">Row {row.row} · {row.email || '—'} · {row.errors.join(', ')}</div>)}</div>}
+        <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button></div>
+      </div>}
+    </div>
+  </Modal>;
+}
+
+export function UsersPage({
+  users, departments, onCreateUser, onToggleUser, onCreateDepartment, onDepartmentUsers,
+  onUpdateDepartment, onDeleteDepartment, onUpdateUser, onDeleteUser,
+  onResetPassword, onBulkValidate, onBulkImport, onUserActivity
+}) {
+  const [dialog, setDialog] = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState(null);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedDepartmentForEdit, setSelectedDepartmentForEdit] = useState(null);
+  const [selectedDepartmentForDelete, setSelectedDepartmentForDelete] = useState(null);
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [reassignTo, setReassignTo] = useState('');
+  const [notice, setNotice] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [details, setDetails] = useState(null);
+  const [menuFor, setMenuFor] = useState(null);
+  const [departmentUsers, setDepartmentUsers] = useState(null);
+  const [departmentMeta, setDepartmentMeta] = useState(null);
+  const [departmentLoading, setDepartmentLoading] = useState(false);
+  const [departmentError, setDepartmentError] = useState('');
+  const [pageIndex, setPageIndex] = useState(1);
+  const requestSequence = useRef(0);
+
+  const isAllUsersView = selectedDepartment === 'all';
+  const isDepartmentView = typeof selectedDepartment === 'number';
+  const activeDepartment = isDepartmentView
+    ? (departmentMeta || departments.find((department) => department.id === selectedDepartment))
+    : null;
+  const sourceUsers = isAllUsersView ? users : (departmentUsers ?? []);
+  const visibleUsers = sourceUsers
+    .filter((person) => (!roleFilter || person.role === roleFilter))
+    .filter((person) => `${person.name} ${person.email} ${person.role} ${person.department} ${person.phone || ''}`.toLowerCase().includes(search.toLowerCase()));
+  const totalPages = Math.max(1, Math.ceil(visibleUsers.length / USERS_PAGE_SIZE));
+  const safePage = Math.min(pageIndex, totalPages);
+  const startIndex = (safePage - 1) * USERS_PAGE_SIZE;
+  const pagedUsers = visibleUsers.slice(startIndex, startIndex + USERS_PAGE_SIZE);
+  const totalAccounts = isAllUsersView ? users.length : (departmentMeta?.userCount ?? activeDepartment?.userCount ?? 0);
+
+  function notify(message, type = 'success') { setNotice({ message, type }); }
+  function closeDialog() {
+    setDialog('');
+    setSelectedUser(null);
+    setSelectedDepartmentForEdit(null);
+    setSelectedDepartmentForDelete(null);
+    setReassignTo('');
+  }
+
+  function resetView() {
+    requestSequence.current += 1;
+    setSelectedDepartment(null);
+    setDepartmentUsers(null);
+    setDepartmentMeta(null);
+    setDepartmentError('');
+    setDepartmentLoading(false);
+    setSearch('');
+    setRoleFilter('');
+    setPageIndex(1);
+    setMenuFor(null);
+  }
+
+  async function openDepartment(id) {
+    const sequence = ++requestSequence.current;
+    setSelectedDepartment(id);
+    setSearch('');
+    setRoleFilter('');
+    setPageIndex(1);
+    setMenuFor(null);
+    setDepartmentUsers(null);
+    setDepartmentMeta(null);
+    setDepartmentError('');
+    if (id === 'all') {
+      setDepartmentLoading(false);
+      return;
+    }
+    setDepartmentLoading(true);
+    try {
+      const result = await onDepartmentUsers(id);
+      if (sequence !== requestSequence.current) return;
+      setDepartmentUsers(result.users);
+      setDepartmentMeta(result.department);
+    } catch (exception) {
+      if (sequence !== requestSequence.current) return;
+      setDepartmentError(exception.message || 'Unable to load users for this department.');
+      setDepartmentUsers([]);
+    } finally {
+      if (sequence === requestSequence.current) setDepartmentLoading(false);
+    }
+  }
+
+  function refreshCurrentDepartment() {
+    if (typeof selectedDepartment === 'number') openDepartment(selectedDepartment);
+  }
+
+  async function run(action, successMessage) {
+    setBusy(true);
+    try {
+      const result = await action();
+      notify(successMessage);
+      return result;
+    } catch (exception) {
+      notify(exception.message, 'error');
+      throw exception;
+    } finally { setBusy(false); }
+  }
+
+  async function viewDetails(person) {
+    try {
+      setDetails(await onUserActivity(person.id));
+      setDialog('details');
+    } catch (exception) { notify(exception.message, 'error'); }
+  }
+
+  return <>
+    <Notice notice={notice} onClose={() => setNotice(null)} />
+
+    {selectedDepartment === null ? <PageCard
+      title="Users Management"
+      description={`${departments.length} departments · ${users.length} total accounts`}
+      action={<div className="flex flex-wrap gap-2">
+        <button onClick={() => setDialog('department')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand"><Building2 size={14} />Add department</button>
+        <button onClick={() => setDialog('user')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add User</button>
+        <button onClick={() => setDialog('bulk')} className="flex items-center gap-1 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand"><FileSpreadsheet size={14} />Add Users by Template</button>
+      </div>}
+    >
+      <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        <button onClick={() => openDepartment('all')} className="rounded-xl border border-brand/20 bg-brand/5 p-4 text-left shadow-card transition hover:border-brand">
+          <div className="flex items-center justify-between"><span className="text-sm font-extrabold text-brand">All Users</span><Users size={18} className="text-brand" /></div>
+          <p className="mt-2 text-xs text-muted">{users.length} accounts across every department</p>
+          <span className="mt-4 inline-block text-xs font-bold text-brand">Manage all users →</span>
+        </button>
+        {departments.map((department) => <div
+          key={department.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => openDepartment(department.id)}
+          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDepartment(department.id); } }}
+          className="flex cursor-pointer flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-card transition hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div><h3 className="text-sm font-extrabold">{department.name}</h3><p className="mt-1 text-xs text-muted">{department.userCount} user(s)</p></div>
+            <Building2 size={18} className="text-muted" />
+          </div>
+          <p className="mt-2 min-h-8 text-xs text-slate-500">{department.description || 'No description provided.'}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">Manage users</button>
+            <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold text-red-600"><Trash2 size={14} /></button>
+            <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold"><Pencil size={14} /></button>
+          </div>
+        </div>)}
+        {!departments.length && <EmptyState>No departments have been created yet.</EmptyState>}
+      </div>
+    </PageCard> : <section className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card">
+      <div className="flex flex-col gap-5 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <button onClick={resetView} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold"><ChevronLeft size={14} />Back to Departments</button>
+          <h2 className="mt-4 text-xl font-extrabold tracking-tight">{isAllUsersView ? 'All Users' : activeDepartment?.name || 'Department'}</h2>
+          {!isAllUsersView && activeDepartment?.description && <p className="mt-1 max-w-2xl text-xs text-muted">{activeDepartment.description}</p>}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full bg-brand/10 px-3 py-1 font-bold text-brand">{totalAccounts} total user(s)</span>
+            <span className="text-muted">{isAllUsersView ? 'Accounts from every department' : `Department ID · ${selectedDepartment}`}</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setDialog('user')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add User</button>
+          <button onClick={() => setDialog('bulk')} className="flex items-center gap-1 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand"><FileSpreadsheet size={14} />Add Users by Template</button>
+          {!isAllUsersView && <button onClick={() => openDepartment('all')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">All Users</button>}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input value={search} onChange={(event) => { setSearch(event.target.value); setPageIndex(1); }} placeholder="Search name, email, role…" className="field w-full pl-8 sm:w-64" />
+          </div>
+          <select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPageIndex(1); }} aria-label="Filter by role" className="field w-40"><option value="">All roles</option>{ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select>
+        </div>
+        <p className="text-xs text-muted">{departmentLoading ? 'Loading users…' : `${visibleUsers.length} account(s) shown · page ${safePage} of ${totalPages}`}</p>
+      </div>
+
+      {departmentLoading ? <div role="status" className="grid min-h-40 place-items-center gap-2 text-xs text-muted"><LoaderCircle size={20} className="animate-spin text-brand" />Loading users…</div>
+        : departmentError ? <div role="alert" className="m-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+          <span>{departmentError}</span>
+          <button onClick={() => openDepartment(selectedDepartment)} className="flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 font-bold"><RefreshCw size={13} />Retry</button>
+        </div>
+        : pagedUsers.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-xs">
+          <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Full Name', 'Email', 'Role', 'Department', 'Phone Number', 'Account Status', 'Date Created', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
+          <tbody className="divide-y">{pagedUsers.map((person) => <tr key={person.id}>
+            <td className="px-4 py-3 font-bold">{person.name}</td>
+            <td className="px-4 py-3">{person.email}</td>
+            <td className="px-4 py-3 capitalize">{person.role}</td>
+            <td className="px-4 py-3">{person.department || <span className="text-muted">Unassigned</span>}</td>
+            <td className="px-4 py-3">{person.phone || '—'}</td>
+            <td className="px-4 py-3"><span className={person.active ? 'text-emerald-700' : 'text-red-700'}>{person.active ? 'Active' : 'Inactive'}</span></td>
+            <td className="px-4 py-3 text-muted">{dateLabel(person.createdAt)}</td>
+            <td className="px-4 py-3"><div className="flex items-center gap-1">
+              <button onClick={() => viewDetails(person)} title="View account details" aria-label="View account details" className="rounded p-1.5 hover:bg-slate-100"><Eye size={15} /></button>
+              <button onClick={() => { setSelectedUser(person); setDialog('user'); }} title="Edit account" aria-label="Edit account" className="rounded p-1.5 hover:bg-slate-100"><Pencil size={15} /></button>
+              <button onClick={() => { setSelectedUser(person); setDialog('reset'); }} title="Reset password" aria-label="Reset password" className="rounded p-1.5 hover:bg-slate-100"><KeyRound size={15} /></button>
+              <div className="relative">
+                <button onClick={() => setMenuFor(menuFor === person.id ? null : person.id)} title="More actions" aria-label="More actions" className="rounded p-1.5 hover:bg-slate-100"><MoreHorizontal size={15} /></button>
+                {menuFor === person.id && <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-100 bg-white p-1 shadow-lg">
+                  <button disabled={busy} onClick={async () => { setMenuFor(null); try { await run(() => onToggleUser(person.id, !person.active), `Account ${person.active ? 'deactivated' : 'activated'}.`); refreshCurrentDepartment(); } catch {} }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-slate-50"><Ban size={13} />{person.active ? 'Deactivate' : 'Activate'}</button>
+                  <button onClick={() => { setMenuFor(null); setSelectedUser(person); setDialog('delete-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} />Delete account</button>
+                </div>}
+              </div>
+            </div></td>
+          </tr>)}</tbody>
+        </table></div>
+        : <EmptyState>{isAllUsersView || (departmentUsers ?? []).length > 0 ? 'No accounts match the current search or filter.' : 'No users found in this Department'}</EmptyState>}
+
+      {!departmentLoading && !departmentError && visibleUsers.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs">
+        <span className="text-muted">Showing {startIndex + 1}–{Math.min(startIndex + USERS_PAGE_SIZE, visibleUsers.length)} of {visibleUsers.length}</span>
+        <div className="flex items-center gap-2">
+          <button disabled={safePage <= 1} onClick={() => setPageIndex(safePage - 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold disabled:opacity-40">Previous</button>
+          <span className="font-bold">Page {safePage} of {totalPages}</span>
+          <button disabled={safePage >= totalPages} onClick={() => setPageIndex(safePage + 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold disabled:opacity-40">Next</button>
+        </div>
+      </div>}
+    </section>}
+
+    {dialog === 'user' && <UserForm departments={departments} initial={selectedUser?.email ? selectedUser : null} defaultDepartmentId={isDepartmentView ? selectedDepartment : null} onClose={closeDialog} onSubmit={async (payload, id) => {
+      await run(() => id ? onUpdateUser(id, payload) : onCreateUser(payload), id ? 'Account updated.' : 'Account created.');
+      refreshCurrentDepartment();
+    }} />}
+    {dialog === 'department' && <DepartmentForm initial={selectedDepartmentForEdit} onClose={closeDialog} onSubmit={async (payload, id) => {
+      await run(() => id ? onUpdateDepartment(id, payload) : onCreateDepartment(payload), id ? 'Department updated.' : 'Department created.');
+    }} />}
+    {dialog === 'reset' && <ResetPasswordDialog user={selectedUser} onClose={closeDialog} onSubmit={(id, password) => onResetPassword(id, password)} />}
+    {dialog === 'details' && details && <UserDetailsDialog data={details} onClose={closeDialog} />}
+    {dialog === 'bulk' && <BulkImportDialog departments={departments} defaultDepartment={activeDepartment} onValidate={onBulkValidate} onImport={async (rows) => {
+      const result = await onBulkImport(rows);
+      refreshCurrentDepartment();
+      return result;
+    }} onClose={closeDialog} />}
+    {dialog === 'delete-user' && <ConfirmDialog title="Delete user account" message={`Delete ${selectedUser.name} (${selectedUser.email})? The account will be deactivated so historical transactions and audit records remain intact.`} confirmLabel="Deactivate account" busy={busy} onClose={closeDialog} onConfirm={async () => {
+      try { await run(() => onDeleteUser(selectedUser.id), 'Account deactivated.'); closeDialog(); refreshCurrentDepartment(); } catch {}
+    }} />}
+    {dialog === 'delete-department' && <ConfirmDialog title="Delete department" message={`Delete ${selectedDepartmentForDelete.name}? This cannot be undone.`} confirmLabel="Delete department" busy={busy} onClose={closeDialog} onConfirm={async () => {
+      try {
+        await run(() => onDeleteDepartment(selectedDepartmentForDelete.id, reassignTo ? Number(reassignTo) : null), 'Department deleted.');
+        if (selectedDepartment === selectedDepartmentForDelete.id) resetView();
+        closeDialog();
+      } catch {}
+    }}>
+      {Number(selectedDepartmentForDelete.userCount || 0) + Number(selectedDepartmentForDelete.requisitionCount || 0) + Number(selectedDepartmentForDelete.storeRequestCount || 0) > 0 && <label className="block text-xs font-bold">Reassign existing users and records to<select value={reassignTo} onChange={(event) => setReassignTo(event.target.value)} className="field"><option value="">Choose a department…</option>{departments.filter((department) => department.id !== selectedDepartmentForDelete.id).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>}
+      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />Users and historical records are never deleted; they are reassigned when required.</p>
+    </ConfirmDialog>}
+  </>;
 }

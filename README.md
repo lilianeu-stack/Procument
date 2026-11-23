@@ -20,7 +20,9 @@ Copy-Item .env.docker.example .env
 Copy-Item backend\.env.example backend\.env
 ```
 
-For local development, the example credentials match between the two files. Change `MYSQL_ROOT_PASSWORD`, `DB_USER`, and `DB_PASSWORD` in the root `.env` and set the matching `DB_USER` and `DB_PASSWORD` in `backend\.env` if you customize them. The database container creates the `Procument` database, loads `backend/database/schema.sql` on first startup, and persists data in the `procument_mysql_data` Docker volume.
+The backend environment file contains placeholders. Set its `DB_USER` and `DB_PASSWORD` to match `DB_USER` and `DB_PASSWORD` in the root `.env`, and set a unique `JWT_SECRET` of at least 32 characters. The database container creates the `Procument` database, loads `backend/database/schema.sql` on first startup, and persists data in the `procument_mysql_data` Docker volume.
+
+The backend requires `DB_HOST`, `DB_USER`, `DB_NAME`, and `JWT_SECRET`. `DB_PORT` defaults to `3307`; `PORT` defaults to `4000` in development and must be set in production. Production also requires `DB_PASSWORD`.
 
 Start the database from the project root:
 
@@ -31,36 +33,70 @@ docker compose ps
 
 The backend connects to the published MySQL port on `127.0.0.1:3307` (the container listens on 3306). The schema and sample supplier and inventory records are initialized only when the Docker volume is empty.
 
-### 2. Configure and create an administrator
+If Docker is not available, an existing local MySQL/MariaDB server can be used instead: set `DB_PORT=3306` (or the local server's port), `DB_HOST`, `DB_USER`, `DB_PASSWORD` and `DB_NAME` in `backend\.env` to match that server, and make sure the `Procument` schema from `backend/database/schema.sql` is loaded. Generate `JWT_SECRET` locally with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The backend refuses to accept placeholder values or start before the database connection succeeds.
 
-In `backend\.env`, set a long random `JWT_SECRET` (at least 32 characters) and administrator values:
+### 2. Configure and access the administrator
+
+In `backend\.env`, set a long random `JWT_SECRET` (at least 32 characters) and the intended owner identity:
 
 ```text
 ADMIN_NAME=Hope Haven Administrator
 ADMIN_EMAIL=admin@hopehaven.org
-ADMIN_PASSWORD=use-a-unique-password-of-at-least-12-characters
 ```
 
-Install dependencies and create the administrator account:
+Install dependencies:
 
 ```powershell
 npm install
 npm install --prefix backend
 npm install --prefix frontend
-npm run create-admin --prefix backend
 ```
 
-Use the email and password you configured to sign in. Do not commit `.env` files.
+If an administrator account already exists, replace a forgotten password with the secure reset utility. From the `backend` directory it prompts with masked input, asks for confirmation, validates strength, hashes with bcrypt (cost 12), and verifies login and admin access:
+
+```powershell
+cd backend
+npm run admin:reset-password
+```
+
+If the `users` table is empty (no administrator has ever been provisioned), opt in explicitly to create only the initial account described by `ADMIN_EMAIL` and `ADMIN_NAME`:
+
+```powershell
+cd backend
+npm run admin:reset-password -- --bootstrap
+# PowerShell may consume npm's "--" separator; this also works:
+# $env:ADMIN_BOOTSTRAP='1'; npm run admin:reset-password
+```
+
+The utility refuses to create duplicate accounts, never prints the password or its hash, and does not touch other users. `ADMIN_PASSWORD` is only used by the older `npm run create-admin` helper; it is not needed for sign-in after a reset.
+
+Use the configured email and the password you entered to sign in. Do not commit `.env` files.
+
+### Supplier email delivery
+
+The backend uses one generic SMTP integration (`nodemailer`). No provider is assumed: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME` and `APP_BASE_URL` in `backend\.env` using the values issued by your organization's email provider. Use implicit TLS with `SMTP_SECURE=true` on port 465, or STARTTLS with `SMTP_SECURE=false` and `SMTP_REQUIRE_TLS=true` on the provider's submission port. Start the backend to see a warning when any value is missing; RFQs still save correctly, but their invitation deliveries are recorded as `Failed` until the configuration is corrected.
+
+When an RFQ is created, each selected Supplier receives one individual email containing their own signed `#/supplier/RFQ?token=…` link. The token is HMAC-signed with `JWT_SECRET` and contains only that RFQ and Supplier's identifiers; it cannot be used to open another Supplier's quotation. The Supplier page is public but token-gated and lets the Supplier view the request and submit or update their quotation. No other Supplier's email address or link is included in the message.
+
+Delivery status is intentionally truthful: SMTP acceptance is shown as **Accepted by Email Provider**, never **Delivered**. Set `EMAIL_WEBHOOK_SECRET` and point the provider's generic delivery webhook to `POST /api/email/webhooks/generic` with header `x-email-webhook-secret` to record provider-confirmed `Delivered`, `Bounced` and `Opened` statuses. Opening the signed link also records `Opened`. Administrators can verify SMTP authentication, send a test to their own account, retry only failed recipients, and explicitly resend an individual link from the RFQs page.
+
+**Domain authentication is the domain owner's responsibility.** Ask the actual email provider for the exact SPF, DKIM and DMARC records required for the sending domain and enter those values at the DNS registrar; no records are invented by this application. Also verify the sender email/domain in the provider account, confirm the account is activated, and check its sending limits. SPF/DKIM/DMARC problems usually cause spam placement or rejection even when SMTP authentication succeeds.
 
 ### 3. Run the application
 
-From the project root:
+From the project root, start the full application:
 
 ```powershell
 npm run dev
 ```
 
-The frontend is at `http://localhost:5173` and the API is at `http://localhost:4000`. To run either side separately, use `npm run dev:frontend` or `npm run dev:backend`.
+The backend can also be started on its own with:
+
+```powershell
+npm run dev --prefix backend
+```
+
+Or, from the `backend` directory, use `npm run dev` for development or `npm start` for a normal start. The backend waits for a successful MySQL connection before listening. The frontend is at `http://localhost:5173`, the API is at `http://localhost:4000`, and its health endpoint is `http://localhost:4000/api/health`. To run either side separately, use `npm run dev:frontend` or `npm run dev:backend`.
 
 Run the API and role-navigation tests with `npm test --prefix backend` and `npm test --prefix frontend`. Check the production assets with `npm run build --prefix frontend`.
 
@@ -75,18 +111,30 @@ Run the API and role-navigation tests with `npm test --prefix backend` and `npm 
 - Store requests with approval and transactional stock issue (issues fail rather than allowing negative stock)
 - Invoice submission after a goods receipt, finance approval/rejection, and paid status
 - Departments, audit log records, and notification inbox
+- Three role-based portals with protected layouts, dashboards, sidebars, and role-specific pages
+- Business-date tracking, UTC storage with local display, reusable date filters, and branded print/download reports
 
-Available roles: `admin`, `requestor`, `approver`, `procurement`, `storekeeper`, `finance`, and `committee`. Administrators can create users from the Users screen; the starter intentionally does not expose public account registration. Shared read pages are available to signed-in users; Approvals is shown to approvers, Stock movements to storekeepers/procurement, and Users/Audit logs to admins. Action buttons follow the same backend role rules.
+## Role-based portals
 
-| Role | Main actions |
-| --- | --- |
-| Requestor | Submit purchase and store requests; view request, stock, supplier, and procurement status |
-| Approver | Review requisitions, purchase orders, and store requests |
-| Procurement | Manage suppliers, RFQs, quotations, purchase orders, receipts, and invoices |
-| Committee | Record and evaluate quotations; award a supplier |
-| Storekeeper | Maintain inventory, record receipts, review stock movement, and issue approved store requests |
-| Finance | Review, approve/reject, and mark invoices paid |
-| Admin | Access all modules, manage users/departments, and view audit logs |
+Sign-in routes each account to a portal derived from its current database role and Department. The portal is never chosen by the browser. Authentication reloads the role and Department on every API request, so admin changes take effect immediately.
+
+| Portal | Database role | Landing page |
+| --- | --- | --- |
+| Administrator Portal | `admin` | Existing system-wide Overview |
+| Department Supervisor Portal | `supervisor` | Supervisor Dashboard |
+| Requester Portal | `requestor` | Requester Dashboard |
+
+Every Department can have one active Supervisor and one or more Requesters. A Supervisor or Requester must be assigned to the Department they work in. Administrators manage these assignments from Users Management; attempting to create a second active Supervisor for a Department is rejected unless **Replace existing Supervisor** is selected, which deactivates the former Supervisor. `procurement` signs into the Administrator shell with page restrictions; `approver`, `storekeeper`, `finance`, and `committee` also use Administrator-side pages allowed for their role.
+
+Supervisor approval only records the Supervisor decision. The separate **Forward to Procurement** action is the only route into Procurement; forwarded requests are identified by both the forwarding marker and `forwarded_at`, never by status alone. Direct URLs to another portal are blocked in the UI, and the API independently rejects unauthorized roles and Department IDs. Supervisor and Requester accounts can access `/auth/me`, notifications, their portal endpoints, and their own role-scoped exports, but not the legacy management/workflow APIs.
+
+## Dates, printing and downloads
+
+Each module uses its own lifecycle dates (submission, Supervisor decision, forwarding, RFQ issue/due/close, PO approval/delivery, goods receipt, invoice submission/approval/payment, store issue, inventory movement, user last login, and audit activity). Timestamps are stored in UTC and displayed as `DD/MM/YYYY` (with time where it matters) in `VITE_DISPLAY_TIMEZONE`, which defaults to `Africa/Kigali`. Set the same value in the frontend build environment when deployed elsewhere.
+
+List pages provide Today, Yesterday, This week, This month, This quarter, This year, and custom range presets. Date filters work alongside search, status, and module filters and are passed to both the list query and the report export. Invalid ranges and reversed business dates are rejected, and audit timestamps cannot be edited through the application.
+
+Printable views use the branded A4 layout with logo, title, reference, dates, approval details, hidden navigation/controls, clean page breaks, and page numbers. Downloads are generated server-side as PDF for official documents, Excel `.xlsx` for tabular/financial data, and CSV for simple datasets. Reports are scoped by role: Requesters export only their own requisitions, Supervisors only their Department, and Administrator-side datasets follow the existing role permissions. Every export is authenticated and written to the audit log.
 
 ## API overview
 
@@ -97,6 +145,11 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `GET` | `/health` | Public |
 | `POST` | `/auth/login` | Public |
 | `GET` | `/auth/me` | Signed in |
+| `GET` | `/portal/session` | Signed in |
+| `GET` | `/portal/supervisor/summary` | Supervisor |
+| `GET` | `/portal/requester/summary` | Requester |
+| `GET` | `/portal/supervisor/requesters` | Supervisor |
+| `GET` | `/portal/department`, `/portal/department/:id` | Supervisor, Requester (own Department only) |
 | `GET` | `/dashboard` | Signed in |
 | `GET`, `POST` | `/requisitions` | Signed in |
 | `PATCH` | `/requisitions/:id/decision` | Admin, approver |
@@ -122,6 +175,9 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `POST` | `/suppliers` | Admin, procurement |
 | `GET`, `POST` | `/admin/users`, `/admin/departments` | Admin |
 | `GET` | `/admin/audit-logs` | Admin |
+| `GET` | `/exports/available` | Signed in (role-scoped list) |
+| `GET` | `/exports/:key/:format` | Signed in (role-scoped report: `pdf`, `xlsx`, `csv`) |
+| `GET` | `/exports/record/:type/:id/:format` | Signed in (record visibility checked) |
 
 ## Project structure
 
@@ -131,21 +187,26 @@ backend/
   src/config/db.js                 MySQL connection pool
   src/lib/events.js                Audit and notification helpers
   src/middleware/auth.js           JWT authentication and role checks
-  src/routes/                      Auth, inventory, procurement, finance, and admin APIs
+  src/routes/                      Auth, portal, inventory, procurement, finance, and admin APIs
+  src/middleware/auth.js           Database-backed JWT authentication and role checks
+  src/utils/roles.js               Portal/role mapping shared by auth and routes
   src/scripts/create-admin.js      Secure initial administrator setup
-  test/app.test.js                 API smoke and access-control tests
+  test/app.test.js                 API smoke, portal RBAC, and access-control tests
 frontend/
-  src/components/layout/           Shared app shell and navigation
+  src/components/layout/           Administrator app shell and navigation
+  src/components/portals/          Role-based layouts, sidebars, dashboards, and placeholders
   src/components/ui/               Reusable cards, dialogs, and status badges
   src/pages/                        Feature-specific screens
   src/services/api.js              Authenticated API client
-  src/App.jsx                       App state and API orchestration
+  src/utils/access.js              Frontend role/portal permissions
+  src/utils/routes.js              Protected hash routes
+  src/App.jsx                      Portal selection, state, and API orchestration
   src/index.css                     Tailwind and global styles
 docker-compose.yml                  Persistent MySQL 8.4 service
 ```
 
 ## Notes
 
-This project includes the core end-to-end workflows, but still needs deployment-specific production work: email delivery, realtime push notifications, password reset, document uploads/attachments, PDF/Excel exports, formal forecasting, and payment-provider integration. The bundled Docker credentials are for local development only; replace them before exposing the database beyond your machine. The bundled supplier and inventory records are sample data.
+This project includes the core end-to-end workflows and generic SMTP supplier email delivery, but still needs deployment-specific production work: realtime push notifications, password reset, document uploads/attachments, formal forecasting, and payment-provider integration. The bundled Docker credentials are for local development only; replace them before exposing the database beyond your machine. The bundled supplier and inventory records are sample data.
 
 The browser UI defaults to `http://localhost:4000/api`; copy `frontend\.env.example` to `frontend\.env.local` and change `VITE_API_URL` if the API runs elsewhere. During development, local frontend ports are allowed; production permits only `CLIENT_ORIGIN`.

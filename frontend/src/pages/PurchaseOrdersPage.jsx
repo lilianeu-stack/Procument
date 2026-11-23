@@ -4,8 +4,8 @@ import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/u
 import Modal from '../components/ui/Modal.jsx';
 import { currency, dateLabel } from '../utils/format.js';
 
-function OrderForm({ rfqs, onClose, onSubmit }) {
-  const [form, setForm] = useState({ rfqId: '', deliveryDate: '' });
+function OrderForm({ rfqs, initialRfqId, onClose, onSubmit }) {
+  const [form, setForm] = useState({ rfqId: initialRfqId ? String(initialRfqId) : '', deliveryDate: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function submit(event) {
@@ -40,24 +40,37 @@ function ReceiptForm({ order, items, onClose, onSubmit }) {
   </form></Modal>;
 }
 
-export default function PurchaseOrdersPage({ orders, rfqs, items, user, onCreate, onDecision, onReceive }) {
+export default function PurchaseOrdersPage({
+  orders = [], rfqs = [], items = [], user = {}, requisition = null,
+  onCreate, onDecision, onReceive
+}) {
   const [creating, setCreating] = useState(false);
   const [receiving, setReceiving] = useState(null);
   const [error, setError] = useState('');
   const canCreate = ['admin', 'procurement'].includes(user.role);
   const canApprove = ['admin', 'approver'].includes(user.role);
   const canReceive = ['admin', 'storekeeper', 'procurement'].includes(user.role);
+
+  const requestId = requisition ? Number(requisition.id ?? requisition) : null;
+  const scopedOrders = requestId
+    ? orders.filter((order) => Number(order.requisitionId) === requestId)
+    : orders;
+  const scopedRfqs = requestId
+    ? rfqs.filter((rfq) => Number(rfq.requisitionId) === requestId)
+    : rfqs;
+  const awardedRfqs = scopedRfqs.filter((rfq) => rfq.status === 'Awarded');
+  const initialRfqId = requestId && awardedRfqs.length === 1 ? awardedRfqs[0].id : '';
   async function decide(id, decision) {
     try { await onDecision(id, decision); setError(''); }
     catch (exception) { setError(exception.message); }
   }
 
   return <>
-    <PageCard title="Purchase orders" description={`${orders.length} orders · Approval and delivery tracking`} action={canCreate && <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Create PO</button>}>
+    <PageCard title="Purchase orders" description={`${scopedOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Approval and delivery tracking`} action={canCreate && <button onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Create PO</button>}>
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
-      {orders.length ? <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['PO', 'Supplier', 'Requisition', 'Items · quantity @ unit price', 'Total', 'Delivery', 'Status', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{orders.map((order) => <tr key={order.id}><td className="px-4 py-4 font-bold">{order.reference}</td><td className="px-4 py-4">{order.supplier}</td><td className="px-4 py-4">{order.requisition}</td><td className="max-w-[220px] px-4 py-4 text-muted">{order.items}</td><td className="px-4 py-4 font-bold">{currency(order.total)}</td><td className="px-4 py-4">{dateLabel(order.deliveryDate)}</td><td className="px-4 py-4">{order.status}</td><td className="px-4 py-4"><div className="flex gap-1">{canApprove && order.status === 'Pending approval' && <><button onClick={() => decide(order.id, 'Approved')} className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Approve</button><button onClick={() => decide(order.id, 'Rejected')} className="rounded bg-red-50 px-2 py-1 text-red-700">Reject</button></>}{canReceive && ['Approved', 'Partially received'].includes(order.status) && <button onClick={() => setReceiving(order)} className="rounded border px-2 py-1 text-brand">Receive</button>}</div></td></tr>)}</tbody></table></div> : <EmptyState>No purchase orders are ready.</EmptyState>}
+      {scopedOrders.length ? <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['PO', 'Supplier', 'Requisition', 'Items · quantity @ unit price', 'Total', 'Delivery', 'Status', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{scopedOrders.map((order) => <tr key={order.id}><td className="px-4 py-4 font-bold">{order.reference}</td><td className="px-4 py-4">{order.supplier}</td><td className="px-4 py-4">{order.requisition}</td><td className="max-w-[220px] px-4 py-4 text-muted">{order.items}</td><td className="px-4 py-4 font-bold">{currency(order.total)}</td><td className="px-4 py-4">{dateLabel(order.deliveryDate)}</td><td className="px-4 py-4">{order.status}</td><td className="px-4 py-4"><div className="flex gap-1">{canApprove && order.status === 'Pending approval' && <><button onClick={() => decide(order.id, 'Approved')} className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Approve</button><button onClick={() => decide(order.id, 'Rejected')} className="rounded bg-red-50 px-2 py-1 text-red-700">Reject</button></>}{canReceive && ['Approved', 'Partially received'].includes(order.status) && <button onClick={() => setReceiving(order)} className="rounded border px-2 py-1 text-brand">Receive</button>}</div></td></tr>)}</tbody></table></div> : <EmptyState>{requestId ? 'No purchase orders for this request yet.' : 'No purchase orders are ready.'}</EmptyState>}
     </PageCard>
-    {creating && <OrderForm rfqs={rfqs} onClose={() => setCreating(false)} onSubmit={onCreate} />}
+    {creating && <OrderForm rfqs={scopedRfqs} initialRfqId={initialRfqId} onClose={() => setCreating(false)} onSubmit={onCreate} />}
     {receiving && <ReceiptForm order={receiving} items={items} onClose={() => setReceiving(null)} onSubmit={onReceive} />}
   </>;
 }
