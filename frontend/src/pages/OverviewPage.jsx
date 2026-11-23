@@ -2,6 +2,7 @@ import { ArrowRight, Boxes, Check, ClipboardCheck, FileText, Sparkles, Truck } f
 import PageCard, { EmptyState } from '../components/ui/PageCard.jsx';
 import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { currency, dateLabel } from '../utils/format.js';
+import { RECEIVED_REQUESTS_PAGE } from '../utils/access.js';
 
 function Metric({ label, value, note, icon: Icon, tone = 'green' }) {
   const tones = { green: 'bg-brand-light text-brand', blue: 'bg-blue-50 text-blue-600', amber: 'bg-amber-50 text-amber-600', violet: 'bg-violet-50 text-violet-600' };
@@ -22,7 +23,7 @@ export default function OverviewPage({ dashboard, onNavigate }) {
       <Metric label="Active suppliers" value={dashboard?.suppliers?.active ?? '—'} note="Approved supplier partners" icon={Truck} tone="violet" />
     </div>
     <div className="grid gap-5 xl:grid-cols-[1.55fr_1fr]">
-      <PageCard title="Recent requisitions" description="Latest requests across your organization" action={<button onClick={() => onNavigate('Requisitions')} className="text-xs font-bold text-brand">View all <ArrowRight size={14} className="inline" /></button>}>
+      <PageCard title="Recent requisitions" description="Latest requests across your organization" action={<button onClick={() => onNavigate(RECEIVED_REQUESTS_PAGE)} className="text-xs font-bold text-brand">View all <ArrowRight size={14} className="inline" /></button>}>
         {requests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Request', 'Requester', 'Date', 'Amount', 'Status'].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{requests.map((request) => <tr key={request.id}><td className="px-5 py-3 font-bold">{request.reference}</td><td className="px-5 py-3">{request.requester}</td><td className="px-5 py-3">{dateLabel(request.createdAt)}</td><td className="px-5 py-3">{currency(request.total)}</td><td className="px-5 py-3"><StatusBadge value={request.status} /></td></tr>)}</tbody></table></div> : <EmptyState>No requisitions yet.</EmptyState>}
       </PageCard>
       <PageCard title="Inventory health" description={`${dashboard?.inventory?.items ?? 0} catalogue items`}>
@@ -34,7 +35,7 @@ export default function OverviewPage({ dashboard, onNavigate }) {
     </div>
     <div className="rounded-xl bg-[#1d4441] p-5 text-white sm:flex sm:items-center sm:justify-between sm:px-7">
       <div className="flex items-center gap-4"><span className="grid h-11 w-11 place-items-center rounded-xl bg-white/10"><Sparkles size={20} className="text-emerald-300" /></span><div><h3 className="font-bold">Keep every request moving.</h3><p className="mt-1 text-xs text-emerald-100/70">Create a request and track its approvals in one place.</p></div></div>
-      <button onClick={() => onNavigate('Requisitions')} className="mt-4 rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-[#1d4441] sm:mt-0">Start a requisition</button>
+      <button onClick={() => onNavigate(RECEIVED_REQUESTS_PAGE)} className="mt-4 rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-[#1d4441] sm:mt-0">Review received requests</button>
     </div>
   </div>;
 }

@@ -1,16 +1,8 @@
-const styles = {
-  Approved: 'bg-emerald-50 text-emerald-700',
-  Paid: 'bg-emerald-50 text-emerald-700',
-  Issued: 'bg-emerald-50 text-emerald-700',
-  Rejected: 'bg-red-50 text-red-700',
-  'In procurement': 'bg-blue-50 text-blue-700',
-  'Low stock': 'bg-amber-50 text-amber-700',
-  Pending: 'bg-amber-50 text-amber-700',
-  'Pending approval': 'bg-amber-50 text-amber-700'
-};
+import { badgeTone, statusLabel, statusTone } from '../../utils/status.js';
 
-export default function StatusBadge({ value }) {
-  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${styles[value] || 'bg-slate-100 text-slate-700'}`}>
-    <span className="h-1.5 w-1.5 rounded-full bg-current" />{value || 'Pending'}
+export default function StatusBadge({ value, className = '' }) {
+  const tone = badgeTone(statusTone(value));
+  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${tone} ${className}`}>
+    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />{statusLabel(value)}
   </span>;
 }

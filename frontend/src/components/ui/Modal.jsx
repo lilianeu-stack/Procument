@@ -1,8 +1,15 @@
 import { X } from 'lucide-react';
 
-export default function Modal({ title, onClose, children }) {
+const SIZES = {
+  sm: 'max-w-lg',
+  md: 'max-w-2xl',
+  lg: 'max-w-4xl',
+  xl: 'max-w-6xl'
+};
+
+export default function Modal({ title, onClose, children, size = 'sm' }) {
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <section className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+    <section className={`portal-modal w-full ${SIZES[size] || SIZES.sm} max-h-[92vh] overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6`}>
       <header className="mb-5 flex items-center justify-between">
         <h2 className="display-font text-lg font-extrabold">{title}</h2>
         <button onClick={onClose} className="rounded-lg p-2 text-muted hover:bg-slate-100" aria-label="Close"><X size={18} /></button>

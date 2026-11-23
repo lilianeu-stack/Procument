@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { verifyDatabaseConnection } from './config/db.js';
+import { errorCode, log } from './lib/logger.js';
 import api from './routes/api.js';
 
 const app = express();
@@ -14,12 +16,33 @@ app.use(cors({
     return callback(new Error('Origin is not allowed by CORS.'));
   }
 }));
-app.use(express.json({ limit: '1mb' }));
-app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+// Attachments are submitted as base64 in JSON so the existing API client can
+// carry them without a second upload system. Allow room for a small document.
+app.use(express.json({ limit: '12mb' }));
+app.get('/api/health', async (_req, res) => {
+  let database = 'connected';
+  try {
+    await verifyDatabaseConnection();
+  } catch (error) {
+    database = 'disconnected';
+    log('WARN', `Health check could not reach MySQL (${errorCode(error)}).`);
+  }
+
+  const success = database === 'connected';
+  return res.status(success ? 200 : 503).json({
+    success,
+    application: 'Procurement Management System',
+    server: 'running',
+    database,
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime())
+  });
+});
 app.use('/api', api);
 app.use((err, _req, res, _next) => {
   const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
-  if (status === 500) console.error(err);
+  if (status === 500) log('ERROR', `An API request failed (${errorCode(err)}): ${err.message}`);
   return res.status(status).json({
     message: status === 500 ? 'An unexpected server error occurred.' : err.message
   });

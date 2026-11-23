@@ -1,7 +1,12 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
-import pool from '../config/db.js';
 
+// Load backend/.env explicitly so this script works from any working directory.
+// The pool is imported dynamically afterwards so it sees the loaded values.
+dotenv.config({ path: fileURLToPath(new URL('../../.env', import.meta.url)) });
+
+const { default: pool } = await import('../config/db.js');
 const { ADMIN_NAME, ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
 if (!ADMIN_NAME || !ADMIN_EMAIL || !ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
   throw new Error('Set ADMIN_NAME, ADMIN_EMAIL, and ADMIN_PASSWORD (at least 12 characters) in backend/.env.');

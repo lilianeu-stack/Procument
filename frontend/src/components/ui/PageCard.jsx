@@ -19,11 +19,11 @@ export function ErrorMessage({ children }) {
   return children ? <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{children}</p> : null;
 }
 
-export function FormActions({ busy, close, label }) {
+export function FormActions({ busy, close, label, busyLabel }) {
   return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
     <button type="button" onClick={close} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
     <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
-      {busy ? 'Saving…' : label}
+      {busy ? (busyLabel || 'Saving…') : label}
     </button>
   </div>;
 }
