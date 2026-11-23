@@ -5,15 +5,27 @@ import { verifyDatabaseConnection } from './config/db.js';
 import { errorCode, log } from './lib/logger.js';
 import api from './routes/api.js';
 
+function isLocalOrigin(origin) {
+  if (!origin) return false;
+  try {
+    const { hostname } = new URL(origin);
+    return hostname === 'localhost' || hostname === '127.0.0.1' ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(hostname);
+  } catch {
+    return false;
+  }
+}
+
 const app = express();
 app.use(helmet());
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 app.use(cors({
   origin(origin, callback) {
-    const localDevOrigin = process.env.NODE_ENV !== 'production' &&
-      /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin || '');
+    const localDevOrigin = process.env.NODE_ENV !== 'production' && isLocalOrigin(origin);
     if (!origin || origin === clientOrigin || localDevOrigin) return callback(null, true);
-    return callback(new Error('Origin is not allowed by CORS.'));
+    return callback(null, false);
   }
 }));
 // Attachments are submitted as base64 in JSON so the existing API client can

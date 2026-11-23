@@ -37,7 +37,9 @@ router.post('/auth/login', async (req, res, next) => {
     if (!account || !(await bcrypt.compare(password, account.password_hash))) {
       return res.status(401).json({ message: 'Email or password is incorrect.' });
     }
-    const user = withPortalIdentity(account);
+    // Never expose the stored hash to the client.
+    const { password_hash: _passwordHash, ...safeAccount } = account;
+    const user = withPortalIdentity(safeAccount);
     if (!user.portal) {
       return res.status(403).json({ message: 'Your role does not have an assigned portal. Contact an administrator.' });
     }
