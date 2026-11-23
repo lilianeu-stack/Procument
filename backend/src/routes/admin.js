@@ -97,6 +97,42 @@ async function departmentExists(connection, id) {
   return rows.length > 0;
 }
 
+async function departmentDependencies(connection, departmentId) {
+  const [[usage]] = await connection.execute(
+    `SELECT
+      (SELECT COUNT(*) FROM users WHERE department_id = ?) AS users,
+      (SELECT COUNT(*) FROM requisitions WHERE department_id = ?) AS requisitions,
+      (SELECT COUNT(*) FROM store_requests WHERE department_id = ?) AS storeRequests,
+      (SELECT COUNT(*) FROM items WHERE department_id = ?) AS items,
+      (SELECT COUNT(*) FROM inventory_movements WHERE department_id = ?) AS inventoryMovements,
+      (SELECT COUNT(*) FROM messages WHERE department_id = ?) AS messages`,
+    [departmentId, departmentId, departmentId, departmentId, departmentId, departmentId]
+  );
+  return {
+    users: Number(usage.users),
+    requisitions: Number(usage.requisitions),
+    storeRequests: Number(usage.storeRequests),
+    items: Number(usage.items),
+    inventoryMovements: Number(usage.inventoryMovements),
+    messages: Number(usage.messages)
+  };
+}
+
+function departmentDependencyMessage(usage) {
+  const labels = {
+    users: 'user(s)',
+    requisitions: 'requisition(s)',
+    storeRequests: 'store request(s)',
+    items: 'inventory item(s)',
+    inventoryMovements: 'stock movement(s)',
+    messages: 'message(s)'
+  };
+  const linked = Object.entries(labels)
+    .filter(([key]) => Number(usage[key]) > 0)
+    .map(([key, label]) => `${Number(usage[key])} ${label}`);
+  return `This department is referenced by ${linked.join(', ')}. Reassign all of them to another department before deleting; none of them will be deleted.`;
+}
+
 async function activeAdminCount(connection) {
   const [[result]] = await connection.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = TRUE");
   return Number(result.total);
@@ -202,8 +238,12 @@ router.get('/departments', async (_req, res, next) => {
     const [departments] = await pool.query(
       `SELECT d.id, d.name, d.description, d.created_at AS createdAt,
         COUNT(u.id) AS userCount,
+        COALESCE(SUM(u.active = TRUE), 0) AS activeUserCount,
         (SELECT COUNT(*) FROM requisitions r WHERE r.department_id = d.id) AS requisitionCount,
-        (SELECT COUNT(*) FROM store_requests s WHERE s.department_id = d.id) AS storeRequestCount
+        (SELECT COUNT(*) FROM store_requests s WHERE s.department_id = d.id) AS storeRequestCount,
+        (SELECT COUNT(*) FROM items i WHERE i.department_id = d.id) AS itemCount,
+        (SELECT COUNT(*) FROM inventory_movements m WHERE m.department_id = d.id) AS stockMovementCount,
+        (SELECT COUNT(*) FROM messages msg WHERE msg.department_id = d.id) AS messageCount
        FROM departments d LEFT JOIN users u ON u.department_id = d.id
        GROUP BY d.id ORDER BY d.name`
     );
@@ -217,7 +257,8 @@ router.get('/departments/:id/users', async (req, res, next) => {
   try {
     const [[department]] = await pool.execute(
       `SELECT d.id, d.name, d.description,
-        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) AS userCount
+        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) AS userCount,
+        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id AND u.active = TRUE) AS activeUserCount
        FROM departments d WHERE d.id = ? LIMIT 1`,
       [id]
     );
@@ -229,7 +270,14 @@ router.get('/departments/:id/users', async (req, res, next) => {
        WHERE u.department_id = ? ORDER BY u.name, u.id`,
       [id]
     );
-    return res.json({ department: { ...department, userCount: Number(department.userCount) }, users: users.map(mapUser) });
+    return res.json({
+      department: {
+        ...department,
+        userCount: Number(department.userCount),
+        activeUserCount: Number(department.activeUserCount)
+      },
+      users: users.map(mapUser)
+    });
   } catch (error) { return next(error); }
 });
 
@@ -292,33 +340,39 @@ router.delete('/departments/:id', async (req, res, next) => {
       await connection.rollback();
       return res.status(404).json({ message: 'Department not found.' });
     }
-    const [[usage]] = await connection.execute(
-      `SELECT
-        (SELECT COUNT(*) FROM users WHERE department_id = ?) AS users,
-        (SELECT COUNT(*) FROM requisitions WHERE department_id = ?) AS requisitions,
-        (SELECT COUNT(*) FROM store_requests WHERE department_id = ?) AS storeRequests`,
-      [id, id, id]
-    );
-    const assigned = Number(usage.users) + Number(usage.requisitions) + Number(usage.storeRequests);
+    const usage = await departmentDependencies(connection, id);
+    const assigned = Object.values(usage).reduce((total, count) => total + count, 0);
     if (assigned > 0) {
       if (!reassignTo || reassignTo === id) {
         await connection.rollback();
-        return badRequest(res, `This department has ${usage.users} user(s), ${usage.requisitions} requisition(s) and ${usage.storeRequests} store request(s). Reassign them to another department before deleting.`);
+        return badRequest(res, departmentDependencyMessage(usage));
       }
       if (!(await departmentExists(connection, reassignTo))) {
         await connection.rollback();
         return badRequest(res, 'The reassignment department does not exist.');
       }
-      await connection.execute('UPDATE users SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
-      await connection.execute('UPDATE requisitions SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
-      await connection.execute('UPDATE store_requests SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
+      // Reassigning an active Supervisor into a Department that already has one
+      // would break the one-active-Supervisor rule, so block with an actionable reason.
+      const [[supervisors]] = await connection.execute(
+        `SELECT
+          (SELECT COUNT(*) FROM users WHERE department_id = ? AND role = 'supervisor' AND active = TRUE) AS sourceActive,
+          (SELECT COUNT(*) FROM users WHERE department_id = ? AND role = 'supervisor' AND active = TRUE) AS destinationActive`,
+        [id, reassignTo]
+      );
+      if (Number(supervisors.sourceActive) > 0 && Number(supervisors.destinationActive) > 0) {
+        await connection.rollback();
+        return badRequest(res, 'The destination department already has an active Supervisor. Reassign or deactivate that Supervisor before deleting this department.');
+      }
+      for (const table of ['users', 'requisitions', 'store_requests', 'items', 'inventory_movements', 'messages']) {
+        await connection.execute(`UPDATE ${table} SET department_id = ? WHERE department_id = ?`, [reassignTo, id]);
+      }
     }
     await connection.execute('DELETE FROM departments WHERE id = ?', [id]);
     await writeAudit(connection, req.user.id, 'department_deleted', 'department', String(id), {
-      name: existing[0].name, reassignedTo: assigned ? reassignTo : null
+      name: existing[0].name, reassignedTo: assigned ? reassignTo : null, dependencies: usage
     });
     await connection.commit();
-    return res.json({ deleted: true, reassigned: assigned > 0 ? reassignTo : null });
+    return res.json({ deleted: true, reassigned: assigned > 0 ? reassignTo : null, dependencies: usage });
   } catch (error) {
     await connection.rollback();
     return next(error);
@@ -506,7 +560,6 @@ router.patch('/users/:id/status', async (req, res, next) => {
 router.delete('/users/:id', async (req, res, next) => {
   const id = parseId(req.params.id);
   if (!id) return badRequest(res, 'Invalid user identifier.');
-  if (Number(req.user.id) === id) return badRequest(res, 'You cannot delete your own account.');
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -518,6 +571,10 @@ router.delete('/users/:id', async (req, res, next) => {
     if (existing[0].role === 'admin' && existing[0].active && await activeAdminCount(connection) <= 1) {
       await connection.rollback();
       return badRequest(res, 'The last active administrator cannot be deleted.');
+    }
+    if (Number(req.user.id) === id) {
+      await connection.rollback();
+      return badRequest(res, 'You cannot delete your own account.');
     }
     // Soft deletion preserves all historical purchase, approval, and audit references.
     await connection.execute('UPDATE users SET active = FALSE WHERE id = ?', [id]);

@@ -68,18 +68,6 @@ export function buildRfqEmail({ supplierName, reference, requisitionReference, t
   };
 }
 
-export function buildTestEmail() {
-  const lines = [
-    'This is a delivery verification message from the Hope Haven Procurement Management System.',
-    'If you received this email, SMTP authentication and message acceptance are working. Acceptance by the provider is not the same as confirmed inbox delivery.'
-  ];
-  return {
-    subject: 'Procurement Management System · Email delivery test',
-    text: `${lines.join('\n\n')}\n`,
-    html: wrapHtml('Email delivery test', lines)
-  };
-}
-
 // Always awaited by callers. Never claims inbox delivery: SMTP only proves the
 // provider accepted the message at the time of submission.
 export async function sendEmail(message, override = null) {
@@ -132,23 +120,5 @@ export async function sendEmail(message, override = null) {
     const sanitized = sanitizeEmailError(error);
     log('ERROR', `Supplier email failed for ${recipient} (${sanitized.code}): ${sanitized.message}`);
     return { ok: false, status: 'Failed', reason: 'provider_error', error: sanitized };
-  }
-}
-
-export async function verifyEmailConnection(override = null) {
-  const config = emailConfigStatus();
-  if (!config.configured && !override) {
-    return {
-      ok: false,
-      message: `Email delivery is not configured. Missing environment variable(s): ${config.missing.join(', ')}.`
-    };
-  }
-  try {
-    await getTransporter(override).verify();
-    return { ok: true, message: 'SMTP connection and authentication verified.' };
-  } catch (error) {
-    const sanitized = sanitizeEmailError(error);
-    log('ERROR', `SMTP verification failed (${sanitized.code}): ${sanitized.message}`);
-    return { ok: false, message: sanitized.message, code: sanitized.code };
   }
 }

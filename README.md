@@ -27,11 +27,11 @@ The backend requires `DB_HOST`, `DB_USER`, `DB_NAME`, and `JWT_SECRET`. `DB_PORT
 Start the database from the project root:
 
 ```powershell
-docker compose up -d
-docker compose ps
+docker compose up -d mysql
+docker compose ps mysql
 ```
 
-The backend connects to the published MySQL port on `127.0.0.1:3307` (the container listens on 3306). The schema and sample supplier and inventory records are initialized only when the Docker volume is empty.
+The backend container connects to MySQL at `mysql:3306`; local Node processes connect through the published port at `127.0.0.1:3307`. The schema and sample supplier and inventory records are initialized only when the Docker volume is empty.
 
 If Docker is not available, an existing local MySQL/MariaDB server can be used instead: set `DB_PORT=3306` (or the local server's port), `DB_HOST`, `DB_USER`, `DB_PASSWORD` and `DB_NAME` in `backend\.env` to match that server, and make sure the `Procument` schema from `backend/database/schema.sql` is loaded. Generate `JWT_SECRET` locally with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The backend refuses to accept placeholder values or start before the database connection succeeds.
 
@@ -84,7 +84,16 @@ Delivery status is intentionally truthful: SMTP acceptance is shown as **Accepte
 
 ### 3. Run the application
 
-From the project root, start the full application:
+To build and run the frontend, API, and MySQL in Docker from the project root:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost:5173`. The API is at `http://localhost:4000`; follow container output with `docker compose logs -f frontend backend`. Stop the containers with `docker compose down`; the database volume is preserved.
+
+To run the frontend and API as local Node processes instead:
 
 ```powershell
 npm run dev

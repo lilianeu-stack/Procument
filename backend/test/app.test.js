@@ -81,15 +81,15 @@ async function submitRequest(user, suffix, extra = {}) {
   return response;
 }
 
-async function createInventoryItem(name, quantity, reorderLevel = 2) {
+async function createInventoryItem(name, quantity, reorderLevel = 2, departmentId = departments.a.id) {
   const sku = `QA-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
   const [result] = await pool.execute(
     `INSERT INTO items (department_id, sku, name, category, unit, quantity, reorder_level)
      VALUES (?, ?, ?, 'QA', 'unit', ?, ?)`,
-    [departments.a.id, sku, name, quantity, reorderLevel]
+    [departmentId, sku, name, quantity, reorderLevel]
   );
   createdItemIds.push(Number(result.insertId));
-  return { id: Number(result.insertId), sku, name };
+  return { id: Number(result.insertId), sku, name, departmentId };
 }
 
 async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
@@ -106,6 +106,39 @@ async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
     'INSERT INTO store_request_items (store_request_id, item_id, quantity) VALUES (?, ?, ?)',
     [id, itemId, quantity]
   );
+  return { id, reference };
+}
+
+async function createRequisitionInDepartment(departmentId, requesterId, suffix) {
+  const [result] = await pool.execute(
+    `INSERT INTO requisitions
+      (reference, requester_id, department_id, title, justification, budget_code, priority)
+     VALUES (?, ?, ?, ?, ?, ?, 'Medium')`,
+    [`QA-DEL-${suffix}-${Date.now()}`, requesterId, departmentId, `QA delete test ${suffix}`, 'Delete dependency test', `QA-${suffix}`]
+  );
+  const id = Number(result.insertId);
+  createdRequisitionIds.push(id);
+  return { id };
+}
+
+async function createMessageInDepartment(departmentId, senderId, suffix) {
+  const [result] = await pool.execute(
+    'INSERT INTO messages (department_id, sender_id, body, is_announcement) VALUES (?, ?, ?, FALSE)',
+    [departmentId, senderId, `QA delete dependency message ${suffix}`]
+  );
+  return Number(result.insertId);
+}
+
+async function createMovementInDepartment(itemId, departmentId, suffix) {
+  const reference = `QA-MV-${suffix}-${Date.now()}`;
+  const [result] = await pool.execute(
+    `INSERT INTO inventory_movements
+      (item_id, department_id, movement_type, direction, quantity, reference_no, source, balance_after)
+     VALUES (?, ?, 'Receipt', 'In', 5, ?, 'QA delete dependency test', 5)`,
+    [itemId, departmentId, reference]
+  );
+  const id = Number(result.insertId);
+  createdMovementIds.push(id);
   return { id, reference };
 }
 
@@ -1126,6 +1159,146 @@ test('a department cannot have conflicting active supervisors without replacemen
   assert.equal(Boolean(oldSupervisor.active), false);
 });
 
+test('delete endpoints reject non-administrator direct API calls', async () => {
+  for (const user of [users.requesterA, users.requesterB, users.stockkeeper]) {
+    const userDelete = await request(`/admin/users/${users.requesterA.id}`, { method: 'DELETE', user });
+    assert.equal(userDelete.response.status, 403);
+    const departmentDelete = await request('/admin/departments/999999', { method: 'DELETE', user, body: {} });
+    assert.equal(departmentDelete.response.status, 403);
+  }
+});
+
+test('deleting an account soft-deletes it, preserves history, and records an audit event', async () => {
+  const stamp = Date.now();
+  const person = await createUser('QA Delete Account', `qa.delete.account.${stamp}@example.org`, 'requestor', departments.a.id);
+  const submitted = await submitRequest(person, `DEL${stamp}`);
+  assert.equal(submitted.response.status, 201, submitted.data.message);
+  const requisitionId = submitted.data.id;
+
+  const deleted = await request(`/admin/users/${person.id}`, { method: 'DELETE', user: admin });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  assert.equal(deleted.data.deleted, true);
+  assert.equal(deleted.data.softDeleted, true);
+
+  const [[storedUser]] = await pool.execute('SELECT active FROM users WHERE id = ?', [person.id]);
+  assert.equal(Boolean(storedUser.active), false);
+  const [[history]] = await pool.execute('SELECT requester_id FROM requisitions WHERE id = ?', [requisitionId]);
+  assert.equal(Number(history.requester_id), person.id);
+  const [[audit]] = await pool.execute(
+    "SELECT id FROM audit_logs WHERE user_id = ? AND action = 'user_deleted' AND entity_type = 'user' AND entity_id = ? LIMIT 1",
+    [admin.id, String(person.id)]
+  );
+  assert.ok(audit, 'A user deletion must be recorded in the audit log.');
+  const auth = await request('/auth/me', { user: person });
+  assert.equal(auth.response.status, 401);
+});
+
+test('self-delete and last active administrator delete are blocked', async () => {
+  const stamp = Date.now();
+  const created = await request('/admin/users', {
+    method: 'POST',
+    user: admin,
+    body: {
+      name: 'QA Second Admin', email: `qa.second.admin.${stamp}@example.org`,
+      password: PASSWORD, role: 'admin'
+    }
+  });
+  assert.equal(created.response.status, 201, created.data.message);
+  createdUserIds.push(created.data.id);
+
+  const selfDelete = await request(`/admin/users/${admin.id}`, { method: 'DELETE', user: admin });
+  assert.equal(selfDelete.response.status, 400);
+  assert.match(selfDelete.data.message, /own account/i);
+
+  const secondDelete = await request(`/admin/users/${created.data.id}`, { method: 'DELETE', user: admin });
+  assert.equal(secondDelete.response.status, 200, secondDelete.data.message);
+
+  const [[{ total }]] = await pool.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = TRUE");
+  if (Number(total) === 1) {
+    const lastAdmin = await request(`/admin/users/${admin.id}`, { method: 'DELETE', user: admin });
+    assert.equal(lastAdmin.response.status, 400);
+    assert.match(lastAdmin.data.message, /last active administrator/i);
+  }
+});
+
+test('department deletion checks every dependency and reassigns historical records', async () => {
+  const stamp = Date.now();
+  const source = await createDepartment(`QA Delete Source ${stamp}`);
+  const destination = await createDepartment(`QA Delete Destination ${stamp}`);
+  const supervisorDestination = await createDepartment(`QA Delete Supervisor Destination ${stamp}`);
+  const requester = await createUser('QA Delete Requester', `qa.delete.requester.${stamp}@example.org`, 'requestor', source.id);
+  const supervisor = await createUser('QA Delete Supervisor', `qa.delete.supervisor.${stamp}@example.org`, 'supervisor', source.id);
+  await createUser('QA Delete Destination Supervisor', `qa.delete.dest.supervisor.${stamp}@example.org`, 'supervisor', supervisorDestination.id);
+
+  const requisition = await createRequisitionInDepartment(source.id, requester.id, `DEPT${stamp}`);
+  const item = await createInventoryItem(`QA Delete Item ${stamp}`, 2, 1, source.id);
+  const storeRequest = await createApprovedStoreRequest(item.id, requester, 1, `DEPT${stamp}`);
+  const movement = await createMovementInDepartment(item.id, source.id, `DEPT${stamp}`);
+  const messageId = await createMessageInDepartment(source.id, requester.id, `DEPT${stamp}`);
+
+  const listed = await request('/admin/departments', { user: admin });
+  assert.equal(listed.response.status, 200);
+  const listedSource = listed.data.departments.find((department) => Number(department.id) === source.id);
+  assert.equal(Number(listedSource.userCount), 2);
+  assert.equal(Number(listedSource.requisitionCount), 1);
+  assert.equal(Number(listedSource.storeRequestCount), 1);
+  assert.equal(Number(listedSource.itemCount), 1);
+  assert.equal(Number(listedSource.stockMovementCount), 1);
+  assert.equal(Number(listedSource.messageCount), 1);
+
+  const blocked = await request(`/admin/departments/${source.id}`, { method: 'DELETE', user: admin, body: {} });
+  assert.equal(blocked.response.status, 400);
+  assert.match(blocked.data.message, /referenced by/i);
+  assert.match(blocked.data.message, /message\(s\)/i);
+
+  const sameDepartment = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: source.id }
+  });
+  assert.equal(sameDepartment.response.status, 400);
+
+  const missingDestination = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: 999999999 }
+  });
+  assert.equal(missingDestination.response.status, 400);
+  assert.match(missingDestination.data.message, /does not exist/i);
+
+  const conflictingSupervisor = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: supervisorDestination.id }
+  });
+  assert.equal(conflictingSupervisor.response.status, 400);
+  assert.match(conflictingSupervisor.data.message, /active Supervisor/i);
+
+  const deleted = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: destination.id }
+  });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  assert.equal(deleted.data.deleted, true);
+  assert.equal(deleted.data.reassigned, destination.id);
+
+  const [[remainingDepartment]] = await pool.execute('SELECT id FROM departments WHERE id = ?', [source.id]);
+  assert.equal(remainingDepartment, undefined);
+  for (const [table, id] of [
+    ['users', requester.id], ['users', supervisor.id],
+    ['requisitions', requisition.id], ['store_requests', storeRequest.id],
+    ['items', item.id], ['inventory_movements', movement.id], ['messages', messageId]
+  ]) {
+    const [[row]] = await pool.execute(`SELECT department_id FROM ${table} WHERE id = ?`, [id]);
+    assert.ok(row, `${table} row ${id} must not be deleted.`);
+    assert.equal(Number(row.department_id), destination.id, `${table} row ${id} must be reassigned.`);
+  }
+  const [[audit]] = await pool.execute(
+    "SELECT id, details FROM audit_logs WHERE user_id = ? AND action = 'department_deleted' AND entity_type = 'department' AND entity_id = ? LIMIT 1",
+    [admin.id, String(source.id)]
+  );
+  assert.ok(audit, 'A department deletion must be recorded in the audit log.');
+  assert.equal(JSON.parse(audit.details).reassignedTo, destination.id);
+
+  const empty = await createDepartment(`QA Delete Empty ${stamp}`);
+  const emptyDelete = await request(`/admin/departments/${empty.id}`, { method: 'DELETE', user: admin, body: {} });
+  assert.equal(emptyDelete.response.status, 200, emptyDelete.data.message);
+  assert.equal(emptyDelete.data.reassigned, null);
+});
+
 function futureBusinessDate() {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + 7);
@@ -1328,16 +1501,20 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
   }
 
   try {
-    const initialConfig = await request('/email/config', { user: users.procurement });
-    assert.equal(initialConfig.response.status, 200);
-    assert.equal(initialConfig.data.config.configured, false);
-    assert.ok(initialConfig.data.config.missing.includes('SMTP_HOST'));
-
     const unauthenticatedWebhook = await fetch(`${baseUrl}/email/webhooks/generic`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'delivered', providerMessageId: 'fake' })
     });
     assert.equal(unauthenticatedWebhook.status, 401);
+
+    for (const endpoint of [
+      { path: '/email/config', method: 'GET' },
+      { path: '/email/verify', method: 'POST' },
+      { path: '/email/test', method: 'POST' }
+    ]) {
+      const removed = await request(endpoint.path, { method: endpoint.method, user: users.procurement });
+      assert.equal(removed.response.status, 404, `${endpoint.path} must no longer be exposed`);
+    }
 
     relay = await startTestSmtp();
     process.env.SMTP_HOST = '127.0.0.1';
@@ -1350,20 +1527,6 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     process.env.SMTP_FROM_NAME = 'Hope Haven QA';
     process.env.APP_BASE_URL = 'http://localhost:5173';
     process.env.EMAIL_WEBHOOK_SECRET = `qa-webhook-secret-${stamp}`;
-
-    const configured = await request('/email/config', { user: users.procurement });
-    assert.equal(configured.data.config.configured, true);
-    assert.deepEqual(configured.data.config.missing, []);
-    assert.ok(!JSON.stringify(configured.data.config).includes(process.env.SMTP_PASS));
-
-    const verified = await request('/email/verify', { method: 'POST', user: users.procurement });
-    assert.equal(verified.response.status, 200, verified.data.message);
-
-    const testMail = await request('/email/test', { method: 'POST', user: users.procurement });
-    assert.equal(testMail.response.status, 200, testMail.data.message);
-    assert.equal(testMail.data.result.status, 'Accepted by Email Provider');
-    assert.ok(testMail.data.result.providerMessageId);
-    assert.equal(relay.messages.length, 1);
 
     const supplierA = await makeSupplier(`QA Email Supplier A ${stamp}`, `qa.supplier.a.${stamp}@example.test`);
     const supplierB = await makeSupplier(`QA Email Supplier B ${stamp}`, `qa.supplier.b.${stamp}@example.test`);
@@ -1384,7 +1547,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     createdRfqIds.push(rfq.data.id);
     assert.equal(rfq.data.emailDelivery.accepted, 3);
     assert.equal(rfq.data.emailDelivery.failed, 0);
-    assert.equal(relay.messages.length, 4);
+    assert.equal(relay.messages.length, 3);
 
     const duplicate = await request('/rfqs', {
       method: 'POST', user: users.procurement,
@@ -1398,7 +1561,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.equal(duplicate.response.status, 200);
     assert.equal(duplicate.data.duplicate, true);
     assert.equal(duplicate.data.id, rfq.data.id);
-    assert.equal(relay.messages.length, 4, 'a duplicate submission must not send another RFQ email');
+    assert.equal(relay.messages.length, 3, 'a duplicate submission must not send another RFQ email');
 
     const deliveryResponse = await request(`/rfqs/${rfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(deliveryResponse.response.status, 200);
@@ -1406,7 +1569,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.equal(deliveryResponse.data.summary['Accepted by Email Provider'], 3);
     assert.equal(deliveryResponse.data.summary.Delivered, 0, 'SMTP acceptance must never be reported as Delivered');
     const tokens = [];
-    relay.messages.slice(1).forEach((message, index) => {
+    relay.messages.forEach((message, index) => {
       const supplier = [supplierA, supplierB, supplierC][index];
       const links = linksIn(message);
       // Multipart HTML + plain text legitimately repeat the same URL.
@@ -1441,7 +1604,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
 
     const noFailedRetry = await request(`/rfqs/${rfq.data.id}/emails/retry-failed`, { method: 'POST', user: users.procurement });
     assert.equal(noFailedRetry.data.result.accepted, 0, 'retry must not resend to Suppliers already accepted');
-    assert.equal(relay.messages.length, 4);
+    assert.equal(relay.messages.length, 3);
 
     const singleSupplier = await makeSupplier(`QA Email Single Supplier ${stamp}`, `qa.supplier.single.${stamp}@example.test`);
     const singleRequisition = await forwardedRequest('EMAIL1');
@@ -1453,12 +1616,12 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     createdRfqIds.push(singleRfq.data.id);
     assert.equal(singleRfq.data.emailDelivery.accepted, 1);
     assert.equal(singleRfq.data.emailDelivery.failed, 0);
-    assert.equal(relay.messages.length, 5);
+    assert.equal(relay.messages.length, 4);
     const singleDeliveries = await request(`/rfqs/${singleRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(singleDeliveries.data.deliveries.length, 1);
     assert.equal(singleDeliveries.data.deliveries[0].recipientEmail, singleSupplier.email);
     assert.equal(singleDeliveries.data.deliveries[0].status, 'Accepted by Email Provider');
-    assert.equal(linksIn(relay.messages[4]).length > 0, true);
+    assert.equal(linksIn(relay.messages[3]).length > 0, true);
 
     const invalidSupplier = await makeSupplier(`QA Invalid Email ${stamp}`, 'not-an-email');
     const validSupplier = await makeSupplier(`QA Valid Email ${stamp}`, `qa.valid.${stamp}@example.test`);
@@ -1470,7 +1633,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.equal(invalidRfq.response.status, 201, invalidRfq.data.message);
     createdRfqIds.push(invalidRfq.data.id);
     assert.equal(invalidRfq.data.emailDelivery.failed, 1);
-    assert.equal(relay.messages.length, 6);
+    assert.equal(relay.messages.length, 5);
     const invalidDeliveries = await request(`/rfqs/${invalidRfq.data.id}/email-deliveries`, { user: users.procurement });
     const invalidRecord = invalidDeliveries.data.deliveries.find((row) => row.supplierId === invalidSupplier.id);
     assert.equal(invalidRecord.status, 'Failed');
@@ -1491,7 +1654,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.equal(failedRfq.response.status, 201, failedRfq.data.message);
     createdRfqIds.push(failedRfq.data.id);
     assert.equal(failedRfq.data.emailDelivery.failed, 2);
-    assert.equal(relay.messages.length, 6, 'a provider failure must not produce a queued message');
+    assert.equal(relay.messages.length, 5, 'a provider failure must not produce a queued message');
     const failedDeliveries = await request(`/rfqs/${failedRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(failedDeliveries.data.summary.Failed, 2);
     assert.ok(failedDeliveries.data.deliveries.every((row) => row.errorDetails?.message));
