@@ -80,10 +80,7 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
     onAward: actions.onAward,
     onLoadEmailDeliveries: actions.onLoadEmailDeliveries,
     onRetryFailedEmails: actions.onRetryFailedEmails,
-    onResendRfqEmail: actions.onResendRfqEmail,
-    onEmailConfig: actions.onEmailConfig,
-    onVerifyEmail: actions.onVerifyEmail,
-    onTestEmail: actions.onTestEmail
+    onResendRfqEmail: actions.onResendRfqEmail
   };
 
   return <div className="space-y-5">

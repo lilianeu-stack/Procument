@@ -58,7 +58,7 @@ const DESCRIPTIONS = {
   password_min_length: 'Minimum length for newly created or reset passwords.',
   session_timeout_minutes: 'Informational session policy; authentication middleware applies the existing JWT lifetime.',
   maintenance_mode: 'Reserved control. It is persisted and audited but does not bypass authentication or existing routes.',
-  email_notifications: 'Enabled only after email integration is configured and verified.'
+  email_notifications: 'Controls email notifications when SMTP is configured through the backend environment.'
 };
 
 function Field({ name, value, onChange }) {

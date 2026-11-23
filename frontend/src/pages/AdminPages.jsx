@@ -8,6 +8,7 @@ import PageCard, { EmptyState, ErrorMessage } from '../components/ui/PageCard.js
 import Modal from '../components/ui/Modal.jsx';
 import { dateLabel } from '../utils/format.js';
 import { csvRowsToUsers, downloadCsv, parseCsv } from '../utils/csv.js';
+import { departmentDependencyText, requiresDepartmentReassignment } from '../utils/deletePolicy.js';
 
 const ROLES = ['supervisor', 'requestor', 'approver', 'procurement', 'committee', 'storekeeper', 'finance', 'admin'];
 const ROLE_LABELS = {
@@ -126,15 +127,17 @@ function DepartmentForm({ initial, onClose, onSubmit }) {
   </Modal>;
 }
 
-function ConfirmDialog({ title, message, confirmLabel = 'Delete', onClose, onConfirm, busy, children }) {
-  return <Modal title={title} onClose={onClose}>
-    <div className="space-y-4">
+function ConfirmDialog({ title, message, confirmLabel = 'Confirm Delete', onClose, onConfirm, busy, error, disabled = false, children }) {
+  return <Modal title={title} onClose={onClose} dismissible={!busy}>
+    <div role="alertdialog" aria-modal="true" className="space-y-4">
       <p className="text-sm text-slate-600">{message}</p>
       {children}
-      <ErrorMessage />
+      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-        <button disabled={busy} onClick={onConfirm} className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Working…' : confirmLabel}</button>
+        <button type="button" disabled={busy} onClick={onClose} aria-label="Cancel deletion" className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <button type="button" disabled={busy || disabled} onClick={onConfirm} aria-label={confirmLabel} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+          {busy && <LoaderCircle size={14} className="animate-spin" />}{busy ? 'Working…' : confirmLabel}
+        </button>
       </div>
     </div>
   </Modal>;
@@ -307,11 +310,15 @@ export function UsersPage({
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedDepartmentForEdit, setSelectedDepartmentForEdit] = useState(null);
   const [selectedDepartmentForDelete, setSelectedDepartmentForDelete] = useState(null);
+  const [requestedActive, setRequestedActive] = useState(null);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
   const [reassignTo, setReassignTo] = useState('');
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [dialogBusy, setDialogBusy] = useState(false);
+  const [dialogError, setDialogError] = useState('');
   const [details, setDetails] = useState(null);
   const [menuFor, setMenuFor] = useState(null);
   const [departmentUsers, setDepartmentUsers] = useState(null);
@@ -320,6 +327,7 @@ export function UsersPage({
   const [departmentError, setDepartmentError] = useState('');
   const [pageIndex, setPageIndex] = useState(1);
   const requestSequence = useRef(0);
+  const dialogSubmitting = useRef(false);
 
   const isAllUsersView = selectedDepartment === 'all';
   const isDepartmentView = typeof selectedDepartment === 'number';
@@ -327,22 +335,74 @@ export function UsersPage({
     ? (departmentMeta || departments.find((department) => department.id === selectedDepartment))
     : null;
   const sourceUsers = isAllUsersView ? users : (departmentUsers ?? []);
-  const visibleUsers = sourceUsers
+  const statusMatches = (person) => statusFilter === 'all'
+    || (statusFilter === 'active' ? person.active : !person.active);
+  const statusUsers = sourceUsers.filter(statusMatches);
+  const visibleUsers = statusUsers
     .filter((person) => (!roleFilter || person.role === roleFilter))
     .filter((person) => `${person.name} ${person.email} ${person.role} ${person.department} ${person.phone || ''}`.toLowerCase().includes(search.toLowerCase()));
   const totalPages = Math.max(1, Math.ceil(visibleUsers.length / USERS_PAGE_SIZE));
   const safePage = Math.min(pageIndex, totalPages);
   const startIndex = (safePage - 1) * USERS_PAGE_SIZE;
   const pagedUsers = visibleUsers.slice(startIndex, startIndex + USERS_PAGE_SIZE);
-  const totalAccounts = isAllUsersView ? users.length : (departmentMeta?.userCount ?? activeDepartment?.userCount ?? 0);
+  const activeAccountCount = users.filter((person) => person.active).length;
+  const totalAccounts = isAllUsersView
+    ? (statusFilter === 'all' ? users.length : statusUsers.length)
+    : (departmentUsers ? statusUsers.length : (departmentMeta?.userCount ?? activeDepartment?.userCount ?? 0));
 
   function notify(message, type = 'success') { setNotice({ message, type }); }
-  function closeDialog() {
+  function closeDialog(force = false) {
+    if (dialogSubmitting.current && !force) return;
     setDialog('');
+    setDialogError('');
     setSelectedUser(null);
     setSelectedDepartmentForEdit(null);
     setSelectedDepartmentForDelete(null);
+    setRequestedActive(null);
     setReassignTo('');
+  }
+
+  // Confirmation dialogs use their own single-flight guard so a double click
+  // cannot issue two DELETE/PATCH requests before React re-renders.
+  async function runConfirmed(action, successMessage, onSuccess) {
+    if (dialogSubmitting.current) return;
+    dialogSubmitting.current = true;
+    setDialogBusy(true);
+    setDialogError('');
+    try {
+      const result = await action();
+      notify(successMessage);
+      if (onSuccess) onSuccess(result);
+      closeDialog(true);
+    } catch (exception) {
+      const message = exception?.message || 'The action could not be completed.';
+      setDialogError(message);
+      notify(message, 'error');
+    } finally {
+      dialogSubmitting.current = false;
+      setDialogBusy(false);
+    }
+  }
+
+  function updateDepartmentUser(userId, changes) {
+    setDepartmentUsers((current) => current
+      ? current.map((person) => person.id === userId ? { ...person, ...changes } : person)
+      : current);
+    if (typeof changes.active === 'boolean') {
+      setDepartmentMeta((current) => current ? {
+        ...current,
+        activeUserCount: Math.max(0, Number(current.activeUserCount || 0) + (changes.active ? 1 : -1))
+      } : current);
+    }
+  }
+
+  function removeDepartmentUser(userId) {
+    setDepartmentUsers((current) => current ? current.filter((person) => person.id !== userId) : current);
+    setDepartmentMeta((current) => current ? {
+      ...current,
+      userCount: Math.max(0, Number(current.userCount || 0) - 1),
+      activeUserCount: Math.max(0, Number(current.activeUserCount || 0) - 1)
+    } : current);
   }
 
   function resetView() {
@@ -354,6 +414,7 @@ export function UsersPage({
     setDepartmentLoading(false);
     setSearch('');
     setRoleFilter('');
+    setStatusFilter('active');
     setPageIndex(1);
     setMenuFor(null);
   }
@@ -363,6 +424,7 @@ export function UsersPage({
     setSelectedDepartment(id);
     setSearch('');
     setRoleFilter('');
+    setStatusFilter('active');
     setPageIndex(1);
     setMenuFor(null);
     setDepartmentUsers(null);
@@ -415,7 +477,7 @@ export function UsersPage({
 
     {selectedDepartment === null ? <PageCard
       title="Users Management"
-      description={`${departments.length} departments · ${users.length} total accounts`}
+      description={`${departments.length} departments · ${activeAccountCount} active accounts`}
       action={<div className="flex flex-wrap gap-2">
         <button onClick={() => setDialog('department')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand"><Building2 size={14} />Add department</button>
         <button onClick={() => setDialog('user')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add User</button>
@@ -425,7 +487,7 @@ export function UsersPage({
       <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
         <button onClick={() => openDepartment('all')} className="rounded-xl border border-brand/20 bg-brand/5 p-4 text-left shadow-card transition hover:border-brand">
           <div className="flex items-center justify-between"><span className="text-sm font-extrabold text-brand">All Users</span><Users size={18} className="text-brand" /></div>
-          <p className="mt-2 text-xs text-muted">{users.length} accounts across every department</p>
+          <p className="mt-2 text-xs text-muted">{activeAccountCount} active accounts across every department</p>
           <span className="mt-4 inline-block text-xs font-bold text-brand">Manage all users →</span>
         </button>
         {departments.map((department) => <div
@@ -437,13 +499,13 @@ export function UsersPage({
           className="flex cursor-pointer flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-card transition hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
         >
           <div className="flex items-start justify-between gap-2">
-            <div><h3 className="text-sm font-extrabold">{department.name}</h3><p className="mt-1 text-xs text-muted">{department.userCount} user(s)</p></div>
+            <div><h3 className="text-sm font-extrabold">{department.name}</h3><p className="mt-1 text-xs text-muted">{department.activeUserCount ?? department.userCount} active user(s)</p></div>
             <Building2 size={18} className="text-muted" />
           </div>
           <p className="mt-2 min-h-8 text-xs text-slate-500">{department.description || 'No description provided.'}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <button onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">Manage users</button>
-            <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold text-red-600"><Trash2 size={14} /></button>
+            <button disabled={busy || dialogBusy} onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setReassignTo(''); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
             <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold"><Pencil size={14} /></button>
           </div>
         </div>)}
@@ -474,6 +536,7 @@ export function UsersPage({
             <input value={search} onChange={(event) => { setSearch(event.target.value); setPageIndex(1); }} placeholder="Search name, email, role…" className="field w-full pl-8 sm:w-64" />
           </div>
           <select value={roleFilter} onChange={(event) => { setRoleFilter(event.target.value); setPageIndex(1); }} aria-label="Filter by role" className="field w-40"><option value="">All roles</option>{ROLES.map((role) => <option key={role} value={role}>{role}</option>)}</select>
+          <select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPageIndex(1); }} aria-label="Filter by status" className="field w-40"><option value="active">Active accounts</option><option value="inactive">Inactive accounts</option><option value="all">All accounts</option></select>
         </div>
         <p className="text-xs text-muted">{departmentLoading ? 'Loading users…' : `${visibleUsers.length} account(s) shown · page ${safePage} of ${totalPages}`}</p>
       </div>
@@ -500,8 +563,8 @@ export function UsersPage({
               <div className="relative">
                 <button onClick={() => setMenuFor(menuFor === person.id ? null : person.id)} title="More actions" aria-label="More actions" className="rounded p-1.5 hover:bg-slate-100"><MoreHorizontal size={15} /></button>
                 {menuFor === person.id && <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-100 bg-white p-1 shadow-lg">
-                  <button disabled={busy} onClick={async () => { setMenuFor(null); try { await run(() => onToggleUser(person.id, !person.active), `Account ${person.active ? 'deactivated' : 'activated'}.`); refreshCurrentDepartment(); } catch {} }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-slate-50"><Ban size={13} />{person.active ? 'Deactivate' : 'Activate'}</button>
-                  <button onClick={() => { setMenuFor(null); setSelectedUser(person); setDialog('delete-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-red-600 hover:bg-red-50"><Trash2 size={13} />Delete account</button>
+                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setRequestedActive(!person.active); setDialog('toggle-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-50"><Ban size={13} />{person.active ? 'Deactivate' : 'Activate'}</button>
+                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setDialog('delete-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={13} />Delete account</button>
                 </div>}
               </div>
             </div></td>
@@ -533,18 +596,75 @@ export function UsersPage({
       refreshCurrentDepartment();
       return result;
     }} onClose={closeDialog} />}
-    {dialog === 'delete-user' && <ConfirmDialog title="Delete user account" message={`Delete ${selectedUser.name} (${selectedUser.email})? The account will be deactivated so historical transactions and audit records remain intact.`} confirmLabel="Deactivate account" busy={busy} onClose={closeDialog} onConfirm={async () => {
-      try { await run(() => onDeleteUser(selectedUser.id), 'Account deactivated.'); closeDialog(); refreshCurrentDepartment(); } catch {}
-    }} />}
-    {dialog === 'delete-department' && <ConfirmDialog title="Delete department" message={`Delete ${selectedDepartmentForDelete.name}? This cannot be undone.`} confirmLabel="Delete department" busy={busy} onClose={closeDialog} onConfirm={async () => {
-      try {
-        await run(() => onDeleteDepartment(selectedDepartmentForDelete.id, reassignTo ? Number(reassignTo) : null), 'Department deleted.');
-        if (selectedDepartment === selectedDepartmentForDelete.id) resetView();
-        closeDialog();
-      } catch {}
-    }}>
-      {Number(selectedDepartmentForDelete.userCount || 0) + Number(selectedDepartmentForDelete.requisitionCount || 0) + Number(selectedDepartmentForDelete.storeRequestCount || 0) > 0 && <label className="block text-xs font-bold">Reassign existing users and records to<select value={reassignTo} onChange={(event) => setReassignTo(event.target.value)} className="field"><option value="">Choose a department…</option>{departments.filter((department) => department.id !== selectedDepartmentForDelete.id).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>}
-      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />Users and historical records are never deleted; they are reassigned when required.</p>
+    {dialog === 'toggle-user' && selectedUser && <ConfirmDialog
+      title={`${requestedActive ? 'Activate' : 'Deactivate'} account · ${selectedUser.name}`}
+      message={`${requestedActive ? 'Activate' : 'Deactivate'} ${selectedUser.name} (${selectedUser.email})? Confirm only if this status change is intended.`}
+      confirmLabel={requestedActive ? 'Confirm Activate' : 'Confirm Deactivate'}
+      busy={dialogBusy}
+      error={dialogError}
+      onClose={() => closeDialog()}
+      onConfirm={() => {
+        const person = selectedUser;
+        const nextActive = requestedActive;
+        return runConfirmed(
+          () => onToggleUser(person.id, nextActive),
+          `Account ${nextActive ? 'activated' : 'deactivated'}.`,
+          () => {
+            updateDepartmentUser(person.id, { active: nextActive });
+            refreshCurrentDepartment();
+          }
+        );
+      }}
+    >
+      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />{requestedActive ? 'The account will be able to sign in again. Activation is blocked if this Department already has an active Supervisor.' : 'The account will no longer be able to sign in. This status change is reversible; historical records remain intact.'}</p>
+    </ConfirmDialog>}
+    {dialog === 'delete-user' && selectedUser && <ConfirmDialog
+      title={`Delete account · ${selectedUser.name}`}
+      message={`Delete ${selectedUser.name} (${selectedUser.email})? This action may be irreversible from this screen. The account will be deactivated instead of permanently removed so historical transactions and audit records remain intact.`}
+      confirmLabel="Confirm Delete"
+      busy={dialogBusy}
+      error={dialogError}
+      onClose={() => closeDialog()}
+      onConfirm={() => {
+        const person = selectedUser;
+        return runConfirmed(
+          () => onDeleteUser(person.id),
+          'Account deactivated.',
+          () => {
+            removeDepartmentUser(person.id);
+            refreshCurrentDepartment();
+          }
+        );
+      }}
+    >
+      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />The record will disappear from this list immediately after the server confirms the deactivation. Purchase, approval, stock, and audit history is preserved.</p>
+    </ConfirmDialog>}
+    {dialog === 'delete-department' && selectedDepartmentForDelete && <ConfirmDialog
+      title={`Delete department · ${selectedDepartmentForDelete.name}`}
+      message={`Delete ${selectedDepartmentForDelete.name}? This action may be irreversible and must be confirmed explicitly.`}
+      confirmLabel="Confirm Delete"
+      busy={dialogBusy}
+      error={dialogError}
+      disabled={requiresDepartmentReassignment(selectedDepartmentForDelete) && !reassignTo}
+      onClose={() => closeDialog()}
+      onConfirm={() => {
+        const department = selectedDepartmentForDelete;
+        return runConfirmed(
+          () => onDeleteDepartment(department.id, reassignTo ? Number(reassignTo) : null),
+          'Department deleted.',
+          () => {
+            if (selectedDepartment === department.id) resetView();
+          }
+        );
+      }}
+    >
+      {requiresDepartmentReassignment(selectedDepartmentForDelete) && <label className="block text-xs font-bold">Reassign users and historical records to
+        <select value={reassignTo} onChange={(event) => setReassignTo(event.target.value)} className="field" aria-label="Reassign department records to">
+          <option value="">Choose a department…</option>
+          {departments.filter((department) => department.id !== selectedDepartmentForDelete.id).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+        </select>
+      </label>}
+      <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{departmentDependencyText(selectedDepartmentForDelete)} Choose a destination department to enable deletion.</span></p>
     </ConfirmDialog>}
   </>;
 }

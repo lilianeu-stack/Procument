@@ -64,9 +64,6 @@ export default function PageContent({
       onLoadEmailDeliveries={actions.onLoadEmailDeliveries}
       onRetryFailedEmails={actions.onRetryFailedEmails}
       onResendRfqEmail={actions.onResendRfqEmail}
-      onEmailConfig={actions.onEmailConfig}
-      onVerifyEmail={actions.onVerifyEmail}
-      onTestEmail={actions.onTestEmail}
     />;
   } else if (page === 'Purchase orders') {
     content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO} />;

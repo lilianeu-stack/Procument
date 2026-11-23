@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mail, Plus, RefreshCw, Send, ShieldCheck } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+import { Plus, RefreshCw, Send } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
@@ -64,12 +64,12 @@ function statusClass(status) {
   return 'bg-slate-100 text-slate-600';
 }
 
-function emailResultNotice(result, config = null) {
+function emailResultNotice(result) {
   if (!result) return 'RFQ created.';
   const accepted = Number(result.accepted) || 0;
   const failed = Number(result.failed) || 0;
-  if (config && !config.configured) {
-    return `RFQ created, but no Supplier email was sent. Email delivery is disabled: missing ${(config.missing || []).join(', ') || 'SMTP configuration'}. Configure it and retry failed emails.`;
+  if (Number(result.total) === 0 && accepted === 0 && failed === 0) {
+    return 'RFQ created. No Supplier invitations were selected, so no email was sent.';
   }
   if (accepted > 0 && failed === 0) {
     return `RFQ created. RFQ email accepted by the email provider (${accepted}). Provider acceptance is not confirmed inbox delivery.`;
@@ -84,7 +84,7 @@ export default function RfqsPage({
   rfqs = [], requisitions = [], suppliers = [], quotations = [], user = {}, query = {},
   initialRequisitionId, autoOpenCreate = false,
   onCreate, onLoadQuotes, onQuote, onAward, onLoadEmailDeliveries,
-  onRetryFailedEmails, onResendRfqEmail, onEmailConfig, onVerifyEmail, onTestEmail
+  onRetryFailedEmails, onResendRfqEmail
 }) {
   const sendingRfq = useRef(false);
   const [createOpen, setCreateOpen] = useState(autoOpenCreate || Boolean(query.requisition));
@@ -92,11 +92,9 @@ export default function RfqsPage({
   const [activeRfq, setActiveRfq] = useState(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [emailConfig, setEmailConfig] = useState(null);
   const [emailData, setEmailData] = useState(null);
   const [emailLoading, setEmailLoading] = useState(false);
   const [emailBusy, setEmailBusy] = useState(false);
-  const [configMessage, setConfigMessage] = useState('');
   const canCreate = ['admin', 'procurement'].includes(user.role);
   const canEvaluate = ['admin', 'committee', 'procurement'].includes(user.role);
   const canAward = ['admin', 'committee'].includes(user.role);
@@ -109,14 +107,6 @@ export default function RfqsPage({
     finally { setEmailLoading(false); }
   }, [onLoadEmailDeliveries]);
 
-  const loadConfig = useCallback(async () => {
-    if (!onEmailConfig) return;
-    try { setEmailConfig((await onEmailConfig()).config); }
-    catch { setEmailConfig(null); }
-  }, [onEmailConfig]);
-
-  useEffect(() => { if (canCreate) loadConfig(); }, [canCreate, loadConfig]);
-
   async function createRfq(form) {
     if (sendingRfq.current) throw new Error('This RFQ is already being sent. Please wait.');
     sendingRfq.current = true;
@@ -124,7 +114,7 @@ export default function RfqsPage({
       const result = await onCreate(form);
       setNotice(result.duplicate
         ? 'This RFQ was already submitted. Existing email delivery statuses are shown below; no duplicate was created.'
-        : emailResultNotice(result.emailDelivery, emailConfig));
+        : emailResultNotice(result.emailDelivery));
       setCreateOpen(false);
       if (result.id) {
         setActiveRfq({ id: result.id, reference: result.reference, status: 'Sent' });
@@ -150,7 +140,7 @@ export default function RfqsPage({
     setEmailBusy(true); setError('');
     try {
       const result = await onRetryFailedEmails(activeRfq.id);
-      setNotice(emailResultNotice(result.result, result.config || emailConfig));
+      setNotice(emailResultNotice(result.result));
       setEmailData(result);
     } catch (exception) { setError(exception.message); }
     finally { setEmailBusy(false); }
@@ -162,28 +152,9 @@ export default function RfqsPage({
     setEmailBusy(true); setError('');
     try {
       const result = await onResendRfqEmail(activeRfq.id, delivery.id);
-      setNotice(`Link resent to ${delivery.recipientEmail}. ${emailResultNotice(result.result, result.config || emailConfig)}`);
+      setNotice(`Link resent to ${delivery.recipientEmail}. ${emailResultNotice(result.result)}`);
       setEmailData(result);
     } catch (exception) { setError(exception.message); }
-    finally { setEmailBusy(false); }
-  }
-
-  async function verifyEmail() {
-    setConfigMessage(''); setEmailBusy(true);
-    try {
-      const result = await onVerifyEmail();
-      setConfigMessage(result.message || 'SMTP connection verified.');
-      await loadConfig();
-    } catch (exception) { setConfigMessage(exception.message || 'SMTP verification failed.'); }
-    finally { setEmailBusy(false); }
-  }
-
-  async function testEmail() {
-    setConfigMessage(''); setEmailBusy(true);
-    try {
-      const result = await onTestEmail();
-      setConfigMessage(result.message || 'Test email accepted by the provider.');
-    } catch (exception) { setConfigMessage(exception.message || 'Test email failed.'); }
     finally { setEmailBusy(false); }
   }
 
@@ -199,21 +170,7 @@ export default function RfqsPage({
     {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">{notice}</div>}
     {error && <div className="mb-4"><ErrorMessage>{error}</ErrorMessage></div>}
 
-    {canCreate && <PageCard title="Email delivery configuration" description="A truthful status is recorded for every RFQ invitation">
-      {emailConfig && !emailConfig.configured && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-700">
-        <strong>Email delivery is disabled.</strong> Missing environment variable(s): {emailConfig.missing.join(', ')}. RFQs can still be created, but Supplier invitations will be recorded as failed until these are configured.
-      </div>}
-      {emailConfig?.configured && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">
-        <strong>SMTP configured.</strong> Sender: {emailConfig.from} · Port {emailConfig.port} · {emailConfig.secure ? 'TLS' : 'STARTTLS'} · Delivery webhook {emailConfig.webhookConfigured ? 'configured' : 'not configured'}.
-      </div>}
-      {configMessage && <div className="mt-3 rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-700">{configMessage}</div>}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button type="button" disabled={emailBusy} onClick={verifyEmail} className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-50"><ShieldCheck size={13} />Verify connection</button>
-        <button type="button" disabled={emailBusy} onClick={testEmail} className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-50"><Mail size={13} />Send test to my email</button>
-      </div>
-    </PageCard>}
-
-    <div className="mt-5"><PageCard title="Request for quotations" description={`${rfqs.length} RFQs`}
+    <div><PageCard title="Request for quotations" description={`${rfqs.length} RFQs`}
       action={canCreate && <button onClick={() => setCreateOpen(true)} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Create RFQ</button>}>
       {rfqs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[780px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['RFQ', 'Requisition', 'Due date', 'Suppliers', 'Quotes', 'Status', 'Email status', ''].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{rfqs.map((rfq) => <tr key={rfq.id}>
         <td className="px-5 py-4 font-bold">{rfq.reference}</td>
