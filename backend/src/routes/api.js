@@ -7,6 +7,7 @@ import { allowRoles, authenticate } from '../middleware/auth.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { withPortalIdentity } from '../utils/roles.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
+import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
 import admin from './admin.js';
 import exportsRouter from './exports.js';
 import stockkeeper from './stockkeeper.js';
@@ -95,29 +96,190 @@ router.use('/exports', exportsRouter);
 
 router.get('/dashboard', async (req, res, next) => {
   try {
-    const [[requisitionStats]] = await pool.query(
-      `SELECT COUNT(*) AS total,
-        SUM(status IN ('Pending', 'Pending Supervisor Approval')) AS pending,
-        SUM(status IN ('Approved', 'Approved by Supervisor', 'Forwarded to Procurement')) AS approved,
-        SUM(status = 'Forwarded to Procurement') AS forwarded,
-        SUM(status = 'Under Procurement Review') AS underReview
-       FROM requisitions`
-    );
-    const [[inventoryStats]] = await pool.query(
-      'SELECT COUNT(*) AS items, SUM(quantity <= reorder_level) AS lowStock FROM items'
-    );
-    const [recent] = await pool.query(
-      `SELECT r.id, r.reference, r.status, r.created_at AS createdAt, u.name AS requester,
-        d.name AS department,
-        COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS total
-       FROM requisitions r
-       JOIN users u ON u.id = r.requester_id
-       LEFT JOIN departments d ON d.id = r.department_id
-       LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
-       GROUP BY r.id ORDER BY r.created_at DESC LIMIT 6`
-    );
-    const [[supplierStats]] = await pool.query("SELECT COUNT(*) AS active FROM suppliers WHERE status = 'Active'");
-    return res.json({ requisitions: requisitionStats, inventory: inventoryStats, suppliers: supplierStats, recent });
+    const quotationActivity = ['admin', 'procurement'].includes(req.user.role)
+      ? `UNION ALL
+         SELECT CONCAT('quotation-', response.id) AS id, 'quotation' AS kind,
+           'submitted' AS action, p.reference AS reference, response.status AS status,
+           response.supplier_name AS actor, response.submitted_at AS createdAt,
+           NULL AS itemName, NULL AS quantity
+          FROM purchase_order_pricing_responses response
+          JOIN purchase_orders p ON p.id = response.purchase_order_id
+         WHERE response.status = 'Submitted' AND response.submitted_at IS NOT NULL`
+      : '';
+    const [
+      [requestStatusRows],
+      [purchaseOrderStatusRows],
+      [[inventoryStats]],
+      [[stockStats]],
+      [[supplierStats]],
+      [recent],
+      [recentPurchaseOrders],
+      [recentSuppliers],
+      [monthlyActivityRows],
+      [recentActivities]
+    ] = await Promise.all([
+      pool.query('SELECT status, COUNT(*) AS statusCount FROM requisitions GROUP BY status'),
+      pool.query('SELECT status, COUNT(*) AS statusCount FROM purchase_orders GROUP BY status'),
+      pool.query(
+        `SELECT COUNT(*) AS items, COALESCE(SUM(quantity <= reorder_level), 0) AS lowStock,
+          COALESCE(SUM(quantity), 0) AS available
+         FROM items`
+      ),
+      pool.query(
+        `SELECT COALESCE(SUM(CASE WHEN direction = 'In' THEN quantity ELSE 0 END), 0) AS totalStockIn,
+          COALESCE(SUM(CASE WHEN direction = 'Out' THEN quantity ELSE 0 END), 0) AS totalStockOut
+         FROM inventory_movements`
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS total,
+          COALESCE(SUM(status = 'Active'), 0) AS active,
+          COALESCE(SUM(status = 'Inactive'), 0) AS inactive
+         FROM suppliers`
+      ),
+      pool.query(
+        `SELECT r.id, r.reference, r.status, r.created_at AS createdAt, u.name AS requester,
+          d.name AS department,
+          COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS total
+         FROM requisitions r
+         JOIN users u ON u.id = r.requester_id
+         LEFT JOIN departments d ON d.id = r.department_id
+         LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
+         GROUP BY r.id ORDER BY r.created_at DESC LIMIT 6`
+      ),
+      pool.query(
+        `SELECT p.id, p.reference, p.status, p.created_at AS createdAt, p.total,
+          s.name AS supplier, r.id AS requisitionId, r.reference AS requisition
+         FROM purchase_orders p
+         LEFT JOIN suppliers s ON s.id = p.supplier_id
+         LEFT JOIN rfqs f ON f.id = p.rfq_id
+         LEFT JOIN requisitions r ON r.id = f.requisition_id
+         ORDER BY p.created_at DESC LIMIT 6`
+      ),
+      pool.query(
+        `SELECT id, name, status, created_at AS createdAt
+         FROM suppliers ORDER BY created_at DESC, id DESC LIMIT 5`
+      ),
+      pool.query(
+        `SELECT monthKey, SUM(requestCount) AS requests, SUM(purchaseOrderCount) AS purchaseOrders
+         FROM (
+           SELECT DATE_FORMAT(r.created_at, '%Y-%m') AS monthKey, COUNT(*) AS requestCount, 0 AS purchaseOrderCount
+           FROM requisitions r
+           WHERE r.created_at >= DATE_FORMAT(DATE_SUB(UTC_DATE(), INTERVAL 5 MONTH), '%Y-%m-01')
+           GROUP BY monthKey
+           UNION ALL
+           SELECT DATE_FORMAT(p.created_at, '%Y-%m') AS monthKey, 0 AS requestCount, COUNT(*) AS purchaseOrderCount
+           FROM purchase_orders p
+           WHERE p.created_at >= DATE_FORMAT(DATE_SUB(UTC_DATE(), INTERVAL 5 MONTH), '%Y-%m-01')
+           GROUP BY monthKey
+         ) activity
+         GROUP BY monthKey ORDER BY monthKey`
+      ),
+      pool.query(
+        `SELECT CONCAT('request-', activity.id) AS id, 'request' AS kind,
+          activity.action, r.reference AS reference, COALESCE(activity.new_status, r.status) AS status,
+          u.name AS actor, activity.created_at AS createdAt, NULL AS itemName, NULL AS quantity
+         FROM requisition_activity activity
+         JOIN requisitions r ON r.id = activity.requisition_id
+         LEFT JOIN users u ON u.id = activity.user_id
+         UNION ALL
+         SELECT CONCAT('purchase-order-', audit.id) AS id, 'purchase-order' AS kind,
+          audit.action,
+          COALESCE(JSON_UNQUOTE(JSON_EXTRACT(audit.details, '$.reference')), audit.entity_id) AS reference,
+          COALESCE(audit.new_status, audit.previous_status) AS status,
+          u.name AS actor, audit.created_at AS createdAt, NULL AS itemName, NULL AS quantity
+         FROM audit_logs audit
+         LEFT JOIN users u ON u.id = audit.user_id
+         WHERE audit.entity_type = 'purchase_order'
+           AND audit.action IN ('created', 'approved', 'rejected')
+         UNION ALL
+         SELECT CONCAT('stock-', movement.id) AS id, 'stock' AS kind,
+          movement.direction AS action, movement.reference_no AS reference,
+          movement.movement_type AS status, u.name AS actor,
+          COALESCE(movement.movement_at, movement.created_at) AS createdAt,
+          item.name AS itemName, movement.quantity AS quantity
+         FROM inventory_movements movement
+         JOIN items item ON item.id = movement.item_id
+         LEFT JOIN users u ON u.id = movement.user_id
+         ${quotationActivity}
+         ORDER BY createdAt DESC LIMIT 10`
+      )
+    ]);
+
+    const requestStatuses = requestStatusRows.map((row) => ({
+      status: row.status,
+      count: Number(row.statusCount)
+    }));
+    const purchaseOrderStatuses = purchaseOrderStatusRows.map((row) => ({
+      status: row.status,
+      count: Number(row.statusCount)
+    }));
+    const countStatuses = (rows, statuses) => rows
+      .filter((row) => statuses.includes(row.status))
+      .reduce((total, row) => total + row.count, 0);
+    const requisitions = {
+      total: requestStatuses.reduce((total, row) => total + row.count, 0),
+      pending: countStatuses(requestStatuses, [
+        'Pending', 'Submitted', 'Pending Supervisor Approval', 'Information Required',
+        'Under Procurement Review', 'In procurement'
+      ]),
+      approved: countStatuses(requestStatuses, [
+        'Approved', 'Approved by Supervisor', 'Forwarded to Procurement',
+        'Procurement Approved', 'Processing', 'Completed'
+      ]),
+      rejected: countStatuses(requestStatuses, [
+        'Rejected', 'Rejected by Supervisor', 'Procurement Rejected'
+      ]),
+      forwarded: countStatuses(requestStatuses, ['Forwarded to Procurement']),
+      underReview: countStatuses(requestStatuses, ['Under Procurement Review']),
+      byStatus: requestStatuses
+    };
+    const purchaseOrders = {
+      total: purchaseOrderStatuses.reduce((total, row) => total + row.count, 0),
+      pending: countStatuses(purchaseOrderStatuses, ['Pending approval']),
+      approved: countStatuses(purchaseOrderStatuses, ['Approved', 'Partially received', 'Received']),
+      rejected: countStatuses(purchaseOrderStatuses, ['Rejected']),
+      byStatus: purchaseOrderStatuses
+    };
+    const currentDate = new Date();
+    const monthlyActivity = Array.from({ length: 6 }, (_value, index) => {
+      const monthDate = new Date(Date.UTC(
+        currentDate.getUTCFullYear(),
+        currentDate.getUTCMonth() - 5 + index,
+        1
+      ));
+      const monthKey = `${monthDate.getUTCFullYear()}-${String(monthDate.getUTCMonth() + 1).padStart(2, '0')}`;
+      const row = monthlyActivityRows.find((entry) => entry.monthKey === monthKey);
+      return {
+        monthKey,
+        month: monthDate.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+        requests: Number(row?.requests || 0),
+        purchaseOrders: Number(row?.purchaseOrders || 0)
+      };
+    });
+
+    return res.json({
+      requisitions,
+      purchaseOrders,
+      inventory: {
+        items: Number(inventoryStats.items),
+        lowStock: Number(inventoryStats.lowStock),
+        available: Number(inventoryStats.available)
+      },
+      stock: {
+        totalStockIn: Number(stockStats.totalStockIn),
+        totalStockOut: Number(stockStats.totalStockOut)
+      },
+      suppliers: {
+        total: Number(supplierStats.total),
+        active: Number(supplierStats.active),
+        inactive: Number(supplierStats.inactive)
+      },
+      recent,
+      recentPurchaseOrders,
+      recentSuppliers,
+      monthlyActivity,
+      recentActivities
+    });
   } catch (error) {
     return next(error);
   }
@@ -261,6 +423,7 @@ const RECEIVED_SORT_FIELDS = {
   submittedAt: 'q.submittedAt',
   forwardedAt: 'q.forwardedAt',
   total: 'q.total',
+  itemCount: 'q.itemCount',
   status: 'q.status'
 };
 
@@ -277,18 +440,17 @@ function receivedListQuery() {
       r.supervisor_id AS supervisorId, su.name AS supervisorName,
       r.forwarded_by_supervisor AS forwardedBySupervisor, fwd.name AS forwardedByName,
       fwd_d.name AS supervisorDepartment,
-      COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS total,
-      COUNT(DISTINCT ra.id) AS attachmentCount
+      (SELECT COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0)
+         FROM requisition_items ri WHERE ri.requisition_id = r.id) AS total,
+      (SELECT COUNT(*) FROM requisition_items ri WHERE ri.requisition_id = r.id) AS itemCount,
+      (SELECT COUNT(*) FROM requisition_attachments ra WHERE ra.requisition_id = r.id) AS attachmentCount
     FROM requisitions r
     JOIN users u ON u.id = r.requester_id
     LEFT JOIN departments d ON d.id = r.department_id
     LEFT JOIN users su ON su.id = r.supervisor_id
     LEFT JOIN users fwd ON fwd.id = r.forwarded_by_supervisor
     LEFT JOIN departments fwd_d ON fwd_d.id = fwd.department_id
-    LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
-    LEFT JOIN requisition_attachments ra ON ra.requisition_id = r.id
-    WHERE r.forwarded_by_supervisor IS NOT NULL AND r.forwarded_at IS NOT NULL
-    GROUP BY r.id`;
+    WHERE r.forwarded_by_supervisor IS NOT NULL AND r.forwarded_at IS NOT NULL`;
 }
 
 function mapReceivedRow(row) {
@@ -296,6 +458,7 @@ function mapReceivedRow(row) {
     ...row,
     title: row.title || `${row.reference} procurement request`,
     total: Number(row.total) || 0,
+    itemCount: Number(row.itemCount) || 0,
     attachmentCount: Number(row.attachmentCount) || 0,
     forwardedBySupervisor: row.forwardedBySupervisor == null ? null : Number(row.forwardedBySupervisor)
   };
@@ -320,10 +483,22 @@ router.get('/procurement/received-requests', allowRoles(...procurementRoles), as
       where.push('(q.reference LIKE ? OR q.title LIKE ? OR q.requester LIKE ? OR q.supervisorName LIKE ? OR q.department LIKE ? OR q.justification LIKE ?)');
       params.push(pattern, pattern, pattern, pattern, pattern, pattern);
     }
+    const reference = String(req.query.reference || '').trim().slice(0, 120);
+    if (reference) { where.push('q.reference LIKE ?'); params.push(`%${reference}%`); }
+    const requester = String(req.query.requester || '').trim().slice(0, 120);
+    if (requester) { where.push('q.requester LIKE ?'); params.push(`%${requester}%`); }
+    const departmentQuery = String(req.query.departmentQuery || '').trim().slice(0, 120);
+    if (departmentQuery) { where.push('q.department LIKE ?'); params.push(`%${departmentQuery}%`); }
     const department = String(req.query.department || '').trim().slice(0, 120);
     if (department) { where.push('q.department = ?'); params.push(department); }
     const status = String(req.query.status || '').trim().slice(0, 60);
     if (status) { where.push('q.status = ?'); params.push(status); }
+    const statusGroup = String(req.query.statusGroup || '').trim().slice(0, 40);
+    if (RECEIVED_STATUS_GROUPS[statusGroup]) {
+      const statuses = RECEIVED_STATUS_GROUPS[statusGroup];
+      where.push(`q.status IN (${statuses.map(() => '?').join(',')})`);
+      params.push(...statuses);
+    }
     const columns = {
       forwarded: 'q.forwardedAt', submitted: 'q.submittedAt',
       created: 'q.createdAt', approved: 'q.supervisorDecisionAt'
@@ -345,6 +520,32 @@ router.get('/procurement/received-requests', allowRoles(...procurementRoles), as
     return res.json({
       requisitions: rows.map(mapReceivedRow),
       pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) }
+    });
+  } catch (error) { return next(error); }
+});
+
+router.get('/procurement/received-requests/stats', allowRoles(...procurementRoles), async (_req, res, next) => {
+  try {
+    const groups = Object.entries(RECEIVED_STATUS_GROUPS);
+    const selects = groups.map(([key, statuses]) =>
+      `COALESCE(SUM(status IN (${statuses.map(() => '?').join(',')})), 0) AS \`${key}\``
+    ).join(', ');
+    const params = groups.flatMap(([, statuses]) => statuses);
+    const [[row]] = await pool.execute(
+      `SELECT COUNT(*) AS total, ${selects}
+         FROM requisitions
+        WHERE forwarded_by_supervisor IS NOT NULL AND forwarded_at IS NOT NULL`,
+      params
+    );
+    return res.json({
+      stats: {
+        total: Number(row?.total) || 0,
+        new: Number(row?.new) || 0,
+        underReview: Number(row?.underReview) || 0,
+        processing: Number(row?.processing) || 0,
+        completed: Number(row?.completed) || 0,
+        rejected: Number(row?.rejected) || 0
+      }
     });
   } catch (error) { return next(error); }
 });
@@ -474,7 +675,11 @@ router.get('/procurement/received-requests/:id/attachments/:attachmentId', allow
       [attachmentId, requisitionId]
     );
     if (!rows[0]) return res.status(404).json({ message: 'Attachment not found.' });
-    const disposition = String(req.query.inline || '') === '1' ? 'inline' : 'attachment';
+    const inlineValue = req.query.inline;
+    const inline = Array.isArray(inlineValue)
+      ? inlineValue.includes('1')
+      : String(inlineValue || '') === '1';
+    const disposition = inline ? 'inline' : 'attachment';
     res.setHeader('Content-Type', rows[0].mimeType);
     res.setHeader('Content-Disposition', `${disposition}; filename="${String(rows[0].fileName).replace(/["\r\n]/g, '_')}"`);
     res.setHeader('Content-Length', rows[0].fileSize);

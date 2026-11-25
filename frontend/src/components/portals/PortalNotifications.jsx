@@ -63,22 +63,22 @@ export default function PortalNotifications({ notifications = [], portalApi, onO
         {items.map((notification) => {
           const link = notification.link || '';
           const canOpen = Boolean(parseRoute(link).portal);
-          return <div key={notification.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${notification.isRead ? '' : 'bg-brand-light/40'}`}>
+          return <div key={notification.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${notification.isRead ? '' : 'bg-white'}`}>
             <button type="button" disabled={!canOpen} onClick={() => onOpenNotification(notification)}
               className="min-w-0 flex-1 text-left disabled:cursor-default">
               <div className="flex flex-wrap items-center gap-2">
-                {!notification.isRead && <span className="h-2 w-2 rounded-full bg-rose-500" />}
+                {!notification.isRead && <span className="h-2 w-2 rounded-full bg-reference" />}
                 <span className="text-xs font-bold text-ink">{notification.title}</span>
                 {!notification.isRead && <PortalBadge tone="rose">New</PortalBadge>}
               </div>
               <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted">{notification.body}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted">
                 <span>{dateTimeLabel(notification.createdAt)}</span>
-                {canOpen && <><span>·</span><span className="font-bold text-brand">Open {destinationLabel(link)}</span><ChevronRight size={11} className="text-brand" /></>}
+                {canOpen && <><span>·</span><span className="font-bold text-black">Open {destinationLabel(link)}</span><ChevronRight size={11} className="text-black" /></>}
               </div>
             </button>
             {!notification.isRead && <button type="button" disabled={busyId === notification.id} onClick={() => markRead(notification)}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-brand disabled:opacity-50">
+              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-black disabled:opacity-50">
               <Check size={12} />{busyId === notification.id ? 'Saving…' : 'Mark read'}
             </button>}
           </div>;
@@ -86,7 +86,7 @@ export default function PortalNotifications({ notifications = [], portalApi, onO
       </div> : <EmptyState title="No notifications" description="Notices about your requests and messages will appear here." />}
     </PageCard>
 
-    <button type="button" onClick={() => navigate(portal === 'supervisor' ? 'Supervisor Dashboard' : 'Requester Dashboard')} className="mt-4 text-xs font-bold text-brand hover:underline">
+    <button type="button" onClick={() => navigate(portal === 'supervisor' ? 'Supervisor Dashboard' : 'Requester Dashboard')} className="mt-4 text-xs font-bold text-black hover:underline">
       Back to dashboard
     </button>
   </>;

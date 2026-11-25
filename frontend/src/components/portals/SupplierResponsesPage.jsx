@@ -140,7 +140,7 @@ export default function SupplierResponsesPage({
       </label>}
     >
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
-      {notice && <div className="px-4 pb-4"><p role="status" className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"><CheckCircle2 size={14} />{notice}</p></div>}
+      {notice && <div className="px-4 pb-4"><p role="status" className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"><CheckCircle2 size={14} />{notice}</p></div>}
       {loading && <div className="flex items-center gap-2 px-5 py-8 text-xs text-muted"><Loader2 size={14} className="animate-spin" />Loading supplier responses…</div>}
       {!loading && !error && !selectedOrder && <EmptyState>Create and send a purchase order to suppliers to see responses here.</EmptyState>}
       {!loading && !error && selectedOrder && !requests.length && !responses.length && <EmptyState>
@@ -151,8 +151,8 @@ export default function SupplierResponsesPage({
         {requests.map((requestRow) => {
           const rowResponses = responses.filter((response) => Number(response.requestId) === Number(requestRow.id));
           const failedCount = rowResponses.filter(emailFailed).length;
-          return <section key={requestRow.id} className="overflow-hidden rounded-lg border border-slate-200">
-            <header className="flex flex-wrap items-start justify-between gap-3 bg-slate-50 px-4 py-3">
+          return <section key={requestRow.id} className="overflow-hidden rounded-lg border border-brand">
+            <header className="flex flex-wrap items-start justify-between gap-3 bg-white px-4 py-3">
               <div>
                 <h4 className="text-sm font-extrabold">{requestRow.reference || `Pricing request ${requestRow.id}`}</h4>
                 <p className="mt-1 text-[11px] text-muted">
@@ -164,29 +164,29 @@ export default function SupplierResponsesPage({
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge value={requestRow.status || 'Sent'} />
                 {failedCount > 0 && <button type="button" disabled={busy} onClick={() => retry(requestRow)}
-                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-800 disabled:opacity-50">
+                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[11px] font-bold text-black disabled:opacity-50">
                   <RefreshCw size={12} />Retry failed emails ({failedCount})
                 </button>}
                 <button type="button" disabled={!rowResponses.length} onClick={() => setComparison({ requestId: requestRow.id })}
-                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[11px] font-bold text-brand disabled:opacity-50">
+                  className="no-print inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[11px] font-bold text-black disabled:opacity-50">
                   Compare Quotations
                 </button>
               </div>
             </header>
-            <dl className="grid gap-3 border-b border-slate-100 px-4 py-3 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
+            <dl className="grid gap-3 border-b border-subtle px-4 py-3 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
               <div><dt className="text-[10px] uppercase text-muted">Currency</dt><dd className="font-bold">{requestRow.currency || 'RWF'}</dd></div>
               <div><dt className="text-[10px] uppercase text-muted">Submission deadline</dt><dd className="font-bold">{dateLabel(requestRow.submissionDeadline)}</dd></div>
               <div><dt className="text-[10px] uppercase text-muted">Created</dt><dd className="font-bold">{dateTimeLabel(requestRow.createdAt)}</dd></div>
               <div><dt className="text-[10px] uppercase text-muted">Awarded</dt>
                 <dd className="font-bold">{requestRow.awardedAt ? `${dateLabel(requestRow.awardedAt)}${requestRow.awardComment ? ` · ${requestRow.awardComment}` : ''}` : '—'}</dd>
               </div>
-              {requestRow.message && <div className="sm:col-span-4 rounded-lg bg-emerald-50/60 p-3 text-xs italic text-slate-700">“{requestRow.message}”</div>}
+              {requestRow.message && <div className="sm:col-span-4 rounded-lg border border-brand bg-white p-3 text-xs italic text-black">“{requestRow.message}”</div>}
             </dl>
 
             {!rowResponses.length ? <EmptyState>No supplier responses have arrived for this request yet.</EmptyState>
               : <div className="overflow-x-auto">
                 <table className="w-full min-w-[1080px] text-left text-xs">
-                  <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+                  <thead className="bg-white text-[10px] uppercase text-muted">
                     <tr>{['Supplier', 'Email / delivery', 'Status', 'Submitted', 'Subtotal', 'VAT', 'Other', 'Final amount', 'Validity', 'Lead time', 'Actions'].map((heading) =>
                       <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
                   </thead>
@@ -197,12 +197,12 @@ export default function SupplierResponsesPage({
                         <td className="px-3 py-3">
                           <div className="font-bold">{response.supplierName || `Supplier ${response.supplierId}`}</div>
                           {response.supplierContact && <div className="text-[10px] text-muted">{response.supplierContact}</div>}
-                          {response.awarded && <span className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">Awarded</span>}
+                          {response.awarded && <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-black">Awarded</span>}
                         </td>
                         <td className="max-w-[220px] px-3 py-3">
                           <div className="break-all">{response.supplierEmail || '—'}</div>
                           <div className="mt-1"><StatusBadge value={response.emailStatus || 'Pending'} /></div>
-                          {response.emailError && <div className="mt-1 flex items-start gap-1 text-[10px] text-red-700"><AlertCircle size={11} className="mt-0.5 shrink-0" />{response.emailError}</div>}
+                          {response.emailError && <div className="mt-1 flex items-start gap-1 text-[10px] text-black"><AlertCircle size={11} className="mt-0.5 shrink-0" />{response.emailError}</div>}
                           {response.sentAt && <div className="mt-1 text-[10px] text-muted">Sent {dateTimeLabel(response.sentAt)}</div>}
                         </td>
                         <td className="px-3 py-3"><StatusBadge value={response.status || 'Draft'} /></td>
@@ -210,23 +210,23 @@ export default function SupplierResponsesPage({
                         <td className="px-3 py-3">{money(response.subtotal, currencyCode)}</td>
                         <td className="px-3 py-3">{money(response.vatAmount, currencyCode)}</td>
                         <td className="px-3 py-3">{money(response.otherCharges, currencyCode)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-brand">{money(finalTotal(response), currencyCode)}</td>
+                        <td className="whitespace-nowrap px-3 py-3 font-extrabold text-black">{money(finalTotal(response), currencyCode)}</td>
                         <td className="px-3 py-3">{response.quotationValidity || '—'}</td>
                         <td className="px-3 py-3">{response.deliveryLeadTime || '—'}</td>
                         <td className="px-3 py-3">
                           <div className="flex flex-wrap gap-1">
-                            <button type="button" onClick={() => setQuotation(response)} className="no-print inline-flex items-center gap-1 rounded border border-slate-200 px-2 py-1 text-brand"><Eye size={12} />View Quotation</button>
+                            <button type="button" onClick={() => setQuotation(response)} className="no-print inline-flex items-center gap-1 rounded border border-brand px-2 py-1 text-black"><Eye size={12} />View Quotation</button>
                             <DownloadButton type="supplierPricingResponse" id={response.id} format="pdf" label="Download PDF" />
                             <PrintButton label="Print" />
                             <button type="button" onClick={() => setComparison({ requestId: response.requestId || requestRow.id })}
-                              className="no-print rounded border border-brand bg-brand/5 px-2 py-1 font-bold text-brand">Compare Quotations</button>
+                              className="no-print rounded border border-brand bg-white px-2 py-1 font-bold text-black">Compare Quotations</button>
                             {canRevoke(response) && <button type="button" disabled={busy} onClick={() => setRevokeTarget(response)}
-                              className="no-print inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 font-bold text-red-700 disabled:opacity-50">
+                              className="no-print inline-flex items-center gap-1 rounded border border-brand bg-white px-2 py-1 font-bold text-black disabled:opacity-50">
                               <RotateCcw size={12} />Revoke link
                             </button>}
                             {String(response.status || '').toLowerCase() === 'submitted' && !response.awarded && <button type="button" disabled={busy}
                               onClick={() => { setAwardTarget({ ...response, requestId: response.requestId || requestRow.id }); setAwardComment(''); setAwardConfirmed(false); }}
-                              className="no-print inline-flex items-center gap-1 rounded bg-brand px-2 py-1 font-bold text-white disabled:opacity-50">
+                              className="no-print inline-flex items-center gap-1 rounded bg-brand px-2 py-1 font-bold text-black disabled:opacity-50">
                               <Award size={12} />Award
                             </button>}
                           </div>
@@ -247,15 +247,15 @@ export default function SupplierResponsesPage({
           <PrintButton label="Print quotation" />
           <DownloadButton type="supplierPricingResponse" id={quotation.id} format="pdf" label="Download PDF" />
         </div>
-        <dl className="grid gap-3 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <dl className="grid gap-3 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
           <div><dt className="text-[10px] text-muted">Supplier email</dt><dd className="break-all font-bold">{quotation.supplierEmail || '—'}</dd></div>
           <div><dt className="text-[10px] text-muted">Status</dt><dd><StatusBadge value={quotation.status || 'Draft'} /></dd></div>
           <div><dt className="text-[10px] text-muted">Submitted</dt><dd className="font-bold">{dateTimeLabel(quotation.submittedAt)}</dd></div>
           <div><dt className="text-[10px] text-muted">Email delivery</dt><dd className="font-bold">{quotation.emailStatus || '—'}{quotation.emailError ? ` · ${quotation.emailError}` : ''}</dd></div>
         </dl>
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <div className="overflow-x-auto rounded-lg border border-brand">
           <table className="w-full min-w-[640px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-muted">
               <tr>{['Item No.', 'Item', 'Quantity', 'Unit', 'Unit price', 'Line total'].map((heading) =>
                 <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -272,11 +272,11 @@ export default function SupplierResponsesPage({
             </tbody>
           </table>
         </div>
-        <dl className="grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2">
+        <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
           <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="font-bold">{money(quotation.subtotal, quotation.currency || 'RWF')}</dd></div>
           <div className="flex justify-between"><dt className="text-muted">VAT</dt><dd className="font-bold">{money(quotation.vatAmount, quotation.currency || 'RWF')}</dd></div>
           <div className="flex justify-between"><dt className="text-muted">Other charges</dt><dd className="font-bold">{money(quotation.otherCharges, quotation.currency || 'RWF')}</dd></div>
-          <div className="flex justify-between"><dt className="font-bold">Final amount</dt><dd className="font-extrabold text-brand">{money(finalTotal(quotation), quotation.currency || 'RWF')}</dd></div>
+          <div className="flex justify-between"><dt className="font-bold">Final amount</dt><dd className="font-extrabold text-black">{money(finalTotal(quotation), quotation.currency || 'RWF')}</dd></div>
           <div><dt className="text-[10px] text-muted">Quotation validity</dt><dd className="font-bold">{quotation.quotationValidity || '—'}</dd></div>
           <div><dt className="text-[10px] text-muted">Delivery lead time</dt><dd className="font-bold">{quotation.deliveryLeadTime || '—'}</dd></div>
           {quotation.comments && <div className="sm:col-span-2"><dt className="text-[10px] text-muted">Pricing comments</dt><dd className="whitespace-pre-wrap">{quotation.comments}</dd></div>}
@@ -287,14 +287,14 @@ export default function SupplierResponsesPage({
 
     {revokeTarget && <Modal title="Revoke pricing link" onClose={() => setRevokeTarget(null)}>
       <div className="space-y-4">
-        <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+        <div className="flex items-start gap-3 rounded-lg border border-brand bg-white p-4 text-xs text-black">
           <MailWarning size={18} className="mt-0.5 shrink-0" />
           <p>The private pricing link for <strong>{revokeTarget.supplierName || 'this supplier'}</strong> will stop working immediately. Any saved draft remains available to Procurement.</p>
         </div>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" onClick={() => setRevokeTarget(null)} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" onClick={() => setRevokeTarget(null)} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
           <button type="button" onClick={() => revoke(revokeTarget)} disabled={busy}
-            className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+            className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
             {busy ? 'Revoking…' : 'Revoke link'}
           </button>
         </div>
@@ -303,9 +303,9 @@ export default function SupplierResponsesPage({
 
     {awardTarget && <Modal title="Award supplier" onClose={() => setAwardTarget(null)}>
       <div className="space-y-4">
-        <div className="rounded-lg border border-brand/20 bg-brand/5 p-4 text-xs">
-          <p className="font-bold text-brand">Confirm the procurement award decision.</p>
-          <p className="mt-2 leading-5 text-slate-700">
+        <div className="rounded-lg border border-brand bg-white p-4 text-xs">
+          <p className="font-bold text-black">Confirm the procurement award decision.</p>
+          <p className="mt-2 leading-5 text-black">
             You are awarding <strong>{awardTarget.supplierName || 'this supplier'}</strong> with a final quoted amount of
             <strong> {money(finalTotal(awardTarget), awardCurrency)}</strong>. The lowest price is not selected automatically.
           </p>
@@ -318,10 +318,10 @@ export default function SupplierResponsesPage({
           <input type="checkbox" checked={awardConfirmed} onChange={(event) => setAwardConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4" />
           I confirm that Procurement has made this award decision.
         </label>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" onClick={() => setAwardTarget(null)} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" onClick={() => setAwardTarget(null)} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
           <button type="button" onClick={award} disabled={busy || !awardConfirmed}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Award size={14} />}
             {busy ? 'Awarding…' : 'Confirm award'}
           </button>

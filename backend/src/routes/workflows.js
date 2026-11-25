@@ -26,6 +26,41 @@ const committee = ['admin', 'committee'];
 const finance = ['admin', 'finance'];
 const stores = ['admin', 'storekeeper', 'procurement'];
 const PO_APPROVAL_LINK_HOURS = 72;
+const RFQ_STATUSES = ['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'];
+const RFQ_SORT_FIELDS = {
+  reference: 'f.reference',
+  requisition: 'r.reference',
+  rfqDate: 'COALESCE(f.issued_at, f.created_at)',
+  dueDate: 'f.due_date',
+  invitedSuppliers: 'invitedSuppliers',
+  quotations: 'quotations',
+  status: 'f.status',
+  createdAt: 'f.created_at'
+};
+
+function positiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// The original requisition stays authoritative; sending an RFQ only advances
+// its workflow stage once and records that transition in its own history.
+async function markRequisitionInProcurement(connection, requisition, userId, rfqReference) {
+  const nextStatus = [
+    REQUISITION_STATUS.FORWARDED, REQUISITION_STATUS.APPROVED, REQUISITION_STATUS.UNDER_REVIEW
+  ].includes(requisition.status) ? REQUISITION_STATUS.UNDER_REVIEW : 'In procurement';
+  await connection.execute('UPDATE requisitions SET status = ? WHERE id = ?', [nextStatus, requisition.id]);
+  await connection.execute(
+    `INSERT INTO requisition_activity
+       (requisition_id, user_id, action, details, previous_status, new_status)
+     VALUES (?, ?, 'procurement_review_started', ?, ?, ?)`,
+    [requisition.id, userId, JSON.stringify({ rfqReference }), requisition.status, nextStatus]
+  );
+  await createNotification(connection, requisition.requesterId, 'Request under Procurement review',
+    `${requisition.reference} is now being processed by Procurement.`,
+    `#/requester/My%20Procurement%20Requests?request=${requisition.id}`);
+  return nextStatus;
+}
 
 function reference(prefix) {
   return `${prefix}-${new Date().getFullYear()}-${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -259,8 +294,9 @@ async function duplicateRfqResponse(rfq) {
     body: {
       id: rfq.id,
       reference: rfq.reference,
+      status: rfq.status || 'Sent',
       message: 'This RFQ was already submitted. Existing delivery statuses are shown; no duplicate was created.',
-      emailDelivery: deliveries.summary,
+      emailDelivery: rfq.status === 'Draft' ? null : deliveries.summary,
       duplicate: true
     }
   };
@@ -467,38 +503,113 @@ export async function notifySenderOfDecision(actorId, approval, decision, decisi
   return delivery;
 }
 
+function rfqBaseQuery() {
+  return `SELECT f.id, f.reference, f.status, f.due_date AS dueDate,
+    f.instructions, f.terms,
+    f.issued_at AS issuedAt, f.closed_at AS closedAt,
+    f.created_at AS createdAt, f.updated_at AS updatedAt,
+    r.reference AS requisition, r.id AS requisitionId, r.title AS requisitionTitle,
+    q.supplier_id AS selectedSupplierId, q.amount AS awardedAmount,
+    s.name AS selectedSupplier,
+    s.contact_name AS selectedSupplierContactName,
+    s.phone AS selectedSupplierPhone, s.email AS selectedSupplierEmail,
+    s.address AS selectedSupplierAddress,
+    CONCAT_WS(' / ', NULLIF(s.contact_name, ''), NULLIF(s.phone, ''), NULLIF(s.email, '')) AS selectedSupplierContact,
+    CONCAT_WS(' / ', NULLIF(s.contact_name, ''), NULLIF(s.phone, ''), NULLIF(s.email, '')) AS awardedSupplierContact,
+    s.address AS awardedSupplierAddress,
+    COUNT(DISTINCT fs.supplier_id) AS invitedSuppliers,
+    COUNT(DISTINCT qt.id) AS quotations
+   FROM rfqs f JOIN requisitions r ON r.id = f.requisition_id
+   LEFT JOIN rfq_suppliers fs ON fs.rfq_id = f.id
+   LEFT JOIN quotations qt ON qt.rfq_id = f.id
+   LEFT JOIN quotations q ON q.id = f.selected_quotation_id
+   LEFT JOIN suppliers s ON s.id = q.supplier_id`;
+}
+
 router.get('/rfqs', async (req, res, next) => {
   try {
     const columns = { issued: 'f.issued_at', due: 'f.due_date', closed: 'f.closed_at', created: 'f.created_at' };
     const filter = parseDateFilter(req.query, columns, { defaultField: 'issued' });
     if (filter.error) return res.status(400).json({ message: filter.error });
     const params = [];
-    const clause = dateFilterClause(filter, columns, params);
-    const [rfqs] = await pool.query(
-      `SELECT f.id, f.reference, f.status, f.due_date AS dueDate,
-        f.issued_at AS issuedAt, f.closed_at AS closedAt,
-        f.created_at AS createdAt, f.updated_at AS updatedAt,
-        r.reference AS requisition, r.id AS requisitionId, q.supplier_id AS selectedSupplierId,
-        q.amount AS awardedAmount,
-        s.name AS selectedSupplier,
-        s.contact_name AS selectedSupplierContactName,
-        s.phone AS selectedSupplierPhone, s.email AS selectedSupplierEmail,
-        s.address AS selectedSupplierAddress,
-        CONCAT_WS(' / ', NULLIF(s.contact_name, ''), NULLIF(s.phone, ''), NULLIF(s.email, '')) AS selectedSupplierContact,
-        CONCAT_WS(' / ', NULLIF(s.contact_name, ''), NULLIF(s.phone, ''), NULLIF(s.email, '')) AS awardedSupplierContact,
-        s.address AS awardedSupplierAddress,
-        COUNT(DISTINCT fs.supplier_id) AS invitedSuppliers,
-        COUNT(DISTINCT qt.id) AS quotations
-       FROM rfqs f JOIN requisitions r ON r.id = f.requisition_id
-       LEFT JOIN rfq_suppliers fs ON fs.rfq_id = f.id
-       LEFT JOIN quotations qt ON qt.rfq_id = f.id
-       LEFT JOIN quotations q ON q.id = f.selected_quotation_id
-       LEFT JOIN suppliers s ON s.id = q.supplier_id
-       WHERE 1 = 1 ${clause}
-       GROUP BY f.id ORDER BY COALESCE(f.issued_at, f.created_at) DESC`,
-      params
+    const dateClause = dateFilterClause(filter, columns, params).replace(/^\s*AND\s*/i, '');
+    const where = dateClause ? [dateClause] : [];
+
+    const reference = String(req.query.reference || '').trim().slice(0, 120);
+    if (reference) { where.push('f.reference LIKE ?'); params.push(`%${reference}%`); }
+    const supplier = String(req.query.supplier || '').trim().slice(0, 120);
+    if (supplier) {
+      where.push(`EXISTS (
+        SELECT 1 FROM rfq_suppliers fsi JOIN suppliers si ON si.id = fsi.supplier_id
+        WHERE fsi.rfq_id = f.id AND (si.name LIKE ? OR si.email LIKE ?)
+      )`);
+      params.push(`%${supplier}%`, `%${supplier}%`);
+    }
+    const requisition = String(req.query.requisition || '').trim().slice(0, 120);
+    if (requisition) {
+      where.push('(r.reference LIKE ? OR r.title LIKE ?)');
+      params.push(`%${requisition}%`, `%${requisition}%`);
+    }
+    const status = String(req.query.status || '').trim().slice(0, 40);
+    if (status) {
+      if (!RFQ_STATUSES.includes(status)) return res.status(400).json({ message: 'Unsupported RFQ status.' });
+      where.push('f.status = ?');
+      params.push(status);
+    }
+    const hasResponses = String(req.query.hasResponses || '').trim().toLowerCase();
+    let having = '';
+    if (hasResponses === 'yes') having = 'HAVING COUNT(DISTINCT qt.id) > 0';
+    if (hasResponses === 'no') having = 'HAVING COUNT(DISTINCT qt.id) = 0';
+
+    const base = `${rfqBaseQuery()} WHERE ${where.length ? where.join(' AND ') : '1 = 1'} GROUP BY f.id ${having}`;
+    const sort = RFQ_SORT_FIELDS[String(req.query.sort || '')] || RFQ_SORT_FIELDS.rfqDate;
+    const direction = String(req.query.direction || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const paginated = req.query.page !== undefined || req.query.limit !== undefined;
+    const page = positiveInt(req.query.page, 1);
+    const limit = Math.min(positiveInt(req.query.limit, 10), 100);
+
+    if (!paginated) {
+      const [rfqs] = await pool.query(`${base} ORDER BY ${sort} ${direction}, f.id DESC`, params);
+      return res.json({ rfqs });
+    }
+
+    const [[countRow]] = await pool.execute(`SELECT COUNT(*) AS total FROM (${base}) counted`, params);
+    const [rfqs] = await pool.execute(
+      `${base} ORDER BY ${sort} ${direction}, f.id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, (page - 1) * limit]
     );
-    return res.json({ rfqs });
+    const total = Number(countRow?.total) || 0;
+    return res.json({
+      rfqs,
+      pagination: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) }
+    });
+  } catch (error) { return next(error); }
+});
+
+router.get('/rfqs/stats', async (_req, res, next) => {
+  try {
+    const [[row]] = await pool.execute(
+      `SELECT COUNT(*) AS total,
+        COALESCE(SUM(f.status = 'Draft'), 0) AS draft,
+        COALESCE(SUM(f.status = 'Sent'), 0) AS sent,
+        COALESCE(SUM(f.status = 'Sent' AND COALESCE(qc.responses, 0) = 0), 0) AS awaitingResponses,
+        COALESCE(SUM(COALESCE(qc.responses, 0) > 0), 0) AS receivedQuotations,
+        COALESCE(SUM(f.status = 'Closed'), 0) AS closed
+       FROM rfqs f
+       LEFT JOIN (
+         SELECT rfq_id, COUNT(*) AS responses FROM quotations GROUP BY rfq_id
+       ) qc ON qc.rfq_id = f.id`
+    );
+    return res.json({
+      stats: {
+        total: Number(row?.total) || 0,
+        draft: Number(row?.draft) || 0,
+        sent: Number(row?.sent) || 0,
+        awaitingResponses: Number(row?.awaitingResponses) || 0,
+        receivedQuotations: Number(row?.receivedQuotations) || 0,
+        closed: Number(row?.closed) || 0
+      }
+    });
   } catch (error) { return next(error); }
 });
 
@@ -515,6 +626,9 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
   } catch (error) {
     return res.status(error.status || 400).json({ message: error.message });
   }
+  const saveAsDraft = req.body.saveAsDraft === true;
+  const instructions = text(req.body.instructions, 4000);
+  const terms = text(req.body.terms, 4000);
   const idempotencyKey = String(req.body.idempotencyKey || '').trim().slice(0, 80);
   if (idempotencyKey) {
     const [existingRows] = await pool.execute('SELECT id, reference FROM rfqs WHERE idempotency_key = ?', [idempotencyKey]);
@@ -564,8 +678,13 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
     let result;
     try {
       [result] = await connection.execute(
-        'INSERT INTO rfqs (reference, idempotency_key, requisition_id, due_date, issued_at, created_by) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)',
-        [rfqReference, idempotencyKey || null, requisitionId, dueDate, req.user.id]
+        `INSERT INTO rfqs
+           (reference, idempotency_key, requisition_id, due_date, instructions, terms, status, issued_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ${saveAsDraft ? 'NULL' : 'UTC_TIMESTAMP()'}, ?)`,
+        [
+          rfqReference, idempotencyKey || null, requisitionId, dueDate,
+          instructions || null, terms || null, saveAsDraft ? 'Draft' : 'Sent', req.user.id
+        ]
       );
     } catch (error) {
       // A concurrent double-click can race the pre-check. The unique key makes
@@ -581,47 +700,241 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
     for (const supplierId of supplierIds) {
       await connection.execute('INSERT INTO rfq_suppliers (rfq_id, supplier_id) VALUES (?, ?)', [result.insertId, supplierId]);
     }
-    const emailDeliveries = await createRfqEmailDeliveries(connection, {
-      rfqId: result.insertId,
-      reference: rfqReference,
-      supplierIds
-    });
-    // The original requisition is the procurement record. Its reference and all
-    // lines are preserved; only its workflow stage moves forward.
-    const nextStatus = REQUISITION_STATUS.FORWARDED === requisition.status
-      || REQUISITION_STATUS.APPROVED === requisition.status
-      || REQUISITION_STATUS.UNDER_REVIEW === requisition.status
-      ? REQUISITION_STATUS.UNDER_REVIEW
-      : 'In procurement';
-    await connection.execute('UPDATE requisitions SET status = ? WHERE id = ?', [nextStatus, requisitionId]);
-    await connection.execute(
-      `INSERT INTO requisition_activity
-         (requisition_id, user_id, action, details, previous_status, new_status)
-       VALUES (?, ?, 'procurement_review_started', ?, ?, ?)`,
-      [requisitionId, req.user.id, JSON.stringify({ rfqReference }), requisition.status, nextStatus]
-    );
+    let nextStatus = requisition.status;
+    let emailDeliveries = [];
+    if (!saveAsDraft) {
+      emailDeliveries = await createRfqEmailDeliveries(connection, {
+        rfqId: result.insertId,
+        reference: rfqReference,
+        supplierIds
+      });
+      nextStatus = await markRequisitionInProcurement(connection, requisition, req.user.id, rfqReference);
+      await createNotification(connection, null, 'New request for quotation',
+        `${rfqReference} was issued to ${supplierIds.length} suppliers.`, `/rfqs/${result.insertId}`);
+    }
     await writeAudit(
-      connection, req.user.id, 'created', 'rfq', result.insertId,
-      { reference: rfqReference, requisitionReference: requisition.reference },
-      { previousStatus: requisition.status, newStatus: nextStatus }
+      connection, req.user.id, saveAsDraft ? 'draft_created' : 'created', 'rfq', result.insertId,
+      { reference: rfqReference, requisitionReference: requisition.reference, supplierCount: supplierIds.length },
+      { previousStatus: requisition.status, newStatus: saveAsDraft ? 'Draft' : nextStatus }
     );
-    await createNotification(connection, null, 'New request for quotation', `${rfqReference} was issued to ${supplierIds.length} suppliers.`, `/rfqs/${result.insertId}`);
-    await createNotification(connection, requisition.requesterId, 'Request under Procurement review',
-      `${requisition.reference} is now being processed by Procurement.`,
-      `#/requester/My%20Procurement%20Requests?request=${requisitionId}`);
     const responseBody = {
       id: result.insertId,
       reference: rfqReference,
-      message: 'RFQ created. Supplier email delivery was attempted; see email delivery status for the result.',
-      emailDelivery: { total: emailDeliveries.length }
+      status: saveAsDraft ? 'Draft' : 'Sent',
+      message: saveAsDraft
+        ? 'RFQ saved as a draft. No supplier email has been sent yet.'
+        : 'RFQ created. Supplier email delivery was attempted; see email delivery status for the result.',
+      emailDelivery: saveAsDraft ? null : { total: emailDeliveries.length }
     };
     return {
       status: 201,
       body: responseBody,
-      afterCommit: async () => {
+      afterCommit: saveAsDraft ? undefined : async () => {
         responseBody.emailDelivery = await sendRfqDeliveries({ rfqId: result.insertId });
       }
     };
+  }, res, next);
+});
+
+async function rfqDetail(rfqId) {
+  const [[rfq]] = await pool.execute(
+    `SELECT f.id, f.reference, f.status, f.due_date AS dueDate, f.instructions, f.terms,
+      f.issued_at AS issuedAt, f.closed_at AS closedAt, f.created_at AS createdAt,
+      f.requisition_id AS requisitionId, r.reference AS requisition, r.title AS requisitionTitle,
+      r.justification, r.priority, r.required_by AS requiredBy,
+      d.name AS department, u.name AS createdBy,
+      q.id AS selectedQuotationId, q.amount AS awardedAmount, s.name AS selectedSupplier
+     FROM rfqs f
+     JOIN requisitions r ON r.id = f.requisition_id
+     LEFT JOIN departments d ON d.id = r.department_id
+     LEFT JOIN users u ON u.id = f.created_by
+     LEFT JOIN quotations q ON q.id = f.selected_quotation_id
+     LEFT JOIN suppliers s ON s.id = q.supplier_id
+    WHERE f.id = ?`,
+    [rfqId]
+  );
+  if (!rfq) return null;
+  const [items] = await pool.execute(
+    `SELECT id, item_name AS itemName, description, quantity, unit,
+      estimated_unit_cost AS estimatedUnitCost
+     FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+    [rfq.requisitionId]
+  );
+  const [suppliers] = await pool.execute(
+    `SELECT s.id, s.name, s.contact_name AS contactName, s.email, s.phone, s.status,
+      (SELECT d.status FROM rfq_email_deliveries d
+        WHERE d.rfq_id = ? AND d.supplier_id = s.id ORDER BY d.id DESC LIMIT 1) AS emailStatus,
+      (SELECT COUNT(*) FROM rfq_email_deliveries d
+        WHERE d.rfq_id = ? AND d.supplier_id = s.id) AS emailAttempts,
+      (SELECT COUNT(*) FROM quotations q
+        WHERE q.rfq_id = ? AND q.supplier_id = s.id) AS responses
+     FROM rfq_suppliers fs JOIN suppliers s ON s.id = fs.supplier_id
+    WHERE fs.rfq_id = ? ORDER BY s.name`,
+    [rfqId, rfqId, rfqId, rfqId]
+  );
+  const [quotations] = await pool.execute(
+    `SELECT q.id, q.supplier_id AS supplierId, s.name AS supplier, q.amount,
+      q.delivery_days AS deliveryDays, q.quality_score AS qualityScore,
+      q.rating_score AS ratingScore, q.notes, q.submitted_at AS submittedAt,
+      (f.selected_quotation_id = q.id) AS selected
+     FROM quotations q JOIN suppliers s ON s.id = q.supplier_id JOIN rfqs f ON f.id = q.rfq_id
+    WHERE q.rfq_id = ? ORDER BY q.amount, q.delivery_days`,
+    [rfqId]
+  );
+  const [activity] = await pool.execute(
+    `SELECT a.id, a.action, a.details, a.created_at AS createdAt,
+      a.previous_status AS previousStatus, a.new_status AS newStatus,
+      COALESCE(u.name, 'System') AS actor
+     FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.entity_type = 'rfq' AND a.entity_id = ? ORDER BY a.created_at, a.id`,
+    [rfqId]
+  );
+  return {
+    rfq: {
+      ...rfq,
+      invitedSuppliers: suppliers.length,
+      quotations: quotations.length
+    },
+    items,
+    suppliers,
+    quotations,
+    activity
+  };
+}
+
+router.get('/rfqs/:id', allowRoles(...procurement, ...committee), async (req, res, next) => {
+  try {
+    const detail = await rfqDetail(req.params.id);
+    if (!detail) return res.status(404).json({ message: 'RFQ not found.' });
+    return res.json(detail);
+  } catch (error) { return next(error); }
+});
+
+router.patch('/rfqs/:id', allowRoles(...procurement), async (req, res, next) => {
+  try {
+    const [[rfq]] = await pool.execute("SELECT id, reference, requisition_id AS requisitionId FROM rfqs WHERE id = ? AND status = 'Draft'", [req.params.id]);
+    if (!rfq) return res.status(404).json({ message: 'Only a draft RFQ can be edited.' });
+    const requisitionId = req.body.requisitionId === undefined ? rfq.requisitionId : Number(req.body.requisitionId);
+    if (!Number.isInteger(requisitionId) || requisitionId < 1) return res.status(400).json({ message: 'Choose a valid procurement request.' });
+    const [[ready]] = await pool.execute(
+      `SELECT id, reference, status FROM requisitions
+       WHERE id = ? AND status IN (${PROCUREMENT_READY_STATUSES.map(() => '?').join(',')})`,
+      [requisitionId, ...PROCUREMENT_READY_STATUSES]
+    );
+    if (!ready) return res.status(409).json({ message: 'Choose a request forwarded by a Department Supervisor.' });
+    let dueDate = null;
+    if (req.body.dueDate !== undefined) {
+      try { dueDate = businessDate(req.body.dueDate, 'Quotation due date', { allowPast: false }); }
+      catch (error) { return res.status(error.status || 400).json({ message: error.message }); }
+    }
+    let supplierIds = null;
+    if (req.body.supplierIds !== undefined) {
+      supplierIds = [...new Set((Array.isArray(req.body.supplierIds) ? req.body.supplierIds : []).map(Number))];
+      if (!supplierIds.length || supplierIds.some((id) => !Number.isInteger(id) || id < 1)) {
+        return res.status(400).json({ message: 'Select at least one valid supplier.' });
+      }
+    }
+    await pool.execute(
+      'UPDATE rfqs SET requisition_id = ?, due_date = ?, instructions = ?, terms = ? WHERE id = ?',
+      [
+        requisitionId, dueDate,
+        req.body.instructions === undefined ? null : text(req.body.instructions, 4000) || null,
+        req.body.terms === undefined ? null : text(req.body.terms, 4000) || null,
+        rfq.id
+      ]
+    );
+    if (supplierIds) {
+      const placeholders = supplierIds.map(() => '?').join(',');
+      const [active] = await pool.execute(`SELECT id FROM suppliers WHERE status = 'Active' AND id IN (${placeholders})`, supplierIds);
+      if (active.length !== supplierIds.length) return res.status(400).json({ message: 'One or more selected suppliers are unavailable.' });
+      await pool.execute('DELETE FROM rfq_suppliers WHERE rfq_id = ?', [rfq.id]);
+      for (const supplierId of supplierIds) {
+        await pool.execute('INSERT INTO rfq_suppliers (rfq_id, supplier_id) VALUES (?, ?)', [rfq.id, supplierId]);
+      }
+    }
+    await writeAudit(pool, req.user.id, 'draft_updated', 'rfq', rfq.id, { reference: rfq.reference });
+    return res.json({ message: 'Draft RFQ updated.', id: Number(rfq.id) });
+  } catch (error) { return next(error); }
+});
+
+router.delete('/rfqs/:id', allowRoles(...procurement), async (req, res, next) => {
+  return transaction(async (connection) => {
+    const [[rfq]] = await connection.execute("SELECT id, reference FROM rfqs WHERE id = ? AND status = 'Draft' FOR UPDATE", [req.params.id]);
+    if (!rfq) throw httpError(404, 'Only a draft RFQ can be deleted.');
+    await connection.execute('DELETE FROM rfq_suppliers WHERE rfq_id = ?', [rfq.id]);
+    await connection.execute("DELETE FROM audit_logs WHERE entity_type = 'rfq' AND entity_id = ?", [String(rfq.id)]);
+    await connection.execute('DELETE FROM rfqs WHERE id = ?', [rfq.id]);
+    return { body: { message: `Draft ${rfq.reference} was deleted.` } };
+  }, res, next);
+});
+
+router.post('/rfqs/:id/send', allowRoles(...procurement), async (req, res, next) => {
+  try {
+    const [[rfq]] = await pool.execute("SELECT id, reference, requisition_id AS requisitionId FROM rfqs WHERE id = ? AND status = 'Draft'", [req.params.id]);
+    if (!rfq) return res.status(404).json({ message: 'Only a draft RFQ can be sent.' });
+    const [[requisition]] = await pool.execute(
+      `SELECT id, reference, requester_id AS requesterId, status,
+        supervisor_id AS supervisorId, forwarded_by_supervisor AS forwardedBySupervisor
+       FROM requisitions WHERE id = ?`, [rfq.requisitionId]
+    );
+    if (!requisition) return res.status(409).json({ message: 'The related procurement request no longer exists.' });
+    if (requisition.supervisorId != null && requisition.forwardedBySupervisor == null) {
+      return res.status(409).json({ message: 'This request was not forwarded by its Department Supervisor.' });
+    }
+  } catch (error) { return next(error); }
+
+  return transaction(async (connection) => {
+    const [[rfq]] = await connection.execute(
+      "SELECT id, reference, requisition_id AS requisitionId, idempotency_key AS idempotencyKey FROM rfqs WHERE id = ? AND status = 'Draft' FOR UPDATE",
+      [req.params.id]
+    );
+    if (!rfq) throw httpError(404, 'Only a draft RFQ can be sent.');
+    const [[requisition]] = await connection.execute('SELECT * FROM requisitions WHERE id = ? FOR UPDATE', [rfq.requisitionId]);
+    const [suppliers] = await connection.execute(
+      `SELECT s.id FROM rfq_suppliers fs JOIN suppliers s ON s.id = fs.supplier_id
+       WHERE fs.rfq_id = ? AND s.status = 'Active' ORDER BY s.id`, [rfq.id]
+    );
+    if (!suppliers.length) throw httpError(400, 'Add at least one active supplier before sending the RFQ.');
+    const [[existingDeliveries]] = await connection.execute(
+      'SELECT COUNT(*) AS total FROM rfq_email_deliveries WHERE rfq_id = ?', [rfq.id]
+    );
+    if (!Number(existingDeliveries?.total)) {
+      await createRfqEmailDeliveries(connection, {
+        rfqId: rfq.id,
+        reference: rfq.reference,
+        supplierIds: suppliers.map((supplier) => supplier.id)
+      });
+    }
+    await connection.execute("UPDATE rfqs SET status = 'Sent', issued_at = UTC_TIMESTAMP() WHERE id = ?", [rfq.id]);
+    const nextStatus = await markRequisitionInProcurement(connection, requisition, req.user.id, rfq.reference);
+    await createNotification(connection, null, 'New request for quotation',
+      `${rfq.reference} was issued to ${suppliers.length} suppliers.`, `/rfqs/${rfq.id}`);
+    await writeAudit(connection, req.user.id, 'sent', 'rfq', rfq.id,
+      { reference: rfq.reference, supplierCount: suppliers.length },
+      { previousStatus: 'Draft', newStatus: nextStatus }
+    );
+    const responseBody = { id: Number(rfq.id), reference: rfq.reference, status: 'Sent' };
+    return {
+      status: 200,
+      body: responseBody,
+      afterCommit: async () => {
+        responseBody.emailDelivery = await sendRfqDeliveries({ rfqId: rfq.id });
+      }
+    };
+  }, res, next);
+});
+
+router.post('/rfqs/:id/close', allowRoles(...procurement), async (req, res, next) => {
+  return transaction(async (connection) => {
+    const [[rfq]] = await connection.execute(
+      "SELECT id, reference, status FROM rfqs WHERE id = ? AND status IN ('Sent','Evaluating') FOR UPDATE",
+      [req.params.id]
+    );
+    if (!rfq) throw httpError(404, 'Only an open RFQ can be closed.');
+    await connection.execute("UPDATE rfqs SET status = 'Closed', closed_at = UTC_TIMESTAMP() WHERE id = ?", [rfq.id]);
+    await writeAudit(connection, req.user.id, 'closed', 'rfq', rfq.id, { reference: rfq.reference },
+      { previousStatus: rfq.status, newStatus: 'Closed' });
+    return { body: { message: `${rfq.reference} was closed.`, id: Number(rfq.id) } };
   }, res, next);
 });
 

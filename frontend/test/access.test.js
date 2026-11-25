@@ -2,14 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, PROCUREMENT_PROCESSING_PAGE,
-  RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, SETTINGS_PAGE,
+  PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, SETTINGS_PAGE,
   STOCKKEEPER_PAGES, SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
 } from '../src/utils/access.js';
 
 const adminSideRoles = ['admin', 'approver', 'procurement', 'finance', 'committee'];
 const sharedPages = ['Overview', 'RFQs', 'Goods receipts', 'Invoices', 'Suppliers', 'Stock overview', 'Store requests'];
 const adminPortalRoles = ['admin', 'procurement'];
-const hiddenAdminPages = ['Requisitions', 'Approvals', 'Purchase orders', 'Audit logs'];
+const hiddenAdminPages = ['Requisitions', 'Approvals', 'Audit logs'];
 
 test('administrator-side roles can access shared procurement pages', () => {
   for (const role of adminSideRoles) {
@@ -39,6 +39,13 @@ test('removed administrator pages cannot be reached through direct routes', () =
   }
   // Department portals still own their own approval queue.
   assert.equal(canAccessPage('supervisor', 'Approvals'), true);
+});
+
+test('Overview can open the existing global purchase orders workspace', () => {
+  assert.equal(canAccessPage('admin', PURCHASE_ORDERS_PAGE), true);
+  assert.equal(canAccessPage('procurement', PURCHASE_ORDERS_PAGE), true);
+  assert.equal(canAccessPage('approver', PURCHASE_ORDERS_PAGE), false);
+  assert.equal(canAccessPage('finance', PURCHASE_ORDERS_PAGE), false);
 });
 
 test('procurement processing is an internal workflow page opened by the admin shell', () => {

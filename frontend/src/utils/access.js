@@ -52,6 +52,9 @@ export const RECEIVED_REQUESTS_PAGE = 'Requests Received from Departments';
 // Internal continuation of a forwarded department request. It is opened from
 // the document page, not from the Administrator sidebar.
 export const PROCUREMENT_PROCESSING_PAGE = 'Procurement Processing';
+// Existing global purchase-order workspace. It is reachable from Overview so the
+// dashboard's View All action has a real destination without inventing a route.
+export const PURCHASE_ORDERS_PAGE = 'Purchase orders';
 export const SETTINGS_PAGE = 'Settings';
 
 // These pages remain in the code for their own portals/history, but are no
@@ -59,7 +62,6 @@ export const SETTINGS_PAGE = 'Settings';
 const ADMIN_HIDDEN_PAGES = new Set([
   'Requisitions',
   'Approvals',
-  'Purchase orders',
   'Audit logs'
 ]);
 
@@ -72,6 +74,7 @@ export const PROCUREMENT_PAGES = [
   RECEIVED_REQUESTS_PAGE,
   PROCUREMENT_PROCESSING_PAGE,
   'RFQs',
+  PURCHASE_ORDERS_PAGE,
   'Goods receipts',
   'Invoices',
   'Suppliers',
@@ -97,6 +100,7 @@ const restrictedPages = {
   'Stock movements': ['admin', 'procurement', 'storekeeper'],
   [RECEIVED_REQUESTS_PAGE]: ['admin', 'procurement'],
   [PROCUREMENT_PROCESSING_PAGE]: ['admin', 'procurement'],
+  [PURCHASE_ORDERS_PAGE]: ['admin', 'procurement'],
   Users: ['admin'],
   'Audit logs': ['admin'],
   [SETTINGS_PAGE]: ['admin']

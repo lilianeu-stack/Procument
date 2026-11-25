@@ -134,12 +134,12 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
         </select>
       </label>}
 
-      {operation === 'out' && selectedIssue && <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-xs sm:grid-cols-2">
+      {operation === 'out' && selectedIssue && <div className="grid gap-2 rounded-lg border border-brand bg-white p-3 text-xs sm:grid-cols-2">
         <p><span className="text-muted">Requester:</span> <strong>{selectedIssue.requester}</strong></p>
         <p><span className="text-muted">Department:</span> <strong>{selectedIssue.department || '—'}</strong></p>
         <p><span className="text-muted">Request reference:</span> <strong>{selectedIssue.reference}</strong></p>
         <p><span className="text-muted">Available:</span> <strong>{selectedIssue.availableBalance} {selectedIssue.unit}</strong></p>
-        {selectedIssue.availableBalance < selectedIssue.remainingQuantity && <p className="font-semibold text-amber-700 sm:col-span-2">
+        {selectedIssue.availableBalance < selectedIssue.remainingQuantity && <p className="font-semibold text-black sm:col-span-2">
           Shortage: {selectedIssue.remainingQuantity - selectedIssue.availableBalance} {selectedIssue.unit} of the approved quantity cannot currently be issued.
         </p>}
       </div>}
@@ -180,7 +180,7 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
         <AttachmentPicker files={files} onChange={(next) => { setFiles(next); setKey(transactionKey()); }} />
       </div>}
       <ErrorState message={error} />
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
         <button type="button" onClick={onClose} className={secondaryButtonClass()}>Cancel</button>
         <button type="submit" disabled={busy || (operation === 'out' && (!selectedIssue || selectedIssue.availableBalance < 1))}
           className={primaryButtonClass()}>{busy ? 'Recording…' : operation === 'in' ? 'Record Stock In' : operation === 'out' ? 'Record Stock Out' : 'Record Adjustment'}</button>
@@ -217,18 +217,18 @@ function BinCardDetails({ card, onDownload, onError, actions }) {
         ['Current Balance', `${item.balance} ${item.unit}`],
         ['Minimum Stock Level', `${item.minimumStock} ${item.unit}`],
         ['Last Updated', dateTimeLabel(item.updatedAt)]
-      ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-100 bg-white p-4 shadow-card">
+      ].map(([label, value]) => <div key={label} className="rounded-xl border border-brand bg-white p-4">
         <p className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</p><p className="mt-2 text-sm font-extrabold">{value}</p>
       </div>)}
     </div>
     <PageCard title="Bin Card Transactions" description="Historical transactions are append-only and cannot be silently edited or deleted.">
       {movements.length ? <TableScroll minWidth={900}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-muted">
             <tr>{['Date', 'Reference No.', 'Description', 'Stock In', 'Stock Out', 'Balance', 'Updated By', 'Documents'].map((column) =>
               <th key={column} className="whitespace-nowrap px-4 py-3 font-bold">{column}</th>)}</tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-subtle">
             {[...movements].reverse().map((movement) => <tr key={movement.id}>
               <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(movement.movementAt)}</td>
               <td className="px-4 py-3 font-semibold">{movement.referenceNo || movement.source}</td>
@@ -236,8 +236,8 @@ function BinCardDetails({ card, onDownload, onError, actions }) {
                 {movement.requester && <div className="mt-0.5 text-[10px] text-muted">{movement.requester} · {movement.department}</div>}
                 {movement.receivedBy && <div className="mt-0.5 text-[10px] text-muted">Received by {movement.receivedBy}</div>}
               </td>
-              <td className="px-4 py-3 font-semibold text-emerald-700">{movement.direction === 'In' ? movement.quantity : '—'}</td>
-              <td className="px-4 py-3 font-semibold text-amber-700">{movement.direction === 'Out' ? movement.quantity : '—'}</td>
+              <td className="px-4 py-3 font-semibold text-black">{movement.direction === 'In' ? movement.quantity : '—'}</td>
+              <td className="px-4 py-3 font-semibold text-black">{movement.direction === 'Out' ? movement.quantity : '—'}</td>
               <td className="px-4 py-3 font-extrabold">{movement.balance}</td>
               <td className="px-4 py-3">{movement.updatedBy || '—'}</td>
               <td className="px-4 py-3">{movement.attachments?.length ? <AttachmentList
@@ -346,10 +346,10 @@ export default function StockKeeperBinCards({
 
   return <div className="space-y-5">
     {selectedId && <button type="button" onClick={() => { setSelectedId(''); setCard(null); navigate('Bin Card'); }}
-      className="inline-flex items-center gap-1 text-xs font-bold text-brand hover:underline"><ArrowLeft size={14} />All Bin Cards</button>}
+      className="inline-flex items-center gap-1 text-xs font-bold text-black hover:underline"><ArrowLeft size={14} />All Bin Cards</button>}
     {selectedId ? loading && !card ? <LoadingState label="Loading Bin Card…" /> : card ?
       <>
-        {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">{notice}</div>}
+        {notice && <div role="status" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">{notice}</div>}
         <ErrorState message={error} onRetry={() => portalApi.getBinCard(selectedId).then(setCard).catch((exception) => setError(exception.message))} />
         <BinCardDetails card={card} onDownload={downloadDocument} onError={setError} actions={actions} />
       </> : error ? <ErrorState message={error} onRetry={() => portalApi.getBinCard(selectedId).then(setCard).catch((exception) => setError(exception.message))} /> :
@@ -358,10 +358,10 @@ export default function StockKeeperBinCards({
         <PageHeader eyebrow="Inventory ledger" title="Bin Card"
           description="Review item balances and append stock-in, authorized stock-out, or traceable adjustment transactions."
           actions={actions} />
-        {notice && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">{notice}</div>}
+        {notice && <div role="status" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">{notice}</div>}
         <ErrorState message={error} onRetry={refresh} />
         <PageCard title="Inventory Items" description={`${items.length} item(s)`}>
-          <div className="flex flex-wrap items-end gap-3 border-b border-slate-100 bg-slate-50/40 px-4 py-4">
+          <div className="flex flex-wrap items-end gap-3 border-b border-subtle bg-white px-4 py-4">
             <label className="block w-full sm:max-w-sm"><span className="text-[10px] font-bold uppercase tracking-wide text-muted">Search Bin Cards</span>
               <span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Item, code, category or location…" className="field pl-9" /></span>
@@ -370,14 +370,14 @@ export default function StockKeeperBinCards({
           </div>
           {filteredItems.length ? <TableScroll minWidth={760}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>
+              <thead className="bg-white text-[10px] uppercase text-muted"><tr>
                 {['Item', 'Category', 'Location', 'Current Balance', 'Minimum Level', 'Last Updated', 'Status'].map((column) =>
                   <th key={column} className="whitespace-nowrap px-4 py-3 font-bold">{column}</th>)}
               </tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredItems.map((item) => <tr key={item.id} className="hover:bg-slate-50/60">
+              <tbody className="divide-y divide-subtle">
+                {filteredItems.map((item) => <tr key={item.id} className="hover:bg-white">
                   <td className="px-4 py-3"><button type="button" onClick={() => { setSelectedId(String(item.id)); navigate('Bin Card', { item: item.id }); }}
-                    className="text-left font-bold text-brand hover:underline">{item.name}<span className="block text-[10px] font-normal text-muted">{item.sku}</span></button></td>
+                    className="text-left font-bold text-black hover:underline">{item.name}<span className="block text-[10px] font-normal text-muted">{item.sku}</span></button></td>
                   <td className="px-4 py-3">{item.category}</td><td className="px-4 py-3">{item.department || 'General storage'}</td>
                   <td className="px-4 py-3 font-extrabold">{item.balance} {item.unit}</td><td className="px-4 py-3">{item.minimumStock} {item.unit}</td>
                   <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(item.updatedAt)}</td>

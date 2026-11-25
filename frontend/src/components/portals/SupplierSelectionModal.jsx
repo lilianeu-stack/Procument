@@ -24,6 +24,12 @@ function eligibility(supplier) {
   return '';
 }
 
+function errorDetailsText(value) {
+  if (!value) return '—';
+  if (typeof value === 'string') return value;
+  return value.message || value.reason || JSON.stringify(value);
+}
+
 function decorated(supplier) {
   return {
     ...supplier,
@@ -116,8 +122,8 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
     onClose={onClose}
   >
     {stage === 'select' ? <div className="space-y-4">
-      <section className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
-        <p className="text-[10px] font-extrabold uppercase tracking-widest text-brand">Purchase order</p>
+      <section className="rounded-lg border border-brand bg-white p-4">
+        <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Purchase order</p>
         <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h3 className="display-font text-lg font-extrabold">{order?.reference || 'New purchase order'}</h3>
@@ -127,7 +133,7 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
           </div>
           <div className="text-right text-xs">
             <span className="block text-muted">Total</span>
-            <strong className="text-brand">{formatRwf(order?.total)}</strong>
+            <strong className="text-black">{formatRwf(order?.total)}</strong>
           </div>
         </div>
       </section>
@@ -135,7 +141,7 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
       <section>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h3 className="text-xs font-extrabold uppercase tracking-wide text-brand">Registered suppliers</h3>
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Registered suppliers</h3>
             <p className="mt-1 text-[11px] text-muted">Only active suppliers with a valid registered email can receive a pricing link.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -150,17 +156,17 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand bg-white px-3 py-2 text-xs">
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={selectAll} disabled={!eligibleIds.length} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-bold text-brand disabled:opacity-50">Select All</button>
-            <button type="button" onClick={deselectAll} disabled={!selected.length} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-bold text-muted disabled:opacity-50">Deselect All</button>
+            <button type="button" onClick={selectAll} disabled={!eligibleIds.length} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black disabled:opacity-50">Select All</button>
+            <button type="button" onClick={deselectAll} disabled={!selected.length} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-muted disabled:opacity-50">Deselect All</button>
           </div>
-          <span className="inline-flex items-center gap-1.5 font-bold text-brand"><Users size={14} />Selected Suppliers: {selected.length}</span>
+          <span className="inline-flex items-center gap-1.5 font-bold text-black"><Users size={14} />Selected Suppliers: {selected.length}</span>
         </div>
 
-        {filtered.length ? <div className="mt-3 max-h-[42vh] overflow-auto rounded-lg border border-slate-200">
+        {filtered.length ? <div className="mt-3 max-h-[42vh] overflow-auto rounded-lg border border-brand">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="sticky top-0 bg-white text-[10px] uppercase text-muted">
               <tr>{['', 'Supplier name', 'Registered email', 'Contact person', 'Supplier status'].map((heading) =>
                 <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -173,12 +179,12 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
                 <td className="px-3 py-3 font-bold">{supplier.name}</td>
                 <td className="px-3 py-3">
                   <span className="break-all">{supplier.email || '—'}</span>
-                  {supplier.reason === 'No registered email' && <span className="mt-1 block font-bold text-red-600">No registered email</span>}
+                  {supplier.reason === 'No registered email' && <span className="mt-1 block font-bold text-black">No registered email</span>}
                 </td>
                 <td className="px-3 py-3">{supplier.contact}</td>
                 <td className="px-3 py-3">
                   <StatusBadge value={supplier.status} />
-                  {supplier.reason === 'Inactive' && <span className="mt-1 block font-bold text-red-600">Inactive</span>}
+                  {supplier.reason === 'Inactive' && <span className="mt-1 block font-bold text-black">Inactive</span>}
                 </td>
               </tr>)}
             </tbody>
@@ -187,17 +193,17 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
         <button type="button" onClick={review} disabled={!selected.length}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
           Review request <ArrowLeft size={14} className="rotate-180" />
         </button>
       </div>
     </div> : stage === 'confirm' ? <div className="space-y-4">
-      <section className="rounded-lg border border-brand/20 bg-brand/5 p-4">
-        <h3 className="flex items-center gap-2 text-sm font-extrabold text-brand"><CheckCircle2 size={16} />Confirm before sending</h3>
-        <p className="mt-2 text-xs leading-5 text-slate-700">
+      <section className="rounded-lg border border-brand bg-white p-4">
+        <h3 className="flex items-center gap-2 text-sm font-extrabold text-black"><CheckCircle2 size={16} />Confirm before sending</h3>
+        <p className="mt-2 text-xs leading-5 text-black">
           A private pricing link will be emailed to each registered supplier. Quoted prices stay visible to Procurement only.
         </p>
         <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
@@ -206,8 +212,8 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
           <div><dt className="text-[10px] text-muted">Total</dt><dd className="font-bold">{formatRwf(order?.total)}</dd></div>
           <div><dt className="text-[10px] text-muted">Submission deadline</dt><dd className="font-bold">{deadline ? dateLabel(deadline) : 'Not configured'}</dd></div>
         </dl>
-        <ul className="mt-3 space-y-1.5 rounded-lg bg-white p-3 text-xs">
-          {chosen.map((supplier) => <li key={supplier.id} className="flex flex-wrap justify-between gap-2 border-b border-slate-100 pb-1.5 last:border-0 last:pb-0">
+        <ul className="mt-3 space-y-1.5 rounded-lg border border-brand bg-white p-3 text-xs">
+          {chosen.map((supplier) => <li key={supplier.id} className="flex flex-wrap justify-between gap-2 border-b border-subtle pb-1.5 last:border-0 last:pb-0">
             <span className="font-bold">{supplier.name}</span><span className="break-all text-muted">{supplier.email}</span>
           </li>)}
         </ul>
@@ -228,17 +234,17 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={() => { setStage('select'); setError(''); }} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Back</button>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={() => { setStage('select'); setError(''); }} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Back</button>
         <button type="button" onClick={confirmSend} disabled={busy || !confirmed}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
           {busy ? 'Saving and sending…' : 'Confirm and send'}
         </button>
       </div>
     </div> : <div className="space-y-4">
       <section className={`flex items-start gap-3 rounded-lg border p-4 text-sm ${missing.length || failed > 0 || accepted === 0
-        ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+        ? 'border-brand bg-white text-black' : 'border-brand bg-white text-black'}`}>
         {missing.length || failed > 0 || accepted === 0
           ? <AlertCircle size={18} className="mt-0.5 shrink-0" />
           : <CheckCircle2 size={18} className="mt-0.5 shrink-0" />}
@@ -257,7 +263,7 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
         </div>
       </section>
 
-      <dl className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs sm:grid-cols-3">
+      <dl className="grid gap-3 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-3">
         <div><dt className="text-[10px] text-muted">Request reference</dt><dd className="mt-1 break-all font-bold">{result?.reference || result?.requestId || '—'}</dd></div>
         <div><dt className="text-[10px] text-muted">Accepted</dt><dd className="mt-1 font-bold">{accepted}</dd></div>
         <div><dt className="text-[10px] text-muted">Failed</dt><dd className="mt-1 font-bold">{failed}</dd></div>
@@ -265,15 +271,15 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
         <div><dt className="text-[10px] text-muted">Skipped</dt><dd className="mt-1 font-bold">{Number(delivery.skipped) || 0}</dd></div>
       </dl>
 
-      {missing.length > 0 && <section className="rounded-lg border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+      {missing.length > 0 && <section className="rounded-lg border border-brand bg-white p-4 text-xs text-black">
         <h4 className="flex items-center gap-2 font-extrabold"><Mail size={14} />Missing email variables</h4>
         <p className="mt-1">Messages were NOT delivered. The following variables are missing:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5 font-bold">{missing.map((item, index) => <li key={`${item}-${index}`} className="break-all">{String(item)}</li>)}</ul>
       </section>}
 
-      {deliveries.length > 0 && <section className="overflow-x-auto rounded-lg border border-slate-200">
+      {deliveries.length > 0 && <section className="overflow-x-auto rounded-lg border border-brand">
         <table className="w-full min-w-[640px] text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-muted">
             <tr>{['Supplier', 'Recipient', 'Email status', 'Status', 'Error'].map((heading) => <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
           </thead>
           <tbody className="divide-y">
@@ -282,14 +288,14 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
               <td className="px-3 py-3 break-all">{item.recipientEmail || '—'}</td>
               <td className="px-3 py-3"><StatusBadge value={item.emailStatus || item.status || 'Pending'} /></td>
               <td className="px-3 py-3">{item.status || '—'}</td>
-              <td className="px-3 py-3 text-red-700">{item.errorDetails || '—'}</td>
+              <td className="px-3 py-3 text-black">{errorDetailsText(item.errorDetails)}</td>
             </tr>)}
           </tbody>
         </table>
       </section>}
 
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button>
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black">Done</button>
       </div>
     </div>}
   </Modal>;

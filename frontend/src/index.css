@@ -4,29 +4,232 @@
 
 :root {
   font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  color: #172638;
-  background: #f5f7fb;
+  --pims-reference: #7CB342;
+  --pims-success: var(--pims-reference);
+  --pims-surface: #FFFFFF;
+  --pims-ink: #000000;
+
+  /* Neutral border scale. A future dark theme only needs to override the RGB
+     channel token; every default border and divider resolves through it. */
+  --pims-border-rgb: 0 0 0;
+  --pims-border-subtle: rgb(var(--pims-border-rgb) / 0.08);
+  --pims-border: rgb(var(--pims-border-rgb) / 0.12);
+  --pims-border-strong: rgb(var(--pims-border-rgb) / 0.2);
+  --pims-hover: rgba(0, 0, 0, 0.04);
+
+  /* Match interactive states and primary surfaces to the selected green. */
+  --pims-interaction-green: var(--pims-reference);
+  --pims-interaction-green-rgb: 124 179 66;
+  --pims-interaction-green-text: #456921;
+  --pims-interaction-tint: rgb(var(--pims-interaction-green-rgb) / 0.12);
+  --pims-interaction-tint-strong: rgb(var(--pims-interaction-green-rgb) / 0.18);
+  --pims-interaction-row-tint: rgb(var(--pims-interaction-green-rgb) / 0.07);
+  --pims-interaction-row-solid: #F6FAF2;
+  --pims-interaction-field-tint: rgb(var(--pims-interaction-green-rgb) / 0.06);
+  --pims-interaction-border: rgb(var(--pims-interaction-green-rgb) / 0.55);
+  --pims-interaction-focus: rgb(var(--pims-interaction-green-rgb) / 0.85);
+  --pims-interaction-ring: rgb(var(--pims-interaction-green-rgb) / 0.28);
+
+  --tw-ring-color: var(--pims-border);
+  --tw-ring-offset-color: var(--pims-surface);
+  color: var(--pims-ink);
+  background: var(--pims-surface);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 360px; min-height: 100vh; }
+body { margin: 0; min-width: 360px; min-height: 100vh; background: var(--pims-surface); color: var(--pims-ink); }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
+a { color: inherit; }
+input, select, textarea { accent-color: var(--pims-reference); }
+input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; opacity: 1 !important; }
+::selection { background: var(--pims-reference); color: var(--pims-ink); }
 .display-font { font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { scrollbar-width: none; }
 
-:root[data-theme='dark'] {
-  --canvas: #101923;
-  --ink: #e8eef5;
-}
-:root[data-theme='dark'] body { background: #101923; color: #e8eef5; }
-:root[data-theme='dark'] .bg-canvas { background-color: #101923; }
-
 @layer components {
-  .field { @apply mt-1.5 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-brand; }
+  .field { @apply mt-1.5 h-10 w-full rounded-lg border border-brand px-3 text-sm font-normal outline-none focus:border-accent-border; }
+  button.bg-brand { border: 1px solid var(--pims-border); }
+  button.bg-brand:hover { background-color: var(--pims-interaction-tint); border-color: var(--pims-interaction-border); }
+}
+
+@layer utilities {
+  .hover\:bg-brand:hover { background-color: var(--pims-interaction-tint); border-color: var(--pims-interaction-border); }
+}
+
+@layer base {
+  *, ::before, ::after { border-color: var(--pims-border); }
+}
+
+@media screen {
+/* ---------------------------------------------------------------------------
+   Shared green interaction states use the same accent as primary actions and
+   active navigation. These rules override legacy hover utilities consistently.
+   --------------------------------------------------------------------------- */
+:where(
+  a[href], button, summary,
+  [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option'],
+  input:not([type='hidden']), select, textarea, label
+) {
+  transition-property: background-color, border-color, color, box-shadow, outline-color, accent-color;
+  transition-duration: 160ms;
+  transition-timing-function: ease;
+}
+
+:where(button, input, select, textarea, fieldset, optgroup, option):disabled,
+[aria-disabled='true'] {
+  /* Legacy hover utilities read this token; neutralizing it keeps disabled
+     controls visually inert without changing their authored default colors. */
+  --pims-hover: transparent;
+  cursor: not-allowed !important;
+}
+
+:where(a[href], button, [role='button'], [role='tab'], [role='menuitem']):disabled:hover,
+[aria-disabled='true']:hover {
+  filter: none !important;
+}
+
+/* Restore the authored white surface for disabled secondary controls whose
+   legacy hover utility now resolves to a transparent token. */
+:where(a[href], button, [role='button'], [role='tab'], [role='menuitem']):disabled:hover:is([class~='bg-white'], [class~='!bg-white'], [class~='bg-brand'], [class~='bg-canvas']),
+[aria-disabled='true']:hover:is([class~='bg-white'], [class~='!bg-white'], [class~='bg-brand'], [class~='bg-canvas']) {
+  background-color: var(--pims-surface) !important;
+}
+
+:where(
+  a[href], button, summary,
+  [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option']
+):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class~='bg-ink']):not([class~='!bg-black']):not([class*='bg-black/']):not([class*='text-white']):not([class*='!text-white']) {
+  background-color: var(--pims-interaction-tint) !important;
+  border-color: var(--pims-interaction-border) !important;
+  color: var(--pims-interaction-green-text) !important;
+}
+
+/* Primary green buttons keep dark text and receive a subtle green hover. */
+:where(a[href], button, [role='button'], [role='tab'], [role='menuitem']):hover:not(:disabled):not([aria-disabled='true']):not([aria-selected='true']):not([aria-pressed='true']):where([class~='bg-black'], [class~='bg-reference'], [class~='!bg-reference'], [class~='bg-ink'], [class~='!bg-black'], [class~='bg-black/85']) {
+  background-color: var(--pims-reference) !important;
+  background-image: linear-gradient(var(--pims-interaction-tint), var(--pims-interaction-tint)) !important;
+  border-color: var(--pims-interaction-border) !important;
+  color: var(--pims-ink) !important;
+}
+
+/* Keep legacy hover utility classes from reintroducing grey/black feedback. */
+[class*='hover:bg-hover']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:bg-white']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:bg-brand']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:text-black']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:!text-black']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:text-ink']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:!bg-white']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:border-black']:hover:not(:disabled):not([aria-disabled='true']),
+[class*='hover:border-brand']:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--pims-interaction-border) !important;
+}
+
+/* Group-hover helpers must stay neutral until the group is actually hovered. */
+.group:hover [class*='group-hover:bg-hover']:not(:disabled):not([aria-disabled='true']),
+.group:hover [class*='group-hover:text-black']:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--pims-interaction-border) !important;
+}
+
+:is(
+  [class*='hover:bg-hover'],
+  [class*='hover:bg-white'],
+  [class*='hover:bg-brand'],
+  [class*='hover:!bg-white'],
+  [class*='hover:text-black'],
+  [class*='hover:!text-black'],
+  [class*='hover:text-ink']
+):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class*='bg-black/']):not([class*='text-white']):not([class*='!text-white']) {
+  background-color: var(--pims-interaction-tint) !important;
+  color: var(--pims-interaction-green-text) !important;
+}
+
+.group:hover [class*='group-hover:bg-hover'] {
+  background-color: var(--pims-interaction-row-tint) !important;
+}
+
+.group:hover [class*='group-hover:text-black'] {
+  color: var(--pims-interaction-green-text) !important;
+}
+
+/* Form controls: subtle green tint on hover, stronger green focus ring. */
+:where(input:not([type='hidden']), select, textarea):hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--pims-interaction-border) !important;
+  background-color: var(--pims-interaction-field-tint) !important;
+}
+
+:where(input[type='checkbox'], input[type='radio'], input[type='range']):hover:not(:disabled),
+:where(input[type='checkbox'], input[type='radio'], input[type='range']):focus-visible {
+  accent-color: var(--pims-interaction-green) !important;
+}
+
+:where(input:not([type='hidden']), select, textarea):focus {
+  border-color: var(--pims-interaction-focus) !important;
+  box-shadow: 0 0 0 3px var(--pims-interaction-ring) !important;
+  outline: none;
+}
+
+/* Keyboard focus is green but visually distinct from hover. */
+:where(
+  a[href], button, summary,
+  [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option']
+):focus-visible:not(:disabled):not([aria-disabled='true']) {
+  outline: 2px solid var(--pims-interaction-focus) !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 0 4px var(--pims-interaction-ring) !important;
+}
+
+/* Table rows and selectable labels receive the lightest opaque tint. */
+tbody tr:hover:not([aria-disabled='true']):not([aria-selected='true']) {
+  background-color: var(--pims-interaction-row-solid) !important;
+  transition: background-color 160ms ease;
+}
+
+tbody tr:hover:not([aria-disabled='true']):not([aria-selected='true']) > :where(td, th) {
+  background-color: var(--pims-interaction-row-solid) !important;
+  transition: background-color 160ms ease;
+}
+
+tbody tr:hover > td.sticky,
+tbody tr:hover > th.sticky {
+  background-color: var(--pims-interaction-row-solid) !important;
+}
+
+label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='hover:border-']):not(.opacity-50):not(.opacity-60):not(.cursor-not-allowed):not([aria-disabled='true']) {
+  background-color: var(--pims-interaction-tint) !important;
+  border-color: var(--pims-interaction-border) !important;
+  color: var(--pims-interaction-green-text) !important;
+}
+
+/* Pressed state is slightly stronger, without adding lift or shadow. */
+:where(
+  a[href], button,
+  [role='button'], [role='link'], [role='tab'], [role='menuitem']
+):active:not(:disabled):not([aria-disabled='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class*='bg-black/']) {
+  background-color: var(--pims-interaction-tint-strong) !important;
+}
+
+/* Avoid distracting hover lift/shadow utilities left in legacy components. */
+.hover\:-translate-y-0\.5:hover,
+.hover\:shadow-md:hover,
+.hover\:shadow-lg:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(
+    a[href], button, summary,
+    [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option'],
+    input:not([type='hidden']), select, textarea, label
+  ) {
+    transition-duration: 0.01ms !important;
+  }
+  }
 }
 
 /* Off-screen content that should only appear on printed documents. */
@@ -38,13 +241,13 @@ button { cursor: pointer; }
   @bottom-right {
     content: 'Page ' counter(page) ' of ' counter(pages);
     font-size: 8pt;
-    color: #64748b;
+    color: var(--pims-ink);
   }
 }
 
 @media print {
-  :root { background: #fff; color: #172638; }
-  body { background: #fff; min-width: 0; }
+  :root { background: var(--pims-surface); color: var(--pims-ink); }
+  body { background: var(--pims-surface); min-width: 0; }
   .no-print,
   aside,
   nav,
@@ -57,10 +260,10 @@ button { cursor: pointer; }
   .field { display: none !important; }
 
   .print-only { display: block !important; }
-  .print-header { display: flex !important; align-items: center; gap: 12px; border-bottom: 1px solid #cbd5e1; padding-bottom: 10px; margin-bottom: 14px; }
+  .print-header { display: flex !important; align-items: center; gap: 12px; border-bottom: 1px solid var(--pims-border); padding-bottom: 10px; margin-bottom: 14px; }
   .print-header img { width: 46px; height: 46px; object-fit: contain; }
   .print-header strong { display: block; font-size: 14pt; }
-  .print-header span { display: block; font-size: 9pt; color: #64748b; }
+  .print-header span { display: block; font-size: 9pt; color: var(--pims-ink); }
 
   main, .min-h-screen, .mx-auto { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .fixed.inset-0 { position: static !important; display: block !important; background: transparent !important; padding: 0 !important; }
@@ -70,7 +273,7 @@ button { cursor: pointer; }
   h1, h2, h3, h4, thead { break-after: avoid; page-break-after: avoid; }
   tr, li, .print-block { break-inside: avoid; page-break-inside: avoid; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { border: 1px solid #e2e8f0; padding: 6px 8px; }
+  th, td { border: 1px solid var(--pims-border); padding: 6px 8px; }
   thead { display: table-header-group; }
   tfoot { display: table-footer-group; }
   a { color: inherit; text-decoration: none; }
@@ -88,52 +291,52 @@ button { cursor: pointer; }
   max-width: 210mm;
   margin: 0 auto;
   padding: 14mm 12mm;
-  background: #fff;
-  color: #172638;
+  background: var(--pims-surface);
+  color: var(--pims-ink);
   font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 10pt;
   line-height: 1.35;
 }
 
-.official-header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid #172638; padding-bottom: 10px; }
+.official-header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid var(--pims-border); padding-bottom: 10px; }
 .official-logo { width: 54px; height: 54px; object-fit: contain; }
 .official-header-text { display: flex; flex: 1; flex-direction: column; line-height: 1.2; }
 .official-header-text strong { font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 15pt; letter-spacing: .02em; }
-.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: #475569; }
-.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: #475569; }
+.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: var(--pims-ink); }
+.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: var(--pims-ink); }
 .official-title { margin: 18px 0 16px; text-align: center; font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 16pt; font-weight: 800; letter-spacing: .08em; }
 
-.official-label { display: block; font-size: 9pt; font-weight: 800; color: #334155; }
+.official-label { display: block; font-size: 9pt; font-weight: 800; color: var(--pims-ink); }
 .official-value { display: block; min-height: 18px; font-size: 10pt; font-weight: 600; }
 .official-strong { font-weight: 800; }
-.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: #475569; white-space: pre-wrap; }
+.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: var(--pims-ink); white-space: pre-wrap; }
 .official-center { text-align: center; }
 .official-right { text-align: right; }
 
 .official-details { margin-bottom: 14px; }
-.official-field { display: grid; grid-template-columns: 45mm 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
-.official-field .official-value { border-bottom: 1px solid #94a3b8; }
+.official-field { display: grid; grid-template-columns: 45mm 1fr; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
+.official-field .official-value { border-bottom: 1px solid var(--pims-border); }
 
 .official-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.official-table th, .official-table td { border: 1px solid #94a3b8; padding: 6px 7px; font-size: 9pt; vertical-align: top; }
-.official-table th { background: #f1f5f9; font-weight: 800; text-align: left; text-transform: none; }
+.official-table th, .official-table td { border: 1px solid var(--pims-border); padding: 6px 7px; font-size: 9pt; vertical-align: top; }
+.official-table th { background: var(--pims-surface); font-weight: 800; text-align: left; text-transform: none; }
 .official-blank-row td { height: 24px; }
 
-.official-purpose { margin-top: 14px; border: 1px solid #94a3b8; }
-.official-purpose .official-label { padding: 6px 8px; border-bottom: 1px solid #94a3b8; background: #f1f5f9; }
+.official-purpose { margin-top: 14px; border: 1px solid var(--pims-border); }
+.official-purpose .official-label { padding: 6px 8px; border-bottom: 1px solid var(--pims-border); background: var(--pims-surface); }
 .official-purpose p { min-height: 42px; margin: 0; padding: 8px; white-space: pre-wrap; }
 
-.official-approval-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; margin-top: 16px; border-top: 1px solid #94a3b8; border-left: 1px solid #94a3b8; }
-.official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid #94a3b8; border-bottom: 1px solid #94a3b8; }
-.official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid #64748b; }
+.official-approval-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; margin-top: 16px; border-top: 1px solid var(--pims-border); border-left: 1px solid var(--pims-border); }
+.official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid var(--pims-border); border-bottom: 1px solid var(--pims-border); }
+.official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid var(--pims-border); }
 
 .official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
-.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
+.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
 .official-po-field-wide { grid-column: 1 / -1; }
-.official-po-field .official-value { border-bottom: 1px solid #94a3b8; }
+.official-po-field .official-value { border-bottom: 1px solid var(--pims-border); }
 .official-po-table { margin-top: 4px; }
 .official-po-totals { margin-top: 14px; margin-left: auto; width: 75%; }
-.official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid #cbd5e1; }
+.official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
 .official-po-totals .official-po-words { display: block; }
 .official-po-totals .official-po-words .official-value { margin-top: 3px; font-weight: 700; }
 .official-po-approval { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 22px; }
@@ -151,7 +354,7 @@ button { cursor: pointer; }
     box-shadow: none !important;
     border: 0;
   }
-  .official-document th, .official-document td { border: 1px solid #94a3b8; }
+  .official-document th, .official-document td { border: 1px solid var(--pims-border); }
   .official-document tr, .official-document .official-purpose, .official-document .official-approval-grid > div { break-inside: avoid; page-break-inside: avoid; }
   .official-title { break-after: avoid; page-break-after: avoid; }
 }

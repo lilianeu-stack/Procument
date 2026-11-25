@@ -85,15 +85,24 @@ export default function ProcurementProcessingPage({
     onAward: actions.onAward,
     onLoadEmailDeliveries: actions.onLoadEmailDeliveries,
     onRetryFailedEmails: actions.onRetryFailedEmails,
-    onResendRfqEmail: actions.onResendRfqEmail
+    onResendRfqEmail: actions.onResendRfqEmail,
+    listRfqs: actions.listRfqs,
+    getRfqStats: actions.getRfqStats,
+    getRfqDetail: actions.getRfqDetail,
+    onUpdateRFQ: actions.onUpdateRFQ,
+    onDeleteRFQ: actions.onDeleteRFQ,
+    onSendRFQ: actions.onSendRFQ,
+    onCloseRFQ: actions.onCloseRFQ,
+    navigate,
+    portalApi
   };
 
   return <div className="space-y-5">
     <div className="no-print flex flex-wrap items-center justify-between gap-3">
-      <button type="button" onClick={backToDocument} className="inline-flex items-center gap-1.5 text-xs font-bold text-muted hover:text-brand">
+      <button type="button" onClick={backToDocument} className="inline-flex items-center gap-1.5 text-xs font-bold text-muted hover:text-black">
         <ArrowLeft size={14} />Back to request document
       </button>
-      <span className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Procurement workflow</span>
+      <span className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Procurement workflow</span>
     </div>
 
     {loading && !request ? <LoadingState label="Opening procurement workflow…" /> : null}
@@ -113,7 +122,7 @@ export default function ProcurementProcessingPage({
           <KeyValue label="Forwarded to procurement">{dateTimeLabel(request.forwardedAt)}</KeyValue>
           <KeyValue label="Estimated total">{currency(request.financials?.grandTotal ?? request.total)}</KeyValue>
         </div>
-        <div className="border-t border-slate-100 px-5 py-3 text-[11px] leading-5 text-muted">
+        <div className="border-t border-subtle px-5 py-3 text-[11px] leading-5 text-muted">
           Items, prices, supplier quotation history, approvals and the complete request history remain available in the
           original document. RFQs and purchase orders below are limited to this request.
         </div>
@@ -123,10 +132,10 @@ export default function ProcurementProcessingPage({
         {TABS.map(({ id, label, icon: Icon, hint }) => <button
           key={id} type="button" role="tab" aria-selected={activeTab === id}
           onClick={() => switchTab(id)}
-          className={`flex items-center gap-2 rounded-lg border px-4 py-2.5 text-left text-xs font-bold transition ${activeTab === id ? 'border-brand bg-brand text-white' : 'border-slate-200 bg-white text-muted hover:border-brand hover:text-brand'}`}
+          className={`flex items-center gap-2 rounded-lg border px-4 py-2.5 text-left text-xs font-bold transition ${activeTab === id ? 'border-black bg-white text-black' : 'border-brand bg-white text-muted hover:border-black hover:text-black'}`}
         >
           <Icon size={15} />
-          <span><span className="block">{label}</span><span className={`mt-0.5 block text-[10px] font-normal ${activeTab === id ? 'text-emerald-50' : 'text-muted'}`}>{hint}</span></span>
+          <span><span className="block">{label}</span><span className={`mt-0.5 block text-[10px] font-normal ${activeTab === id ? 'text-black' : 'text-muted'}`}>{hint}</span></span>
         </button>)}
       </div>
 
@@ -140,6 +149,7 @@ export default function ProcurementProcessingPage({
         initialRequisitionId={requestId}
         {...rfqActions}
       /> : activeTab === 'purchase-orders' ? <PurchaseOrdersPage
+        query={query}
         orders={scopedOrders}
         rfqs={scopedRfqs}
         items={data.items || []}

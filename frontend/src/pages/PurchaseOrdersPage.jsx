@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, Mail, Pencil, Plus, Send, Trash2 } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
@@ -8,6 +8,7 @@ import PurchaseOrderDocument from '../components/documents/PurchaseOrderDocument
 import SupplierPricingAwardSummary from '../components/documents/SupplierPricingAwardSummary.jsx';
 import SendForApprovalModal from '../components/portals/SendForApprovalModal.jsx';
 import SupplierSelectionModal from '../components/portals/SupplierSelectionModal.jsx';
+import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
 import {
   PURCHASE_ORDER_TYPES, calculatePurchaseTotals,
@@ -15,6 +16,17 @@ import {
 } from '../utils/purchaseCalculations.js';
 
 // The frontend values are previews only; the backend recalculates all totals.
+// Overview cards open the existing page with a query filter. These groups mirror
+// the dashboard counts without adding a new route or changing backend data.
+const PO_STATUS_GROUPS = {
+  'Pending approval': ['Pending approval'],
+  Approved: ['Approved', 'Partially received', 'Received']
+};
+
+const createPoButtonClass = 'inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-reference px-4 py-2.5 text-xs font-semibold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 sm:w-auto';
+const rowActionClass = 'inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[10px] font-semibold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1';
+const rowPrimaryActionClass = 'inline-flex min-h-8 w-full items-center justify-center gap-1.5 rounded-lg bg-reference px-2.5 py-1.5 text-[10px] font-semibold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1';
+
 const emptyLine = () => ({ itemName: '', description: '', quantity: '1', unit: 'unit', unitPrice: '' });
 
 function normalizeDetail(response) {
@@ -91,9 +103,9 @@ function validateLines(lines) {
 function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
   const totals = calculatePurchaseTotals(lines, vatRate ?? configuredVatRate());
   return <div className="space-y-3">
-    <div className="overflow-x-auto rounded-lg border border-slate-200">
+    <div className="overflow-x-auto rounded-lg border border-brand">
       <table className="w-full min-w-[760px] text-left text-xs">
-        <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+        <thead className="bg-white text-[10px] uppercase text-muted">
           <tr>{['Item No.', 'Quantity', 'Unit', 'Description', 'Unit Price', 'Total Price', ''].map((heading) =>
             <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}</tr>
         </thead>
@@ -114,21 +126,21 @@ function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
               onChange={(event) => onChange(index, 'unitPrice', event.target.value)} className="field mt-0 w-28" /></td>
             <td className="whitespace-nowrap px-3 py-4 font-bold">{formatRwf((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}</td>
             <td className="px-3 py-3"><button type="button" onClick={() => onRemove(index)} aria-label={`Remove line ${index + 1}`}
-              className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-red-50 hover:text-red-600">
+              className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-white hover:text-black">
               <Trash2 size={14} /><span className="text-[10px] font-bold">Remove</span>
             </button></td>
           </tr>)}
         </tbody>
       </table>
     </div>
-    <button type="button" onClick={onAdd} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand">
+    <button type="button" onClick={onAdd} className="inline-flex items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-black">
       <Plus size={14} />Add line
     </button>
-    <dl className="grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2">
-      <dt className="sm:col-span-2 text-[10px] font-extrabold uppercase tracking-wide text-brand">Financial Summary</dt>
+    <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
+      <dt className="sm:col-span-2 text-[10px] font-extrabold uppercase tracking-wide text-black">Financial Summary</dt>
       <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="font-bold">{formatRwf(totals.subtotal)}</dd></div>
       <div className="flex justify-between"><dt className="text-muted">VAT ({totals.vatRate}%)</dt><dd className="font-bold">{formatRwf(totals.vatAmount)}</dd></div>
-      <div className="flex justify-between sm:col-span-2"><dt className="font-bold">Total Amount</dt><dd className="font-extrabold text-brand">{formatRwf(totals.total)}</dd></div>
+      <div className="flex justify-between sm:col-span-2"><dt className="font-bold">Total Amount</dt><dd className="font-extrabold text-black">{formatRwf(totals.total)}</dd></div>
       <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Total Amount in Words · Rwandan Francs</dt><dd className="mt-1 font-semibold">{totals.amountInWords}</dd></div>
     </dl>
   </div>;
@@ -205,7 +217,7 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
   return <Modal title="New purchase order · official form" size="xl" onClose={onClose}>
     <form onSubmit={(event) => { event.preventDefault(); void startSend(); }} className="space-y-5">
       <section>
-        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Purchase order details</h3>
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order details</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-bold">Awarded RFQ *
             <select required value={form.rfqId} onChange={(event) => setForm({ ...form, rfqId: event.target.value })} className="field">
@@ -219,10 +231,10 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
             </select>
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value="Assigned when saved" className="field bg-slate-50 text-muted" />
+            <input readOnly value="Assigned when saved" className="field bg-white text-muted" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-slate-50 text-muted" />
+            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-white text-muted" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
@@ -230,8 +242,8 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
         </div>
       </section>
 
-      <section className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
-        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Registered supplier information</h3>
+      <section className="rounded-lg border border-brand bg-white p-4">
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Registered supplier information</h3>
         <dl className="grid gap-3 text-xs sm:grid-cols-3">
           <div><dt className="text-[10px] text-muted">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
           <div><dt className="text-[10px] text-muted">Supplier Contact</dt><dd className="font-bold">{supplier.contact}</dd></div>
@@ -241,17 +253,17 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
       </section>
 
       <section>
-        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Purchase order items</h3>
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
         <ItemTable lines={lines} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
         {requisitionLines.length > 0 && <p className="mt-2 text-[10px] text-muted">Lines were prefilled from the originating requisition. Final prices are recalculated from the awarded quotation.</p>}
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
         <button type="submit" disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
           <Send size={14} />{busy ? 'Saving Purchase Order…' : 'Send to Suppliers'}
         </button>
       </div>
@@ -314,13 +326,13 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
   return <Modal title={`Edit purchase order · ${order.reference}`} size="xl" onClose={onClose}>
     <form onSubmit={(event) => { event.preventDefault(); void startSend(); }} className="space-y-5">
       <section>
-        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Purchase order details</h3>
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order details</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-bold">Supplier
-            <input readOnly value={order.supplier || '—'} className="field bg-slate-50 text-muted" />
+            <input readOnly value={order.supplier || '—'} className="field bg-white text-muted" />
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value={order.reference || '—'} className="field bg-slate-50 text-muted" />
+            <input readOnly value={order.reference || '—'} className="field bg-white text-muted" />
           </label>
           <label className="block text-xs font-bold">Supplier Contact
             <input value={form.supplierContact} onChange={(event) => setForm({ ...form, supplierContact: event.target.value })} className="field" />
@@ -334,7 +346,7 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
             <input value={form.supplierAddress} onChange={(event) => setForm({ ...form, supplierAddress: event.target.value })} className="field" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-slate-50 text-muted" />
+            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-white text-muted" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
@@ -344,16 +356,16 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
       </section>
 
       <section>
-        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Purchase order items</h3>
+        <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
         <ItemTable lines={lines} vatRate={vatRate} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
+      <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
         <button type="submit" disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
           <Send size={14} />{busy ? 'Saving Purchase Order…' : 'Send to Suppliers'}
         </button>
       </div>
@@ -382,7 +394,7 @@ function ReceiptForm({ order, items, onClose, onSubmit }) {
 
 export default function PurchaseOrdersPage({
   orders = [], rfqs = [], items = [], suppliers = [], user = {}, requisition = null,
-  onCreate, onDecision, onReceive, getPurchaseOrder, updatePurchaseOrder,
+  query = {}, navigate, onCreate, onDecision, onReceive, getPurchaseOrder, updatePurchaseOrder,
   loadApprovers, onSendForApproval, onRevokeApproval, sendPurchaseOrderToSuppliers
 }) {
   const [creating, setCreating] = useState(false);
@@ -394,6 +406,7 @@ export default function PurchaseOrdersPage({
   const [detailMode, setDetailMode] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const openedQueryOrder = useRef(null);
   const canCreate = ['admin', 'procurement'].includes(user.role);
   const canApprove = ['admin', 'approver'].includes(user.role);
   const canReceive = ['admin', 'storekeeper', 'procurement'].includes(user.role);
@@ -402,6 +415,12 @@ export default function PurchaseOrdersPage({
   const scopedOrders = requestId
     ? orders.filter((order) => Number(order.requisitionId) === requestId)
     : orders;
+  const activePoStatuses = Object.prototype.hasOwnProperty.call(PO_STATUS_GROUPS, query.status)
+    ? PO_STATUS_GROUPS[query.status]
+    : null;
+  const visibleOrders = activePoStatuses
+    ? scopedOrders.filter((order) => activePoStatuses.includes(order.status))
+    : scopedOrders;
   const scopedRfqs = requestId
     ? rfqs.filter((rfq) => Number(rfq.requisitionId) === requestId)
     : rfqs;
@@ -432,6 +451,18 @@ export default function PurchaseOrdersPage({
   function closeDetail() {
     setDetail(null); setDetailMode(''); setDetailError('');
   }
+
+  // Overview links carry `order`; opening the existing Purchase orders page with
+  // that parameter reveals the actual official document instead of a filtered list.
+  const linkedOrderId = Number(query.order || query.view || 0);
+  useEffect(() => {
+    if (!Number.isInteger(linkedOrderId) || linkedOrderId <= 0) return;
+    if (openedQueryOrder.current === linkedOrderId) return;
+    const linkedOrder = scopedOrders.find((order) => Number(order.id) === linkedOrderId);
+    if (!linkedOrder) return;
+    openedQueryOrder.current = linkedOrderId;
+    void openDetail(linkedOrder, 'view');
+  }, [linkedOrderId, scopedOrders, getPurchaseOrder]);
 
   async function saveEdit(payload) {
     if (!updatePurchaseOrder || !detail) throw new Error('Purchase order editing is not available.');
@@ -528,36 +559,93 @@ export default function PurchaseOrdersPage({
   }
 
   return <>
-    <PageCard title="Purchase orders" description={`${scopedOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => setCreating(true)} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Create PO</button>}>
+    <PageCard className="shadow-dashboard" title="Purchase orders" description={`${visibleOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => setCreating(true)} className={createPoButtonClass}><Plus size={15} />Create PO</button>}>
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
       {detailError && <div className="p-4"><ErrorMessage>{detailError}</ErrorMessage></div>}
-      {notice && <div className="px-4 pb-4"><p role="status" className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">{notice}</p></div>}
-      {scopedOrders.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['PO', 'Supplier / registered contact', 'Requisition', 'Type', 'Items', 'Total', 'Delivery', 'Status', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{scopedOrders.map((order) => <tr key={order.id}>
-        <td className="px-4 py-4 font-bold">{order.reference}</td>
-        <td className="px-4 py-4"><div className="font-bold">{order.supplier}</div><div className="text-[10px] text-muted">{order.supplierContact || 'No contact recorded'}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}</div></td>
-        <td className="px-4 py-4">{order.requisition}</td>
-        <td className="px-4 py-4">{order.type || 'Standard'}</td>
-        <td className="max-w-[220px] px-4 py-4 text-muted">{order.items}</td>
-        <td className="px-4 py-4 font-bold">{currency(order.total)}</td>
-        <td className="px-4 py-4">{dateLabel(order.deliveryDate)}</td>
-        <td className="px-4 py-4">
-          <div className="font-semibold">{order.status}</div>
-          {order.supplierPricingStatus && order.supplierPricingStatus !== 'Not requested'
-            && <div className="mt-1 text-[10px] text-muted">Supplier pricing · {order.supplierPricingStatus}</div>}
-          {order.approval && <div className="mt-1 text-[10px] text-muted">
-            {order.approval.status === 'Pending' ? `Sent to ${order.approval.recipientName}` : `Approval ${order.approval.status}`}
-            {order.approval.decisionComment ? ` · “${order.approval.decisionComment}”` : ''}
-          </div>}
-        </td>
-        <td className="px-4 py-4"><div className="flex flex-wrap gap-1">
-          <button type="button" onClick={() => openDetail(order, 'view')} className="rounded border border-slate-200 px-2 py-1 text-brand inline-flex items-center gap-1"><Eye size={12} />View</button>
-          {canEditPurchaseOrder(order, user) && <button type="button" onClick={() => openDetail(order, 'edit')} className="rounded border border-slate-200 px-2 py-1 text-brand inline-flex items-center gap-1"><Pencil size={12} />Edit</button>}
-          {canCreate && order.status === 'Pending approval' && canSendForApproval(order) && <button type="button" onClick={() => { setNotice(''); setSendOrder(order); }} className="inline-flex items-center gap-1 rounded border border-brand bg-brand/5 px-2 py-1 font-bold text-brand"><Mail size={12} />Send for approval</button>}
-          {canCreate && order.status === 'Pending approval' && order.supplierPricingStatus !== 'Awarded' && <button type="button" onClick={() => { setNotice(''); setSendOrder({ ...order, __sendToSuppliers: true }); }} className="inline-flex items-center gap-1 rounded border border-brand bg-brand/5 px-2 py-1 font-bold text-brand"><Send size={12} />Send to Suppliers</button>}
-          {canApprove && order.status === 'Pending approval' && canSendForApproval(order) && <><button type="button" onClick={() => decide(order.id, 'Approved')} className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Approve</button><button type="button" onClick={() => decide(order.id, 'Rejected')} className="rounded bg-red-50 px-2 py-1 text-red-700">Reject</button></>}
-          {canReceive && ['Approved', 'Partially received'].includes(order.status) && <button type="button" onClick={() => setReceiving(order)} className="rounded border px-2 py-1 text-brand">Receive</button>}
-        </div></td>
-      </tr>)}</tbody></table></div> : <EmptyState>{requestId ? 'No purchase orders for this request yet.' : 'No purchase orders are ready.'}</EmptyState>}
+      {notice && <div className="px-4 pb-4"><p role="status" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">{notice}</p></div>}
+      {activePoStatuses && <div className="px-4 pb-3">
+        <button type="button" onClick={() => navigate?.('Purchase orders')} className="inline-flex items-center gap-2 rounded-full border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:bg-hover">
+          Filtered: {query.status}<span className="text-black/50 underline">Clear</span>
+        </button>
+      </div>}
+      {visibleOrders.length ? <div className="overflow-x-auto">
+        <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-xs">
+          <colgroup>
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '18%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '9%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '12%' }} />
+          </colgroup>
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+            <tr className="border-b border-subtle">
+              {['PO', 'Supplier / registered contact', 'Requisition', 'Type', 'Items', 'Total', 'Delivery', 'Status', 'Actions']
+                .map((cell) => <th key={cell} scope="col" className="whitespace-nowrap px-3 py-3.5 font-extrabold">{cell}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-subtle">
+            {visibleOrders.map((order) => <tr key={order.id} className="align-top transition-colors hover:bg-hover">
+              <td className="break-words px-3 py-4 font-extrabold leading-5 text-black">{order.reference}</td>
+              <td className="px-3 py-4">
+                <div className="break-words font-bold leading-5 text-black">{order.supplier || '—'}</div>
+                <div className="mt-1 break-words text-[10px] leading-4 text-muted">
+                  {order.supplierContact || 'No contact recorded'}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}
+                </div>
+              </td>
+              <td className="break-words px-3 py-4 font-medium text-muted">{order.requisition || '—'}</td>
+              <td className="px-3 py-4">
+                <span className="inline-flex rounded-md border border-brand bg-white px-2 py-1 text-[10px] font-semibold text-black">
+                  {order.type || 'Standard'}
+                </span>
+              </td>
+              <td className="whitespace-pre-line break-words px-3 py-4 text-[11px] leading-5 text-muted">{order.items || '—'}</td>
+              <td className="whitespace-nowrap px-3 py-4 text-right font-extrabold tabular-nums text-black">{currency(order.total)}</td>
+              <td className="whitespace-nowrap px-3 py-4 tabular-nums text-muted">{dateLabel(order.deliveryDate) || '—'}</td>
+              <td className="px-3 py-4">
+                <StatusBadge value={order.status} className="max-w-full whitespace-normal text-[10px] leading-tight" />
+                {order.supplierPricingStatus && order.supplierPricingStatus !== 'Not requested'
+                  && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">Supplier pricing · {order.supplierPricingStatus}</div>}
+                {order.approval && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">
+                  {order.approval.status === 'Pending' ? `Sent to ${order.approval.recipientName}` : `Approval ${order.approval.status}`}
+                  {order.approval.decisionComment ? ` · “${order.approval.decisionComment}”` : ''}
+                </div>}
+              </td>
+              <td className="px-3 py-4">
+                <div className="flex flex-col gap-1.5">
+                  <button type="button" onClick={() => openDetail(order, 'view')}
+                    aria-label={`View purchase order ${order.reference}`} className={rowActionClass}>
+                    <Eye size={12} />View
+                  </button>
+                  {canEditPurchaseOrder(order, user) && <button type="button" onClick={() => openDetail(order, 'edit')}
+                    aria-label={`Edit purchase order ${order.reference}`} className={rowActionClass}>
+                    <Pencil size={12} />Edit
+                  </button>}
+                  {canCreate && order.status === 'Pending approval' && canSendForApproval(order) && <button type="button"
+                    onClick={() => { setNotice(''); setSendOrder(order); }} className={rowPrimaryActionClass}>
+                    <Mail size={12} />Send for approval
+                  </button>}
+                  {canCreate && order.status === 'Pending approval' && order.supplierPricingStatus !== 'Awarded' && <button type="button"
+                    onClick={() => { setNotice(''); setSendOrder({ ...order, __sendToSuppliers: true }); }} className={rowActionClass}>
+                    <Send size={12} />Send to Suppliers
+                  </button>}
+                  {canApprove && order.status === 'Pending approval' && canSendForApproval(order) && <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" onClick={() => decide(order.id, 'Approved')}
+                      className="min-h-8 rounded-lg border border-brand bg-white px-2 py-1.5 text-[10px] font-semibold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1">Approve</button>
+                    <button type="button" onClick={() => decide(order.id, 'Rejected')}
+                      className="min-h-8 rounded-lg border border-brand bg-white px-2 py-1.5 text-[10px] font-semibold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1">Reject</button>
+                  </div>}
+                  {canReceive && ['Approved', 'Partially received'].includes(order.status) && <button type="button"
+                    onClick={() => setReceiving(order)} className={rowActionClass}>Receive</button>}
+                </div>
+              </td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div> : <EmptyState>{requestId ? 'No purchase orders for this request yet.' : 'No purchase orders are ready.'}</EmptyState>}
     </PageCard>
 
     {creating && <OrderForm rfqs={scopedRfqs} requisition={requisition} initialRfqId={initialRfqId} onClose={() => setCreating(false)} onSubmit={onCreate}
@@ -575,16 +663,16 @@ export default function PurchaseOrdersPage({
           <DownloadButton type="purchaseOrder" id={detail.id} format="xlsx" label="Excel" />
         </div>
         <div className="flex flex-wrap gap-2">
-          {canEditPurchaseOrder(detail, user) && <button type="button" onClick={() => setDetailMode('edit')} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand"><Pencil size={14} />Edit</button>}
-          {canCreate && detail.status === 'Pending approval' && canSendForApproval(detail) && <button type="button" onClick={() => { setNotice(''); setSendOrder(detail); }} className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-brand/5 px-3 py-2 text-xs font-bold text-brand"><Mail size={14} />Send for approval</button>}
-          {canCreate && detail.status === 'Pending approval' && detail.supplierPricingStatus !== 'Awarded' && <button type="button" onClick={() => { setNotice(''); setSendOrder({ ...detail, __sendToSuppliers: true }); }} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Send size={14} />Send to Suppliers</button>}
-          <button type="button" onClick={closeDetail} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">Close</button>
+          {canEditPurchaseOrder(detail, user) && <button type="button" onClick={() => setDetailMode('edit')} className="inline-flex items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-black"><Pencil size={14} />Edit</button>}
+          {canCreate && detail.status === 'Pending approval' && canSendForApproval(detail) && <button type="button" onClick={() => { setNotice(''); setSendOrder(detail); }} className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-3 py-2 text-xs font-bold text-black"><Mail size={14} />Send for approval</button>}
+          {canCreate && detail.status === 'Pending approval' && detail.supplierPricingStatus !== 'Awarded' && <button type="button" onClick={() => { setNotice(''); setSendOrder({ ...detail, __sendToSuppliers: true }); }} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"><Send size={14} />Send to Suppliers</button>}
+          <button type="button" onClick={closeDetail} className="rounded-lg border border-brand px-3 py-2 text-xs font-bold">Close</button>
         </div>
       </div>
-      {detail.approval && <section className="no-print mb-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+      {detail.approval && <section className="no-print mb-4 rounded-lg border border-brand bg-white p-4 text-xs">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <strong className="text-brand">Approval request · {detail.approval.status}</strong>
-          {detail.approval.status === 'Pending' && canCreate && <button type="button" onClick={() => revokeApproval(detail)} className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 font-bold text-red-700">Revoke link</button>}
+          <strong className="text-black">Approval request · {detail.approval.status}</strong>
+          {detail.approval.status === 'Pending' && canCreate && <button type="button" onClick={() => revokeApproval(detail)} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black">Revoke link</button>}
         </div>
         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div><dt className="text-[10px] text-muted">Recipient</dt><dd className="font-bold">{detail.approval.recipientName || '—'}</dd></div>
@@ -594,7 +682,7 @@ export default function PurchaseOrdersPage({
           {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-muted">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
         </dl>
       </section>}
-      <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="max-h-[65vh] overflow-auto rounded-lg border border-brand bg-white p-3">
         <PurchaseOrderDocument order={detail} />
         {detail.supplierPricingAward && <div className="mt-4"><SupplierPricingAwardSummary award={detail.supplierPricingAward} /></div>}
       </div>

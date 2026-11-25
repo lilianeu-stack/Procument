@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Save, Send } from 'lucide-react';
-import BrandLogo from '../ui/BrandLogo.jsx';
 import PageCard, { EmptyState } from '../ui/PageCard.jsx';
 import Modal from '../ui/Modal.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
@@ -218,18 +217,15 @@ export default function SupplierPricingPage({ token }) {
   return <div className="min-h-screen bg-canvas">
     <header className="no-print border-b bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-        <BrandLogo />
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Supplier pricing portal</span>
-          <PrintButton label="Print" />
-        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Supplier pricing portal</span>
+        <PrintButton label="Print" />
       </div>
     </header>
 
     <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
       <div>
-        <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Private supplier response</p>
-        <h1 className="display-font mt-1 text-2xl font-extrabold text-slate-900 sm:text-3xl">Purchase Order – Supplier Pricing Response</h1>
+        <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Private supplier response</p>
+        <h1 className="display-font mt-1 text-2xl font-extrabold text-black sm:text-3xl">Purchase Order – Supplier Pricing Response</h1>
         <p className="mt-2 max-w-3xl text-xs leading-5 text-muted">
           Enter your own prices for the requested items. Your response is visible to Procurement only.
         </p>
@@ -237,10 +233,10 @@ export default function SupplierPricingPage({ token }) {
 
       {loading && <PageCard title="Opening pricing request"><LoadingState label="Opening your pricing request…" /></PageCard>}
       {!loading && error && !request && <PageCard title="Pricing link"><ErrorState message={error} onRetry={load} /></PageCard>}
-      {!loading && error && request && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{error}</div>}
-      {validationError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">{validationError}</div>}
-      {notice && <div className="flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-800"><CheckCircle2 size={16} className="mt-0.5 shrink-0" />{notice}</div>}
-      {locked && <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs font-semibold text-blue-800">
+      {!loading && error && request && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{error}</div>}
+      {validationError && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{validationError}</div>}
+      {notice && <div className="flex items-start gap-2 rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black"><CheckCircle2 size={16} className="mt-0.5 shrink-0" />{notice}</div>}
+      {locked && <div className="flex items-start gap-2 rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">
         <CheckCircle2 size={16} className="mt-0.5 shrink-0" />
         <span>Your quotation was submitted{response.submittedAt ? ` on ${dateTimeLabel(response.submittedAt)}` : ''}. It is read-only while Procurement reviews it.</span>
       </div>}
@@ -262,7 +258,7 @@ export default function SupplierPricingPage({ token }) {
                 <dd key={`organization-${index}`} className="mt-0.5 text-xs text-muted">{value}</dd>)}
             </div>
             <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Currency</dt><dd className="mt-1 text-sm font-bold">{details.currency || currencyCode}</dd></div>
-            {details.message && <div className="sm:col-span-3 rounded-lg bg-emerald-50/60 p-4 text-xs leading-5 text-slate-700"><dt className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-700">Message from Procurement</dt><dd className="mt-1 whitespace-pre-wrap">{details.message}</dd></div>}
+            {details.message && <div className="sm:col-span-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black"><dt className="text-[10px] font-extrabold uppercase tracking-wide text-black">Message from Procurement</dt><dd className="mt-1 whitespace-pre-wrap">{details.message}</dd></div>}
           </dl>
         </PageCard>
 
@@ -278,7 +274,7 @@ export default function SupplierPricingPage({ token }) {
         <PageCard title="Requested Items" description="Enter your own unit prices. Requested quantities and descriptions cannot be changed.">
           {items.length ? <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-muted">
                 <tr>{['Item No.', 'Quantity', 'Unit', 'Description', 'Supplier Unit Price', 'Supplier Total Price'].map((heading) =>
                   <th key={heading} className="px-4 py-3 font-bold">{heading}</th>)}</tr>
               </thead>
@@ -308,11 +304,11 @@ export default function SupplierPricingPage({ token }) {
 
         <PageCard title="Your Quotation" description="Your own prices only. These figures are never shared with other suppliers.">
           <div className="space-y-5 p-5">
-            <dl className="grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:max-w-md">
+            <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:max-w-md">
               <div className="flex justify-between"><dt className="text-muted">Your subtotal</dt><dd className="font-bold">{money(totals.subtotal, currencyCode)}</dd></div>
               <div className="flex justify-between"><dt className="text-muted">VAT ({vatRate}%)</dt><dd className="font-bold">{money(totals.vatAmount, currencyCode)}</dd></div>
               {otherCharges > 0 && <div className="flex justify-between"><dt className="text-muted">Other charges</dt><dd className="font-bold">{money(totals.otherCharges, currencyCode)}</dd></div>}
-              <div className="flex justify-between border-t border-slate-200 pt-2"><dt className="font-bold">Your total</dt><dd className="font-extrabold text-brand">{money(totals.total, currencyCode)}</dd></div>
+              <div className="flex justify-between border-t border-subtle pt-2"><dt className="font-bold">Your total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>
             </dl>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -342,14 +338,14 @@ export default function SupplierPricingPage({ token }) {
               </label>
             </div>
 
-            {!locked && <div className="no-print flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+            {!locked && <div className="no-print flex flex-wrap gap-2 border-t border-subtle pt-4">
               <button type="button" onClick={saveDraft} disabled={busy}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">
                 {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}Save Draft
               </button>
               <button type="button" onClick={() => { const problem = validate(); if (problem) { setValidationError(problem); return; } setValidationError(''); setSubmitConfirmed(false); setSubmitOpen(true); }}
                 disabled={busy}
-                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
                 <Send size={14} />Submit Quotation
               </button>
             </div>}
@@ -361,22 +357,22 @@ export default function SupplierPricingPage({ token }) {
 
     {submitOpen && <Modal title="Submit your quotation" onClose={() => setSubmitOpen(false)}>
       <div className="space-y-4">
-        <div className="flex items-start gap-3 rounded-lg border border-brand/20 bg-brand/5 p-4 text-xs leading-5 text-slate-700">
-          <AlertCircle size={18} className="mt-0.5 shrink-0 text-brand" />
+        <div className="flex items-start gap-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black">
+          <AlertCircle size={18} className="mt-0.5 shrink-0 text-black" />
           <p>Once submitted, your quotation becomes read-only. Make sure every unit price, your validity period and your delivery lead time are correct.</p>
         </div>
-        <dl className="grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2">
-          <div><dt className="text-[10px] text-muted">Supplier total</dt><dd className="font-extrabold text-brand">{money(totals.total, currencyCode)}</dd></div>
+        <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
+          <div><dt className="text-[10px] text-muted">Supplier total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>
           <div><dt className="text-[10px] text-muted">Items priced</dt><dd className="font-bold">{items.length}</dd></div>
         </dl>
         <label className="flex items-start gap-2 text-xs font-semibold">
           <input type="checkbox" checked={submitConfirmed} onChange={(event) => setSubmitConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4" />
           I confirm this is my final quotation for {details.purchaseOrderReference || 'this purchase order'}.
         </label>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" onClick={() => setSubmitOpen(false)} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" onClick={() => setSubmitOpen(false)} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
           <button type="button" onClick={submitQuotation} disabled={busy || !submitConfirmed}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             {busy ? 'Submitting…' : 'Confirm and submit'}
           </button>

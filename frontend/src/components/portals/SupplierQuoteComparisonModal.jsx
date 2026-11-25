@@ -82,7 +82,7 @@ export default function SupplierQuoteComparisonModal({
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-[10px] font-extrabold uppercase tracking-widest text-brand">Private procurement review</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Private procurement review</p>
           <h3 className="display-font mt-1 text-lg font-extrabold">{comparison.request?.reference || `Pricing request ${requestId || '—'}`}</h3>
           <p className="mt-1 text-xs text-muted">
             {comparison.request?.poReference || comparison.request?.purchaseOrderReference || 'Purchase order'}
@@ -95,7 +95,7 @@ export default function SupplierQuoteComparisonModal({
         </div>
       </div>
 
-      <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900">
+      <div className="flex items-start gap-2 rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">
         <Info size={16} className="mt-0.5 shrink-0" />
         Comparison is advisory only. Procurement must make the award decision.
       </div>
@@ -104,11 +104,11 @@ export default function SupplierQuoteComparisonModal({
       <ErrorMessage>{error}</ErrorMessage>
 
       {!loading && !error && <section>
-        <h4 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-brand">Requested items · supplier prices</h4>
+        <h4 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-black">Requested items · supplier prices</h4>
         {!rows.length || !quotes.length ? <EmptyState>No submitted quotations are available to compare yet.</EmptyState>
-          : <div className="max-h-[45vh] overflow-auto rounded-lg border border-slate-200">
+          : <div className="max-h-[45vh] overflow-auto rounded-lg border border-brand">
             <table className="w-full min-w-[900px] text-left text-xs">
-              <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase text-muted">
+              <thead className="sticky top-0 bg-white text-[10px] uppercase text-muted">
                 <tr>
                   <th className="px-3 py-3 font-bold">Item</th>
                   <th className="px-3 py-3 font-bold">Qty</th>
@@ -130,10 +130,10 @@ export default function SupplierQuoteComparisonModal({
                     const price = Number(item?.unitPrice);
                     const hasPrice = Number.isFinite(price);
                     const isLowest = hasPrice && lowestUnit[row.purchaseOrderItemId] === price;
-                    return <td key={response.id} className={`px-3 py-3 ${isLowest ? 'bg-emerald-50' : ''}`}>
+                    return <td key={response.id} className={`px-3 py-3 ${isLowest ? 'bg-white' : ''}`}>
                       <div className="font-bold">{hasPrice ? money(price, currencyCode) : '—'}</div>
                       <div className="mt-0.5 text-[10px] text-muted">Line: {hasPrice ? money(item?.lineTotal ?? roundMoney((Number(row.quantity) || 0) * price), currencyCode) : '—'}</div>
-                      {isLowest && <span className="mt-1 inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">Lowest</span>}
+                      {isLowest && <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-black">Lowest</span>}
                     </td>;
                   })}
                 </tr>)}
@@ -143,17 +143,17 @@ export default function SupplierQuoteComparisonModal({
       </section>}
 
       {!loading && !error && quotes.length > 0 && <section>
-        <h4 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-brand">Supplier summary</h4>
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <h4 className="mb-2 text-xs font-extrabold uppercase tracking-wide text-black">Supplier summary</h4>
+        <div className="overflow-x-auto rounded-lg border border-brand">
           <table className="w-full min-w-[900px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-muted">
               <tr>{['Supplier', 'Status', 'Subtotal', 'VAT', 'Other', 'Final total', 'Lead time', 'Validity', 'Remarks', ''].map((heading) =>
                 <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y">
               {quotes.map((response, index) => {
                 const isLowest = lowestResponseIds.has(Number(response.id));
-                return <tr key={response.id} className={isLowest ? 'bg-emerald-50' : ''}>
+                return <tr key={response.id} className={isLowest ? 'bg-white' : ''}>
                   <td className="px-3 py-3 font-bold">{response.supplierName || `Supplier ${response.supplierId}`}</td>
                   <td className="px-3 py-3"><StatusBadge value={response.status || 'Submitted'} /></td>
                   <td className="px-3 py-3">{money(response.subtotal, currencyCode)}</td>
@@ -161,7 +161,7 @@ export default function SupplierQuoteComparisonModal({
                   <td className="px-3 py-3">{money(response.otherCharges, currencyCode)}</td>
                   <td className="whitespace-nowrap px-3 py-3 font-extrabold">
                     {money(totals[index], currencyCode)}
-                    {isLowest && <span className="ml-2 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">Lowest</span>}
+                    {isLowest && <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-black">Lowest</span>}
                   </td>
                   <td className="px-3 py-3">{response.deliveryLeadTime || '—'}</td>
                   <td className="px-3 py-3">{response.quotationValidity || '—'}</td>
@@ -169,7 +169,7 @@ export default function SupplierQuoteComparisonModal({
                   <td className="px-3 py-3">
                     {onAward && ['submitted', 'delivered', 'opened'].includes(String(response.status || '').toLowerCase()) && !response.awarded
                       ? <button type="button" onClick={() => onAward(response)}
-                        className="no-print inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-2 py-1 text-[11px] font-bold text-brand">
+                        className="no-print inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-2 py-1 text-[11px] font-bold text-black">
                         <Award size={12} />Award
                       </button>
                       : <span className="text-[10px] text-muted">{response.awarded ? 'Awarded' : '—'}</span>}
@@ -181,8 +181,8 @@ export default function SupplierQuoteComparisonModal({
         </div>
       </section>}
 
-      <div className="flex justify-end border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Close</button>
+      <div className="flex justify-end border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Close</button>
       </div>
     </div>
   </Modal>;

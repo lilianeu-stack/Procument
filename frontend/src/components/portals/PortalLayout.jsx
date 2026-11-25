@@ -37,7 +37,7 @@ export default function PortalLayout({
       />
       <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
         <div className="mb-6">
-          <div className="mb-1 text-[11px] font-semibold text-brand">
+          <div className="mb-1 text-[11px] font-semibold text-black">
             {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
           </div>
           <h1 className="display-font text-[25px] font-extrabold tracking-tight">{page}</h1>

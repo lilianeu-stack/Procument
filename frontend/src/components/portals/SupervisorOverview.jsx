@@ -65,7 +65,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
             ['Description', department.description || 'No description supplied.'],
             ['Total users', department.userCount ?? '—'],
             ['Active Requesters', department.requesterCount ?? '—']
-          ].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+          ].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 border-b border-subtle pb-3 last:border-0 last:pb-0">
             <dt className="font-semibold text-muted">{label}</dt><dd className="max-w-[65%] text-right font-bold">{value}</dd>
           </div>)}
         </dl>
@@ -103,10 +103,10 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
 
     <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => <button key={card.label} type="button" onClick={() => navigate(card.page)}
-        className="rounded-xl border border-slate-100 bg-white p-5 text-left shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+        className="rounded-xl border border-brand bg-white p-5 text-left transition hover:bg-accent-tint hover:border-accent-border hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">
         <div className="flex items-start justify-between gap-2">
           <span className="text-[12px] font-semibold text-muted">{card.label}</span>
-          <span className={`grid h-9 w-9 place-items-center rounded-lg ${card.tone === 'emerald' ? 'bg-emerald-50 text-emerald-700' : card.tone === 'amber' ? 'bg-amber-50 text-amber-700' : card.tone === 'indigo' ? 'bg-indigo-50 text-indigo-700' : 'bg-blue-50 text-blue-700'}`}>
+          <span className="grid h-9 w-9 place-items-center rounded-lg border border-brand bg-white text-black">
             <card.icon size={17} />
           </span>
         </div>
@@ -122,12 +122,12 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
           !extras.requests.length ? <EmptyState title="No requests yet" description="Department requests will appear here." /> :
             <TableScroll minWidth={620}>
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+                <thead className="bg-white text-[10px] uppercase text-muted">
                   <tr>{['Reference', 'Requester', 'Title', 'Date', 'Cost', 'Status'].map((heading) => <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y">
                   {extras.requests.slice(0, 6).map((request) => <tr key={request.id}>
-                    <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
+                    <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
                       <TextLink onClick={() => navigate('Procurement Requests', { request: request.id })}>{request.reference}</TextLink>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
@@ -149,12 +149,12 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
               { label: 'Items', value: stats.stockItems ?? '—', tone: 'slate' },
               { label: 'Low stock', value: stats.lowStock ?? '—', tone: 'amber' },
               { label: 'Out of stock', value: stats.outOfStock ?? '—', tone: 'red' }
-            ].map((item) => <div key={item.label} className="rounded-lg bg-slate-50 p-3 text-center">
+            ].map((item) => <div key={item.label} className="rounded-lg border border-brand bg-white p-3 text-center">
               <div className="display-font text-xl font-extrabold">{item.value}</div>
               <div className="mt-1"><PortalBadge tone={item.tone}>{item.label}</PortalBadge></div>
             </div>)}
           </dl>
-          {extras.stock.length > 0 && <div className="border-t border-slate-100 px-5 py-3">
+          {extras.stock.length > 0 && <div className="border-t border-subtle px-5 py-3">
             <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted"><PackageSearch size={12} />Needs attention</div>
             {extras.stock.filter((item) => item.stockStatus !== 'Available').slice(0, 3).map((item) =>
               <div key={item.id} className="flex items-center justify-between gap-2 py-1.5 text-[11px]">
@@ -172,7 +172,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
               { label: 'My Department', icon: Building2, page: 'My Department' },
               { label: 'Department messages', icon: MessageSquare, page: 'Department Messages' }
             ].map(({ label, icon: Icon, page }) => <button key={page} type="button" onClick={() => navigate(page)}
-              className="flex items-center gap-2 rounded-lg border border-slate-100 px-3 py-3 text-left text-xs font-bold hover:border-brand hover:text-brand">
+              className="flex items-center gap-2 rounded-lg border border-brand px-3 py-3 text-left text-xs font-bold hover:border-brand hover:text-black">
               <Icon size={15} />{label}
             </button>)}
           </div>

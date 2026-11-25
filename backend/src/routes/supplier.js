@@ -15,6 +15,7 @@ async function invitedRfq(token) {
   if (!identity) return { error: 404, message: 'This quotation link is invalid or has expired.' };
   const [rows] = await pool.execute(
     `SELECT f.id, f.reference, f.due_date AS dueDate, f.status,
+       f.instructions, f.terms,
        r.id AS requisitionId, r.reference AS requisitionReference, r.title,
        r.justification, r.priority, r.required_by AS requiredBy,
        s.id AS supplierId, s.name AS supplierName, s.contact_name AS contactName
@@ -57,6 +58,8 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
         reference: rfq.reference,
         dueDate: rfq.dueDate,
         status: rfq.status,
+        instructions: rfq.instructions || '',
+        terms: rfq.terms || '',
         requisitionReference: rfq.requisitionReference,
         title: rfq.title,
         justification: rfq.justification,

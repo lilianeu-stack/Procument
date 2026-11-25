@@ -195,14 +195,14 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
   }
 
   if (loadingDraft) return <>
-    <button type="button" onClick={() => navigate('My Procurement Requests')} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-brand hover:underline">
+    <button type="button" onClick={() => navigate('My Procurement Requests')} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
       <ArrowLeft size={14} />Back to My Procurement Requests
     </button>
     <LoadingState label="Opening draft request…" />
   </>;
 
   return <>
-    <button type="button" onClick={cancelRequest} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-brand hover:underline">
+    <button type="button" onClick={cancelRequest} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
       <ArrowLeft size={14} />Back to My Procurement Requests
     </button>
 
@@ -211,19 +211,19 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
       title={editingId ? 'Edit draft purchase request' : 'Create purchase request'}
       description="Describe what your Department needs, attach supporting documents, then review before saving or submitting for approval."
       actions={<div className="flex items-center gap-2">
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'bg-brand text-white' : 'bg-slate-100 text-muted'}`}>1 · Details</span>
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'bg-brand text-white' : 'bg-slate-100 text-muted'}`}>2 · Review</span>
+        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'border border-black bg-white text-black' : 'bg-white text-muted'}`}>1 · Details</span>
+        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'border border-black bg-white text-black' : 'bg-white text-muted'}`}>2 · Review</span>
       </div>}
     />
 
-    {needsAdministrator && <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+    {needsAdministrator && <div className="mb-4 rounded-xl border border-brand bg-white p-4">
       <div className="flex items-start gap-3">
-        <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={18} />
+        <AlertTriangle className="mt-0.5 shrink-0 text-black" size={18} />
         <div>
-          <p className="text-sm font-bold text-amber-900">Submission is blocked for your Department</p>
-          <p className="mt-1 text-xs leading-5 text-amber-800">{error}</p>
-          <p className="mt-2 text-xs font-bold text-amber-900">Next step: contact an Administrator to assign an active Department Supervisor, then try again.</p>
-          <button type="button" onClick={() => navigate('My Procurement Requests')} className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-800">
+          <p className="text-sm font-bold text-black">Submission is blocked for your Department</p>
+          <p className="mt-1 text-xs leading-5 text-black">{error}</p>
+          <p className="mt-2 text-xs font-bold text-black">Next step: contact an Administrator to assign an active Department Supervisor, then try again.</p>
+          <button type="button" onClick={() => navigate('My Procurement Requests')} className="mt-3 rounded-lg border border-brand bg-white px-3 py-2 text-xs font-bold text-black">
             View my requests
           </button>
         </div>
@@ -236,7 +236,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           <label className="block text-xs font-bold sm:col-span-2">
             Requesting Department
-            <input readOnly value={department} placeholder="Detected from your profile" className="field mt-1.5 bg-slate-50 text-muted" />
+            <input readOnly value={department} placeholder="Detected from your profile" className="field mt-1.5 bg-white text-muted" />
             <span className="mt-1 block text-[10px] font-normal text-muted">Automatically detected from your account. Contact an Administrator if it is incorrect.</span>
           </label>
           <label className="block text-xs font-bold sm:col-span-2">
@@ -253,13 +253,13 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
             Location where the items are needed *
             <input required value={form.location} maxLength={255} onChange={(event) => setForm({ ...form, location: event.target.value })}
               placeholder="e.g. Main store, Kigali" className="field" />
-            {locationMissing && <span className="mt-1 block text-[10px] font-normal text-amber-600">Required when submitting.</span>}
+            {locationMissing && <span className="mt-1 block text-[10px] font-normal text-black">Required when submitting.</span>}
           </label>
           <label className="block text-xs font-bold">
             Budget code *
             <input required value={form.budgetCode} maxLength={60} onChange={(event) => setForm({ ...form, budgetCode: event.target.value })}
               placeholder="e.g. OPS-2026-004" className="field" />
-            {budgetMissing && <span className="mt-1 block text-[10px] font-normal text-amber-600">Required when submitting.</span>}
+            {budgetMissing && <span className="mt-1 block text-[10px] font-normal text-black">Required when submitting.</span>}
           </label>
           <label className="block text-xs font-bold">
             Required by
@@ -271,8 +271,8 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
               {PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}
             </select>
           </label>
-          <div className="rounded-lg bg-slate-50 p-3 text-[11px] leading-5 text-muted sm:col-span-1">
-            <Info size={14} className="mb-1 text-brand" />
+          <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-muted sm:col-span-1">
+            <Info size={14} className="mb-1 text-black" />
             Drafts stay with you until submitted. Once submitted, your Department Supervisor receives the request for approval.
           </div>
         </div>
@@ -287,7 +287,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         {items.length === 0 ? <EmptyState title="No items added" description="Add at least one item to continue." /> :
           <TableScroll minWidth={960}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-muted">
                 <tr>
                   {['Item #', 'Item Description', 'Quantity', 'Unit of Measures', 'Remarks', 'Line total', ''].map((heading) =>
                     <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}
@@ -324,16 +324,16 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
                   <td className="whitespace-nowrap px-3 py-4 font-bold">{currency((Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0))}</td>
                   <td className="px-3 py-3">
                     <button type="button" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((_, position) => position !== index))}
-                      aria-label={`Remove item ${index + 1}`} className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-red-50 hover:text-red-600 disabled:opacity-30">
+                      aria-label={`Remove item ${index + 1}`} className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-white hover:text-black disabled:opacity-30">
                       <Trash2 size={15} /><span className="text-[10px] font-bold">Remove</span>
                     </button>
                   </td>
                 </tr>)}
               </tbody>
               <tfoot>
-                <tr className="border-t border-slate-200 bg-slate-50">
+                <tr className="border-t border-subtle bg-white">
                   <td colSpan="5" className="px-3 py-3 text-right text-xs font-bold">Estimated total</td>
-                  <td className="px-3 py-3 text-sm font-extrabold text-brand">{currency(total)}</td>
+                  <td className="px-3 py-3 text-sm font-extrabold text-black">{currency(total)}</td>
                   <td />
                 </tr>
               </tfoot>
@@ -343,23 +343,23 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
 
       <PageCard title="Authorization" description="Requested-by details are captured from your session. Approval details appear only after a Supervisor decision.">
         <div className="grid gap-4 p-5 sm:grid-cols-2">
-          <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-brand">Requested by</div>
+          <div className="rounded-lg border border-brand bg-white p-4">
+            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Requested by</div>
             <dl className="mt-3 grid gap-3 text-xs">
               <div><dt className="text-[10px] text-muted">Name (Requested by)</dt><dd className="font-bold">{user.name || user.userName || '—'}</dd></div>
               <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">{draft?.submittedAt ? 'Digitally submitted' : 'Pending submission'}</dd></div>
               <div><dt className="text-[10px] text-muted">Date</dt><dd className="font-bold">{dateLabel(draft?.submittedAt || draft?.createdAt) || '—'}</dd></div>
             </dl>
           </div>
-          {draft?.supervisorDecision === 'Approved' && draft?.supervisorDecisionAt ? <div className="rounded-lg border border-emerald-100 bg-emerald-50/70 p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-700">Approved by</div>
+          {draft?.supervisorDecision === 'Approved' && draft?.supervisorDecisionAt ? <div className="rounded-lg border border-brand bg-white p-4">
+            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
             <dl className="mt-3 grid gap-3 text-xs">
               <div><dt className="text-[10px] text-muted">Name (Approved by)</dt><dd className="font-bold">{draft.supervisorName || '—'}</dd></div>
               <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">Digitally approved</dd></div>
               <div><dt className="text-[10px] text-muted">Date</dt><dd className="font-bold">{dateLabel(draft.supervisorDecisionAt)}</dd></div>
             </dl>
-          </div> : <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-brand">Approved by</div>
+          </div> : <div className="rounded-lg border border-brand bg-white p-4">
+            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
             <dl className="mt-3 grid gap-3 text-xs">
               <div><dt className="text-[10px] text-muted">Name (Approved by)</dt><dd className="font-bold">—</dd></div>
               <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">—</dd></div>
@@ -398,7 +398,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         </dl>
         <TableScroll minWidth={640}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-muted">
               <tr>{['Item', 'Description', 'Quantity', 'Unit cost', 'Remarks', 'Line total'].map((heading) => <th key={heading} className="px-4 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y">
@@ -411,10 +411,10 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
                 <td className="px-4 py-3 font-bold">{currency(itemTotals([item]))}</td>
               </tr>)}
             </tbody>
-            <tfoot><tr className="bg-slate-50"><td colSpan="5" className="px-4 py-3 text-right font-bold">Estimated total</td><td className="px-4 py-3 font-extrabold text-brand">{currency(total)}</td></tr></tfoot>
+            <tfoot><tr className="bg-white"><td colSpan="5" className="px-4 py-3 text-right font-bold">Estimated total</td><td className="px-4 py-3 font-extrabold text-black">{currency(total)}</td></tr></tfoot>
           </table>
         </TableScroll>
-        <div className="border-t border-slate-100 px-5 py-4">
+        <div className="border-t border-subtle px-5 py-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-bold"><Paperclip size={14} />Attachments ({files.length})</div>
           {files.length ? <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-[11px] text-muted">• {file.name}</li>)}</ul>
             : <p className="text-[11px] text-muted">{editingId ? 'Existing attachments are preserved when editing a draft.' : 'No documents attached.'}</p>}
@@ -440,7 +440,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
     </div>}
 
     {step === 1 && <p className="mt-4 flex items-center gap-2 text-[11px] text-muted">
-      <Check size={13} className="text-emerald-600" />You can save a draft with just one item; full details are required to submit.
+      <Check size={13} className="text-black" />You can save a draft with just one item; full details are required to submit.
     </p>}
   </>;
 }

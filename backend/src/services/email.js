@@ -5,6 +5,8 @@ import {
   smtpTransportOptions, validEmail
 } from '../utils/email-config.js';
 
+const EMAIL_THEME = { surface: '#FFFFFF', ink: '#000000', border: '#000000' };
+
 let cachedTransport = null;
 let cachedKey = '';
 
@@ -86,24 +88,35 @@ export function procurementWorkspaceLink() {
 }
 
 function wrapHtml(title, lines, action = null, footer = null) {
-  return `<!doctype html><html><body style="margin:0;background:#f4f7f6;padding:24px;font-family:Arial,sans-serif;color:#172a39">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;margin:auto;background:#fff;border-radius:12px;overflow:hidden">
-      <tr><td style="background:#123d3a;padding:20px 28px;color:#fff;font-size:16px;font-weight:bold">Hope Haven · Procurement &amp; Stores</td></tr>
+  return `<!doctype html><html><body style="margin:0;background:${EMAIL_THEME.surface};padding:24px;font-family:Arial,sans-serif;color:${EMAIL_THEME.ink}">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;margin:auto;background:${EMAIL_THEME.surface};border-radius:12px;overflow:hidden">
+      <tr><td style="background:${EMAIL_THEME.surface};border-bottom:1px solid ${EMAIL_THEME.border};padding:20px 28px;color:${EMAIL_THEME.ink};font-size:16px;font-weight:bold">Hope Haven · Procurement &amp; Stores</td></tr>
       <tr><td style="padding:28px"><h1 style="font-size:20px;margin:0 0 18px">${escapeHtml(title)}</h1>
         ${htmlParagraphs(lines)}
-        ${action ? `<p style="margin:24px 0"><a href="${escapeHtml(action.url)}" style="background:#123d3a;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">${escapeHtml(action.label)}</a></p><p style="font-size:12px;color:#5b6b73;word-break:break-all">${escapeHtml(action.url)}</p>` : ''}
-        <p style="margin-top:24px;font-size:12px;color:#5b6b73">${escapeHtml(footer || 'This message was sent only to the Supplier named above. Do not forward the link; it is unique to your organization.')}</p>
+        ${action ? `<p style="margin:24px 0"><a href="${escapeHtml(action.url)}" style="background:${EMAIL_THEME.surface};border:1px solid ${EMAIL_THEME.border};color:${EMAIL_THEME.ink};padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">${escapeHtml(action.label)}</a></p><p style="font-size:12px;color:${EMAIL_THEME.ink};word-break:break-all">${escapeHtml(action.url)}</p>` : ''}
+        <p style="margin-top:24px;font-size:12px;color:${EMAIL_THEME.ink}">${escapeHtml(footer || 'This message was sent only to the Supplier named above. Do not forward the link; it is unique to your organization.')}</p>
       </td></tr>
     </table></body></html>`;
 }
 
-export function buildRfqEmail({ supplierName, reference, requisitionReference, title, dueDate, rawToken, notes = '' }) {
+export function buildRfqEmail({
+  supplierName, reference, requisitionReference, title, dueDate, requiredBy,
+  items = [], instructions = '', terms = '', notes = '', rawToken
+}) {
   const link = supplierLink(rawToken);
+  const itemLines = (Array.isArray(items) ? items : []).map((item) =>
+    `${item.itemName || 'Requested item'} — ${item.quantity} ${item.unit || 'unit'}${item.description ? ` (${item.description})` : ''}`
+  );
   const lines = [
     `Dear ${supplierName || 'Supplier'},`,
     `Hope Haven invites you to submit a quotation for ${reference}${requisitionReference ? ` (requisition ${requisitionReference})` : ''}.`,
     title ? `Request: ${title}` : '',
+    itemLines.length ? 'Requested items:' : '',
+    ...itemLines,
     dueDate ? `Quotation deadline: ${dueDate}.` : 'Quotation deadline: as stated in the quotation document.',
+    requiredBy ? `Required by: ${requiredBy}.` : '',
+    instructions ? `Instructions to suppliers: ${instructions}` : '',
+    terms ? `Terms and conditions: ${terms}` : '',
     notes ? `Additional information: ${notes}` : '',
     'Use the secure link below to view the full request and submit your quotation.'
   ].filter(Boolean);

@@ -12,8 +12,8 @@ import { filesToAttachments } from '../../utils/attachments.js';
 
 function ConversationRow({ conversation, active, onClick }) {
   return <button type="button" onClick={onClick}
-    className={`flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left transition ${active ? 'bg-brand-light/70' : 'hover:bg-slate-50'}`}>
-    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-extrabold ${active ? 'bg-brand text-white' : 'bg-slate-100 text-muted'}`}>
+    className={`flex w-full items-center gap-3 border-b border-subtle px-4 py-3 text-left transition ${active ? 'bg-white' : 'hover:bg-white'}`}>
+    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-extrabold ${active ? 'border border-brand bg-white text-black' : 'bg-white text-muted'}`}>
       {String(conversation.name || '?').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
     </span>
     <span className="min-w-0 flex-1">
@@ -22,26 +22,26 @@ function ConversationRow({ conversation, active, onClick }) {
         {conversation.lastAt && <span className="shrink-0 text-[10px] text-muted">{dateLabel(conversation.lastAt, { month: 'short', day: 'numeric' })}</span>}
       </span>
       <span className="mt-1 block truncate text-[11px] text-muted">{conversation.lastBody || 'No messages yet'}</span>
-      {conversation.lastRequisitionReference && <span className="mt-1 block text-[10px] font-semibold text-brand">Re: {conversation.lastRequisitionReference}</span>}
+      {conversation.lastRequisitionReference && <span className="mt-1 block text-[10px] font-semibold text-black">Re: {conversation.lastRequisitionReference}</span>}
     </span>
-    {Number(conversation.unreadCount) > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">{conversation.unreadCount}</span>}
+    {Number(conversation.unreadCount) > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full border border-brand bg-white px-1 text-[10px] font-bold text-black">{conversation.unreadCount}</span>}
   </button>;
 }
 
 function MessageBubble({ message, userId }) {
   const mine = message.senderId === userId;
   return <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-    <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm sm:max-w-[70%] ${mine ? 'rounded-br-sm bg-brand text-white' : 'rounded-bl-sm bg-slate-100 text-ink'}`}>
+    <div className={`max-w-[85%] rounded-2xl border border-brand px-4 py-3 sm:max-w-[70%] ${mine ? 'rounded-br-sm bg-white text-black' : 'rounded-bl-sm bg-white text-ink'}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] font-bold">
         <span>{mine ? 'You' : message.senderName || 'Other party'}</span>
-        <span className={mine ? 'text-white/70' : 'text-muted'}>{dateTimeLabel(message.createdAt)}</span>
-        {mine && <Check size={11} className="text-white/80" />}
+        <span className={mine ? 'text-black' : 'text-muted'}>{dateTimeLabel(message.createdAt)}</span>
+        {mine && <Check size={11} className="text-black" />}
       </div>
       <p className="whitespace-pre-wrap break-words text-xs leading-5">{message.body || 'Document attached'}</p>
-      {message.requisitionReference && <div className={`mt-2 rounded px-2 py-1 text-[10px] font-bold ${mine ? 'bg-white/15' : 'bg-white'}`}>
+      {message.requisitionReference && <div className={`mt-2 rounded px-2 py-1 text-[10px] font-bold ${mine ? 'bg-white' : 'bg-white'}`}>
         Related request: {message.requisitionReference}
       </div>}
-      {Number(message.attachmentCount) > 0 && <div className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${mine ? 'text-white/80' : 'text-muted'}`}>
+      {Number(message.attachmentCount) > 0 && <div className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${mine ? 'text-black' : 'text-muted'}`}>
         <Paperclip size={11} />{message.attachmentCount} attachment{message.attachmentCount > 1 ? 's' : ''}
       </div>}
     </div>
@@ -226,11 +226,11 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
         {threadLoading ? <LoadingState label="Opening conversation…" /> : threadError ? <ErrorState message={threadError} onRetry={loadThread} /> :
           !selectedId ? <EmptyState title="No conversation selected" description="Pick a contact on the left to read and reply to messages." /> :
             <>
-              <div className="flex max-h-[440px] flex-col gap-3 overflow-y-auto bg-slate-50/60 p-4">
+              <div className="flex max-h-[440px] flex-col gap-3 overflow-y-auto bg-white p-4">
                 {thread?.messages?.length ? thread.messages.map((message) => <MessageBubble key={message.id} message={message} userId={userId} />)
                   : <EmptyState title="No messages yet" description="Start the conversation with a message below." />}
               </div>
-              <form onSubmit={send} className="space-y-3 border-t border-slate-100 p-4">
+              <form onSubmit={send} className="space-y-3 border-t border-subtle p-4">
                 <label className="block text-xs font-bold">
                   Reply to {activeConversation?.name || 'contact'}
                   <textarea rows="3" value={body} onChange={(event) => setBody(event.target.value)}
@@ -257,7 +257,7 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
     <PageCard title="Announcements" description={isSupervisor ? 'Announcements you have sent to the Department.' : 'Updates from your Department Supervisor.'}
       action={<PortalBadge tone="indigo"><Megaphone size={11} />{announcements.filter((item) => !item.isRead).length} unread</PortalBadge>}>
       {announcements.length ? <div className="divide-y">
-        {announcements.map((announcement) => <div key={announcement.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${announcement.isRead ? '' : 'bg-indigo-50/40'}`}>
+        {announcements.map((announcement) => <div key={announcement.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${announcement.isRead ? '' : 'bg-white'}`}>
           <div className="min-w-0 max-w-3xl">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-muted">
               <span>{announcement.senderName || 'Department Supervisor'}</span>
@@ -274,7 +274,7 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
     </PageCard>
 
     <button type="button" onClick={() => navigate(isSupervisor ? 'Supervisor Dashboard' : 'Requester Dashboard')}
-      className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-brand hover:underline">
+      className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
       <ArrowLeft size={14} />Back to dashboard <ChevronRight size={12} className="hidden" />
     </button>
   </>;

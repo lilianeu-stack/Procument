@@ -155,6 +155,8 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', column: 'store_request_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN store_request_id INT UNSIGNED NULL AFTER department_id' },
     { table: 'inventory_movements', column: 'idempotency_key', ddl: 'ALTER TABLE inventory_movements ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER store_request_id' },
     { table: 'rfqs', column: 'issued_at', ddl: 'ALTER TABLE rfqs ADD COLUMN issued_at DATETIME NULL AFTER selected_quotation_id' },
+    { table: 'rfqs', column: 'instructions', ddl: 'ALTER TABLE rfqs ADD COLUMN instructions TEXT NULL AFTER due_date' },
+    { table: 'rfqs', column: 'terms', ddl: 'ALTER TABLE rfqs ADD COLUMN terms TEXT NULL AFTER instructions' },
     // Prevents duplicate RFQs when the administrator double-clicks Send RFQ or
     // retries a request whose first response was lost.
     { table: 'rfqs', column: 'idempotency_key', ddl: 'ALTER TABLE rfqs ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER reference' },
@@ -219,7 +221,8 @@ export async function applySchemaMigrations() {
 
   const enumUpdates = [
     { table: 'users', column: 'role', values: USER_ROLES, required: "'storekeeper'", definition: `ENUM(${USER_ROLES.map((role) => `'${role}'`).join(', ')}) NOT NULL DEFAULT 'requestor'` },
-    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Forwarded to Procurement'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` }
+    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Forwarded to Procurement'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` },
+    { table: 'rfqs', column: 'status', values: ['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'], required: "'Draft'", definition: "ENUM('Draft','Sent','Evaluating','Awarded','Closed') NOT NULL DEFAULT 'Sent'" }
   ];
   for (const update of enumUpdates) {
     const [rows] = await pool.query(

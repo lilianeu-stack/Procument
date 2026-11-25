@@ -17,8 +17,8 @@ import {
 } from '../../utils/status.js';
 
 function DetailSection({ title, children }) {
-  return <section className="rounded-xl border border-slate-100 bg-white">
-    <header className="border-b border-slate-100 px-4 py-3 text-xs font-bold">{title}</header>
+  return <section className="rounded-xl border border-brand bg-white">
+    <header className="border-b border-subtle px-4 py-3 text-xs font-bold">{title}</header>
     <div className="p-4">{children}</div>
   </section>;
 }
@@ -99,8 +99,8 @@ export default function RequestDetail({
     />
 
     {(error || notice) && <div className="mb-4 space-y-2">
-      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      {notice && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+      {error && <p role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-black">{error}</p>}
+      {notice && <p className="rounded-lg bg-white px-3 py-2 text-xs text-black">{notice}</p>}
     </div>}
 
     <div className="grid gap-4 lg:grid-cols-2">
@@ -114,14 +114,14 @@ export default function RequestDetail({
           <KeyValue label="Submitted">{dateTimeLabel(requisition.submittedAt || requisition.createdAt)}</KeyValue>
           <KeyValue label="Required by">{dateLabel(requisition.requiredBy)}</KeyValue>
           <KeyValue label="Budget code">{requisition.budgetCode || '—'}</KeyValue>
-          <KeyValue label="Estimated total"><span className="text-brand">{currency(total)}</span></KeyValue>
+          <KeyValue label="Estimated total"><span className="text-black">{currency(total)}</span></KeyValue>
           <KeyValue label="Supervisor">{requisition.supervisorName || '—'}</KeyValue>
           <KeyValue label="Decision at">{dateTimeLabel(requisition.supervisorDecisionAt)}</KeyValue>
         </dl>
-        {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+        {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-white p-3 text-xs leading-5 text-black">
           <strong>Supervisor note:</strong> {requisition.supervisorNotes}
         </p>}
-        {requisition.informationResponse && <p className="mt-2 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+        {requisition.informationResponse && <p className="mt-2 rounded-lg bg-white p-3 text-xs leading-5 text-black">
           <strong>Your response:</strong> {requisition.informationResponse}
         </p>}
         {otherUserId && onMessage && <button type="button" onClick={() => onMessage(otherUserId, requisition.id)}
@@ -133,7 +133,7 @@ export default function RequestDetail({
       <DetailSection title={`Items (${items.length})`}>
         {items.length ? <TableScroll minWidth={460}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-muted">
               <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2">Remarks</th><th className="px-2 py-2 text-right">Total</th></tr>
             </thead>
             <tbody className="divide-y">
@@ -147,8 +147,8 @@ export default function RequestDetail({
             </tbody>
           </table>
         </TableScroll> : <p className="text-xs text-muted">No items recorded.</p>}
-        <div className="mt-3 flex justify-end border-t border-slate-100 pt-3 text-xs font-bold">
-          Total <span className="ml-3 text-brand">{currency(total)}</span>
+        <div className="mt-3 flex justify-end border-t border-subtle pt-3 text-xs font-bold">
+          Total <span className="ml-3 text-black">{currency(total)}</span>
         </div>
       </DetailSection>
     </div>
@@ -203,12 +203,12 @@ export default function RequestDetail({
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {[
-            { value: 'Approve', icon: CheckCircle2, className: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-            { value: 'Reject', icon: XCircle, className: 'border-red-200 bg-red-50 text-red-700' },
-            { value: 'Request Information', icon: Info, className: 'border-amber-200 bg-amber-50 text-amber-700' }
+            { value: 'Approve', icon: CheckCircle2, className: 'border-brand bg-white text-black' },
+            { value: 'Reject', icon: XCircle, className: 'border-brand bg-white text-black' },
+            { value: 'Request Information', icon: Info, className: 'border-brand bg-white text-black' }
           ].map(({ value, icon: Icon, className }) => <button key={value} type="button" disabled={busy}
             onClick={() => { setPendingDecision(value); setError(''); }}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${pendingDecision === value ? 'ring-2 ring-brand/40' : ''} ${className}`}>
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${pendingDecision === value ? 'ring-2 ring-brand' : ''} ${className}`}>
             <Icon size={14} />{value}
           </button>)}
         </div>
@@ -230,7 +230,7 @@ export default function RequestDetail({
         <PrintButton label="Print official form" />
         <DownloadButton type="requisition" id={requisition.id} format="pdf" label="Download official PDF" />
       </div>
-      <div className="max-h-[65vh] overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="max-h-[65vh] overflow-auto rounded-lg border border-brand bg-white p-3">
         <MaterialRequestDocument requisition={requisition} />
       </div>
     </Modal>}

@@ -142,7 +142,7 @@ export default function RequesterRequests({
             search: '', status: '', preset: '', from: '', to: '',
             dateField: REPORT.defaultField, page: 1
           })}
-            className="mb-0.5 text-xs font-bold text-muted hover:text-brand">Clear filters</button>}
+            className="mb-0.5 text-xs font-bold text-muted hover:text-black">Clear filters</button>}
       </FilterBar>
 
       <ErrorState message={error} onRetry={load} />
@@ -152,15 +152,15 @@ export default function RequesterRequests({
         <>
           <TableScroll minWidth={1120}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-muted">
                 <tr>
                   {['Reference', 'Title', 'Department', 'Submission date', 'Estimated cost', 'Current status', 'Supervisor decision', 'Procurement status', 'Actions'].map((heading) =>
                     <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {requisitions.map((request) => <tr key={request.id} className="hover:bg-slate-50/60">
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
+              <tbody className="divide-y divide-subtle">
+                {requisitions.map((request) => <tr key={request.id} className="hover:bg-white">
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
                     <TextLink onClick={() => openRequest(request.id)}>{request.reference}</TextLink>
                   </td>
                   <td className="min-w-[190px] px-4 py-3">
@@ -172,7 +172,7 @@ export default function RequesterRequests({
                   <td className="whitespace-nowrap px-4 py-3 font-bold">{currency(request.total)}</td>
                   <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={request.status} /></td>
                   <td className="whitespace-nowrap px-4 py-3">
-                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${request.supervisorDecision === 'Approve' ? 'bg-emerald-50 text-emerald-700' : request.supervisorDecision === 'Reject' ? 'bg-red-50 text-red-700' : 'bg-slate-100 text-slate-600'}`}>
+                    <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${request.supervisorDecision === 'Approve' ? 'bg-white text-black' : request.supervisorDecision === 'Reject' ? 'bg-white text-black' : 'bg-white text-black'}`}>
                       {request.supervisorDecision || 'Awaiting'}
                     </span>
                   </td>
@@ -187,7 +187,7 @@ export default function RequesterRequests({
                       </TextLink>}
                       {request.supervisorId && <button type="button" title="Message your Supervisor"
                         onClick={() => navigate('Messages', { userId: request.supervisorId, request: request.id })}
-                        className="text-muted hover:text-brand"><MessageSquare size={14} /></button>}
+                        className="text-muted hover:text-black"><MessageSquare size={14} /></button>}
                     </div>
                   </td>
                 </tr>)}
@@ -198,9 +198,9 @@ export default function RequesterRequests({
         </>}
     </PageCard>
 
-    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30"><LoadingState label="Opening request…" /></div>}
-    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20"><LoadingState label="Opening request…" /></div>}
+    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 ">
         <ErrorState message={detailError} onRetry={loadDetail} />
         <button type="button" onClick={closeRequest} className={primaryButtonClass('w-full')}>Close</button>
       </div>

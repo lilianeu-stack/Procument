@@ -57,16 +57,16 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
 
   return <Modal title={`Send ${order.reference || 'purchase order'} for approval`} size="lg" onClose={onClose}>
     <div className="space-y-5">
-      <section className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
+      <section className="rounded-lg border border-brand bg-white p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-widest text-brand">Purchase order being sent</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Purchase order being sent</p>
             <h3 className="display-font mt-1 text-lg font-extrabold">{order.reference || 'New purchase order'}</h3>
             <p className="mt-1 text-xs text-muted">{order.supplier || 'Supplier not recorded'} · {order.type || 'Standard'}</p>
           </div>
           <div className="text-right text-xs">
             <div className="text-muted">Total amount</div>
-            <div className="mt-1 font-extrabold text-brand">{formatRwf(order.total)}</div>
+            <div className="mt-1 font-extrabold text-black">{formatRwf(order.total)}</div>
             <div className="mt-1 text-[10px] text-muted">Delivery {dateLabel(order.deliveryDate)}</div>
           </div>
         </div>
@@ -76,7 +76,7 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
       </section>
 
       {stage === 'sent' ? <section className="space-y-4">
-        <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+        <div className="flex items-start gap-3 rounded-lg border border-brand bg-white p-4 text-sm text-black">
           <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
           <div>
             <strong>Sent for approval.</strong>
@@ -89,19 +89,19 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
             </p>
           </div>
         </div>
-        {emailDelivery && !emailDelivery.ok && <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+        {emailDelivery && !emailDelivery.ok && <div className="flex items-start gap-3 rounded-lg border border-brand bg-white p-4 text-xs text-black">
           <AlertCircle size={16} className="mt-0.5 shrink-0" />
           <div>
             <strong>Email was not delivered.</strong>
             <p className="mt-1 leading-5">{emailDelivery.error?.message || emailDelivery.reason || 'The email provider did not accept the message.'}</p>
           </div>
         </div>}
-        <div className="flex justify-end border-t border-slate-100 pt-4">
-          <button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button>
+        <div className="flex justify-end border-t border-subtle pt-4">
+          <button type="button" onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black">Done</button>
         </div>
       </section> : stage === 'compose' ? <>
         <section>
-          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-brand">Authorized recipient</h3>
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Authorized recipient</h3>
           {loadingUsers ? <div className="flex items-center gap-2 py-6 text-xs text-muted"><Loader2 size={14} className="animate-spin" />Loading registered reviewers…</div> : <>
             <label className="block text-xs font-bold">Select a registered user
               <select value={recipientId} onChange={(event) => { setRecipientId(event.target.value); setError(''); }} className="field mt-1">
@@ -111,8 +111,8 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
                 </option>)}
               </select>
             </label>
-            {recipient && <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50/60 p-4 text-xs">
-              <div className="flex items-center gap-2 font-bold text-emerald-800"><ShieldCheck size={14} />Authorized Purchase Order reviewer</div>
+            {recipient && <div className="mt-3 rounded-lg border border-brand bg-white p-4 text-xs">
+              <div className="flex items-center gap-2 font-bold text-black"><ShieldCheck size={14} />Authorized Purchase Order reviewer</div>
               <dl className="mt-3 grid gap-2 sm:grid-cols-3">
                 <div><dt className="text-[10px] text-muted">Full name</dt><dd className="font-bold">{recipient.name}</dd></div>
                 <div><dt className="text-[10px] text-muted">Role</dt><dd className="font-bold">{recipient.roleLabel || roleLabel(recipient.role)}</dd></div>
@@ -130,17 +130,17 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
         </section>
 
         <ErrorMessage>{error}</ErrorMessage>
-        <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" onClick={onClose} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" onClick={onClose} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
           <button type="button" onClick={() => { if (!recipient) { setError('Choose an authorized recipient.'); return; } setStage('confirm'); setError(''); }}
-            className="inline-flex items-center gap-2 rounded-lg border border-brand bg-brand/5 px-4 py-2 text-xs font-bold text-brand">
+            className="inline-flex items-center gap-2 rounded-lg border border-brand bg-white px-4 py-2 text-xs font-bold text-black">
             Review request <ArrowRight size={14} />
           </button>
         </div>
       </> : <>
-        <section className="rounded-lg border border-brand/20 bg-brand/5 p-4 text-xs">
-          <h3 className="flex items-center gap-2 text-sm font-extrabold text-brand"><CheckCircle2 size={16} />Confirm before sending</h3>
-          <p className="mt-2 leading-5 text-slate-700">A secure, single-purpose approval link will be sent to the registered email address below. Sending does not approve the purchase order.</p>
+        <section className="rounded-lg border border-brand bg-white p-4 text-xs">
+          <h3 className="flex items-center gap-2 text-sm font-extrabold text-black"><CheckCircle2 size={16} />Confirm before sending</h3>
+          <p className="mt-2 leading-5 text-black">A secure, single-purpose approval link will be sent to the registered email address below. Sending does not approve the purchase order.</p>
           <dl className="mt-4 grid gap-2 sm:grid-cols-2">
             <div><dt className="text-[10px] text-muted">Recipient</dt><dd className="font-bold">{recipient?.name}</dd></div>
             <div><dt className="text-[10px] text-muted">Role</dt><dd className="font-bold">{recipient?.roleLabel || roleLabel(recipient?.role)}</dd></div>
@@ -152,10 +152,10 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
         </section>
 
         <ErrorMessage>{error}</ErrorMessage>
-        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
-          <button type="button" onClick={() => setStage('compose')} disabled={busy} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Back</button>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" onClick={() => setStage('compose')} disabled={busy} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Back</button>
           <button type="button" onClick={confirmSend} disabled={busy}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             {busy ? 'Saving and sending…' : 'Confirm and send'}
           </button>

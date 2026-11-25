@@ -2,10 +2,10 @@ import { formatRwf } from '../../utils/purchaseCalculations.js';
 
 export default function SupplierPricingAwardSummary({ award }) {
   if (!award) return null;
-  return <section className="rounded-xl border border-emerald-200 bg-white p-4 sm:p-5">
+  return <section className="rounded-xl border border-brand bg-white p-4 sm:p-5">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <p className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-700">
+        <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">
           Supplier pricing award · internal approval pending
         </p>
         <h2 className="mt-1 text-sm font-extrabold">{award.supplierName}</h2>
@@ -16,13 +16,13 @@ export default function SupplierPricingAwardSummary({ award }) {
       </div>
       <div className="text-right">
         <span className="block text-[10px] text-muted">Selected quotation total</span>
-        <strong className="text-lg text-emerald-800">{formatRwf(award.total)}</strong>
+        <strong className="text-lg text-black">{formatRwf(award.total)}</strong>
       </div>
     </div>
 
-    {award.items?.length > 0 && <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
+    {award.items?.length > 0 && <div className="mt-4 overflow-x-auto rounded-lg border border-brand">
       <table className="w-full min-w-[700px] text-left text-xs">
-        <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+        <thead className="bg-white text-[10px] uppercase text-muted">
           <tr>{['Item', 'Quantity', 'Unit', 'Description', 'Supplier unit price', 'Line total'].map((label) =>
             <th key={label} className="px-3 py-2 font-bold">{label}</th>)}</tr>
         </thead>

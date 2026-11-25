@@ -136,7 +136,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
             search: '', status: '', preset: '', from: '', to: '',
             dateField: REPORT.defaultField, requesterId: '', page: 1
           })}
-            className="mb-0.5 text-xs font-bold text-muted hover:text-brand">Clear filters</button>}
+            className="mb-0.5 text-xs font-bold text-muted hover:text-black">Clear filters</button>}
       </FilterBar>
 
       <ErrorState message={error} onRetry={load} />
@@ -145,13 +145,13 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
         <>
           <TableScroll minWidth={1160}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-muted">
                 <tr>{['Reference', 'Requester', 'Title', 'Submission date', 'Estimated cost', 'Priority', 'Approval status', 'Procurement status', 'Actions'].map((heading) =>
                   <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {requisitions.map((request) => <tr key={request.id} className="hover:bg-slate-50/60">
-                  <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
+              <tbody className="divide-y divide-subtle">
+                {requisitions.map((request) => <tr key={request.id} className="hover:bg-white">
+                  <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
                     <TextLink onClick={() => openRequest(request.id)}>{request.reference}</TextLink>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
@@ -175,7 +175,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
                       <TextLink onClick={() => openRequest(request.id)}><span className="inline-flex items-center gap-1"><Eye size={13} />View</span></TextLink>
                       <button type="button" title="Message Requester"
                         onClick={() => navigate('Department Messages', { userId: request.requesterId, request: request.id })}
-                        className="text-muted hover:text-brand"><MessageSquare size={14} /></button>
+                        className="text-muted hover:text-black"><MessageSquare size={14} /></button>
                     </div>
                   </td>
                 </tr>)}
@@ -186,11 +186,11 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
         </>}
     </PageCard>
 
-    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30"><LoadingState label="Opening request…" /></div>}
-    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20"><LoadingState label="Opening request…" /></div>}
+    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 ">
         <ErrorState message={detailError} onRetry={loadDetail} />
-        <button type="button" onClick={closeRequest} className="mt-2 w-full rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">Close</button>
+        <button type="button" onClick={closeRequest} className="mt-2 w-full rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">Close</button>
       </div>
     </div>}
     {detail && <RequestDetail

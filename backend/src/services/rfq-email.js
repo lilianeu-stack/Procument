@@ -59,8 +59,9 @@ async function loadDeliveries({ rfqId, onlyFailed = false, deliveryIds = null })
     `SELECT d.id, d.supplier_id AS supplierId, d.recipient_email AS recipientEmail,
        d.rfq_reference AS rfqReference, d.attempts,
        f.due_date AS dueDate, f.status AS rfqStatus, f.id AS rfqId,
-       r.reference AS requisitionReference, r.title,
-       s.name AS supplierName
+       f.instructions, f.terms,
+       r.id AS requisitionId, r.reference AS requisitionReference, r.title,
+       r.required_by AS requiredBy, s.name AS supplierName
      FROM rfq_email_deliveries d
      JOIN rfqs f ON f.id = d.rfq_id
      JOIN requisitions r ON r.id = f.requisition_id
@@ -77,6 +78,15 @@ async function loadDeliveries({ rfqId, onlyFailed = false, deliveryIds = null })
 export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds = null, transport = null } = {}) {
   const deliveries = await loadDeliveries({ rfqId, onlyFailed, deliveryIds });
   const summary = { total: deliveries.length, accepted: 0, failed: 0, skipped: 0, messages: [] };
+  let items = [];
+  if (deliveries.length && deliveries[0].requisitionId) {
+    const [rows] = await pool.execute(
+      `SELECT item_name AS itemName, description, quantity, unit
+         FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+      [deliveries[0].requisitionId]
+    );
+    items = rows;
+  }
 
   for (const delivery of deliveries) {
     if (!OPEN_RFQ_STATUSES.includes(delivery.rfqStatus)) {
@@ -103,6 +113,10 @@ export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds
       requisitionReference: delivery.requisitionReference,
       title: delivery.title,
       dueDate: delivery.dueDate,
+      requiredBy: delivery.requiredBy,
+      items,
+      instructions: delivery.instructions,
+      terms: delivery.terms,
       rawToken: token
     });
     const result = await sendEmail({ ...message, to: delivery.recipientEmail }, transport);

@@ -3,7 +3,6 @@ import {
   AlertCircle, CheckCircle2, FileText, Loader2, LockKeyhole, Mail,
   ShieldCheck, XCircle
 } from 'lucide-react';
-import BrandLogo from '../ui/BrandLogo.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import PurchaseOrderDocument from '../documents/PurchaseOrderDocument.jsx';
@@ -13,9 +12,9 @@ import { roleLabel } from '../../utils/access.js';
 import { dateLabel, dateTimeLabel } from '../../utils/format.js';
 
 function Meta({ label, value }) {
-  return <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+  return <div className="rounded-lg border border-brand bg-white p-3">
     <dt className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</dt>
-    <dd className="mt-1 break-words text-xs font-semibold text-slate-800">{value || '—'}</dd>
+    <dd className="mt-1 break-words text-xs font-semibold text-black">{value || '—'}</dd>
   </div>;
 }
 
@@ -96,22 +95,19 @@ export default function PurchaseOrderApprovalPage({ token }) {
   return <div className="min-h-screen bg-canvas">
     <header className="no-print border-b bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-        <BrandLogo />
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-brand/5 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-brand">Secure approval link</span>
-          <PrintButton label="Print" />
-        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Secure approval link</span>
+        <PrintButton label="Print" />
       </div>
     </header>
 
     <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
       {loading && <div className="flex items-center justify-center gap-2 rounded-xl border bg-white p-10 text-sm text-muted"><Loader2 size={16} className="animate-spin" />Opening secure purchase order…</div>}
-      {!loading && error && <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700"><AlertCircle size={17} className="mt-0.5 shrink-0" />{error}</div>}
-      {!loading && notice && <div className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm font-semibold text-emerald-700"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{notice}</div>}
-      {!loading && emailWarning && <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-5 text-xs text-amber-900"><AlertCircle size={16} className="mt-0.5 shrink-0" /><span><strong>Email notice:</strong> {emailWarning}</span></div>}
+      {!loading && error && <div className="flex items-start gap-2 rounded-xl border border-brand bg-white p-5 text-sm font-semibold text-black"><AlertCircle size={17} className="mt-0.5 shrink-0" />{error}</div>}
+      {!loading && notice && <div className="flex items-start gap-2 rounded-xl border border-brand bg-white p-5 text-sm font-semibold text-black"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{notice}</div>}
+      {!loading && emailWarning && <div className="flex items-start gap-2 rounded-xl border border-brand bg-white p-5 text-xs text-black"><AlertCircle size={16} className="mt-0.5 shrink-0" /><span><strong>Email notice:</strong> {emailWarning}</span></div>}
 
-      {!loading && needsLogin && <section className="mx-auto max-w-lg rounded-xl border bg-white p-6 shadow-sm">
-        <div className="flex items-center gap-2 text-brand"><LockKeyhole size={18} /><h1 className="display-font text-xl font-extrabold">Sign in to review</h1></div>
+      {!loading && needsLogin && <section className="mx-auto max-w-lg rounded-xl border border-brand bg-white p-6">
+        <div className="flex items-center gap-2 text-black"><LockKeyhole size={18} /><h1 className="display-font text-xl font-extrabold">Sign in to review</h1></div>
         <p className="mt-2 text-sm leading-6 text-muted">{loginNotice}</p>
         <form onSubmit={signIn} className="mt-5 space-y-4">
           <label className="block text-xs font-bold">Registered email
@@ -120,7 +116,7 @@ export default function PurchaseOrderApprovalPage({ token }) {
           <label className="block text-xs font-bold">Password
             <input required type="password" value={login.password} onChange={(event) => setLogin({ ...login, password: event.target.value })} className="field mt-1" />
           </label>
-          <button disabled={busy} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">
+          <button disabled={busy} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-black disabled:opacity-60">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
             {busy ? 'Signing in…' : 'Sign in and continue'}
           </button>
@@ -128,11 +124,11 @@ export default function PurchaseOrderApprovalPage({ token }) {
       </section>}
 
       {!loading && approval && <>
-        <section className="rounded-xl border bg-white p-5 shadow-sm sm:p-6">
+        <section className="rounded-xl border border-brand bg-white p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-widest text-brand">Purchase order review</p>
-              <h1 className="display-font mt-1 text-2xl font-extrabold text-slate-900">{approval.purchaseOrder.reference}</h1>
+              <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Purchase order review</p>
+              <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{approval.purchaseOrder.reference}</h1>
               <p className="mt-1 text-sm text-muted">Sent to {approval.recipient.name} · {approval.recipient.roleLabel || roleLabel(approval.recipient.role)}</p>
             </div>
             <div className="text-right">
@@ -148,33 +144,33 @@ export default function PurchaseOrderApprovalPage({ token }) {
             <Meta label="Date sent" value={dateTimeLabel(approval.sentAt)} />
             <Meta label="Optional message from sender" value={approval.message} />
           </dl>
-          {approval.message && <p className="mt-4 rounded-lg bg-brand/5 p-4 text-sm italic leading-6 text-slate-700">“{approval.message}”</p>}
+          {approval.message && <p className="mt-4 rounded-lg border border-brand bg-white p-4 text-sm italic leading-6 text-black">“{approval.message}”</p>}
         </section>
 
-        <section className="rounded-xl border bg-white shadow-sm">
-          <div className="no-print flex items-center gap-2 border-b px-5 py-4"><FileText size={16} className="text-brand" /><h2 className="text-sm font-extrabold">Official purchase order</h2></div>
+        <section className="rounded-xl border border-brand bg-white">
+          <div className="no-print flex items-center gap-2 border-b px-5 py-4"><FileText size={16} className="text-black" /><h2 className="text-sm font-extrabold">Official purchase order</h2></div>
           <div className="space-y-4 overflow-x-auto p-3 sm:p-5">
             <SupplierPricingAwardSummary award={approval.purchaseOrder.supplierPricingAward} />
             <PurchaseOrderDocument order={approval.purchaseOrder} />
           </div>
         </section>
 
-        <section className="no-print rounded-xl border bg-white p-5 shadow-sm sm:p-6">
+        <section className="no-print rounded-xl border border-brand bg-white p-5 sm:p-6">
           {canDecide ? <>
-            <div className="flex items-start gap-2 text-brand"><ShieldCheck size={18} className="mt-0.5" />
+            <div className="flex items-start gap-2 text-black"><ShieldCheck size={18} className="mt-0.5" />
               <div><h2 className="text-sm font-extrabold">Record your decision</h2><p className="mt-1 text-xs text-muted">Your decision updates the original purchase order immediately.</p></div>
             </div>
             {!pendingDecision ? <div className="mt-5 flex flex-wrap gap-2">
               <button type="button" onClick={() => { setPendingDecision('Approved'); setError(''); }}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700">
+                className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-black hover:bg-brand">
                 <CheckCircle2 size={15} />Approve
               </button>
               <button type="button" onClick={() => { setPendingDecision('Rejected'); setError(''); }}
-                className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700 hover:bg-red-100">
+                className="inline-flex items-center gap-2 rounded-lg border border-brand bg-white px-4 py-2.5 text-xs font-bold text-black hover:bg-white">
                 <XCircle size={15} />Reject
               </button>
             </div> : <div className="mt-5 max-w-2xl space-y-4">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+              <div className="rounded-lg border border-brand bg-white p-4 text-xs">
                 <strong>{pendingDecision === 'Approved' ? 'Confirm approval' : 'Confirm rejection'}</strong>
                 <p className="mt-1 leading-5 text-muted">{pendingDecision === 'Approved'
                   ? 'You are approving this purchase order. A confirmation will be sent to the sender.'
@@ -187,12 +183,12 @@ export default function PurchaseOrderApprovalPage({ token }) {
               </label>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={decide} disabled={busy}
-                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60 ${pendingDecision === 'Approved' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+                  className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold text-black disabled:opacity-60 ${pendingDecision === 'Approved' ? 'bg-brand' : 'bg-brand'}`}>
                   {busy ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />}
                   {busy ? 'Recording…' : `Confirm ${pendingDecision === 'Approved' ? 'approval' : 'rejection'}`}
                 </button>
                 <button type="button" onClick={() => { setPendingDecision(''); setComment(''); setError(''); }} disabled={busy}
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-bold disabled:opacity-50">Cancel</button>
+                  className="rounded-lg border border-brand px-4 py-2.5 text-xs font-bold disabled:opacity-50">Cancel</button>
               </div>
             </div>}
           </> : <div className="flex flex-wrap items-center justify-between gap-3">
