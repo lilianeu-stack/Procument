@@ -5,7 +5,9 @@ import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
 import pool from '../config/db.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
+import { amountInWords } from '../utils/money.js';
 import { withPortalIdentity } from '../utils/roles.js';
+import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOGO_CANDIDATES = [
@@ -19,6 +21,7 @@ const BRAND = {
   title: 'Procurement Management System',
   caption: 'PROCUREMENT & STORES'
 };
+const THEME = { brand: '#FFFFFF', surface: '#FFFFFF', ink: '#000000', border: '#000000' };
 
 const EXPORT_DEFINITIONS = {
   requisitions: {
@@ -46,12 +49,25 @@ const EXPORT_DEFINITIONS = {
     role: 'procurement',
     dateFields: { forwarded: 'r.forwarded_at', submitted: 'r.submitted_at', created: 'r.created_at', approved: 'r.supervisor_decision_at' },
     defaultField: 'forwarded',
+    groupFilters: { statusGroup: RECEIVED_STATUS_GROUPS },
+    textFilters: [
+      { key: 'reference', clause: 'r.reference LIKE ?' },
+      { key: 'requester', clause: 'u.name LIKE ?' },
+      { key: 'departmentQuery', clause: "COALESCE(d.name, '') LIKE ?" },
+      { key: 'department', clause: 'd.name = ?', exact: true },
+      { key: 'status', clause: 'r.status = ?', exact: true },
+      {
+        key: 'search',
+        clause: "(r.reference LIKE ? OR r.title LIKE ? OR u.name LIKE ? OR COALESCE(d.name, '') LIKE ? OR r.justification LIKE ?)"
+      }
+    ],
     sql: `
       SELECT r.reference AS Reference, r.title AS Title,
         COALESCE(d.name, '—') AS Department, u.name AS Requester,
         su.name AS 'Approved by', fwd.name AS 'Forwarded by',
         r.status AS Status, COALESCE(r.submitted_at, '—') AS 'Submitted at',
         r.forwarded_at AS 'Forwarded at',
+        (SELECT COUNT(*) FROM requisition_items ri WHERE ri.requisition_id = r.id) AS 'Number of items',
         COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS Total
       FROM requisitions r
       JOIN users u ON u.id = r.requester_id
@@ -67,6 +83,22 @@ const EXPORT_DEFINITIONS = {
     role: 'procurement',
     dateFields: { issued: 'f.issued_at', due: 'f.due_date', closed: 'f.closed_at', created: 'f.created_at' },
     defaultField: 'issued',
+    textFilters: [
+      { key: 'reference', clause: 'f.reference LIKE ?' },
+      { key: 'requisition', clause: '(r.reference LIKE ? OR r.title LIKE ?)' },
+      {
+        key: 'supplier',
+        clause: `EXISTS (SELECT 1 FROM rfq_suppliers fsi JOIN suppliers si ON si.id = fsi.supplier_id
+          WHERE fsi.rfq_id = f.id AND (si.name LIKE ? OR si.email LIKE ?))`
+      },
+      { key: 'status', clause: 'f.status = ?', exact: true }
+    ],
+    customFilters: {
+      hasResponses: {
+        yes: '(SELECT COUNT(*) FROM quotations qc WHERE qc.rfq_id = f.id) > 0',
+        no: '(SELECT COUNT(*) FROM quotations qc WHERE qc.rfq_id = f.id) = 0'
+      }
+    },
     sql: `
       SELECT f.reference AS Reference, r.reference AS Requisition, f.status AS Status,
         COALESCE(f.issued_at, '—') AS 'Issued at', COALESCE(f.due_date, '—') AS 'Due date',
@@ -229,7 +261,8 @@ const RECORD_QUERIES = {
     roles: ['admin', 'procurement', 'supervisor', 'requestor'],
     label: 'Purchase Requisition',
     sql: `
-      SELECT r.id, r.requester_id AS requesterId, r.reference, r.title, r.justification, r.budget_code AS budgetCode,
+      SELECT r.id, r.requester_id AS requesterId, r.reference, r.title, r.location,
+        r.justification, r.budget_code AS budgetCode,
         r.priority, r.required_by AS requiredBy, r.status,
         r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
         r.supervisor_decision AS supervisorDecision,
@@ -251,6 +284,7 @@ const RECORD_QUERIES = {
       WHERE r.id = ? GROUP BY r.id`,
     itemsSql: `
       SELECT ri.item_name AS Item, COALESCE(ri.description, '') AS Description,
+        COALESCE(ri.remarks, '') AS Remarks,
         ri.quantity AS Quantity, ri.unit AS Unit,
         ri.estimated_unit_cost AS 'Unit cost',
         ri.quantity * ri.estimated_unit_cost AS 'Line total'
@@ -292,6 +326,7 @@ const RECORD_QUERIES = {
     label: 'Request for Quotation',
     sql: `
       SELECT f.id, f.reference, f.status, f.due_date AS dueDate,
+        f.instructions, f.terms,
         f.issued_at AS issuedAt, f.closed_at AS closedAt, f.created_at AS createdAt,
         r.reference AS requisition, u.name AS createdBy,
         supplier.name AS awardedSupplier
@@ -315,22 +350,42 @@ const RECORD_QUERIES = {
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'rfq' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
+  rfqQuotation: {
+    roles: ['admin', 'procurement', 'committee'],
+    label: 'RFQ Quotation',
+    sql: `
+      SELECT q.id, CONCAT(s.name, ' · ', f.reference) AS reference,
+        s.name AS supplier, f.reference AS rfq, r.reference AS requisition,
+        q.amount, q.delivery_days AS deliveryDays,
+        q.quality_score AS qualityScore, q.rating_score AS ratingScore,
+        q.notes, q.submitted_at AS submittedAt
+      FROM quotations q
+      JOIN suppliers s ON s.id = q.supplier_id
+      JOIN rfqs f ON f.id = q.rfq_id
+      JOIN requisitions r ON r.id = f.requisition_id
+      WHERE q.id = ?`
+  },
   purchaseOrder: {
     roles: ['admin', 'procurement', 'approver'],
     label: 'Purchase Order',
     sql: `
-      SELECT p.id, p.reference, p.total, p.status, p.delivery_date AS deliveryDate,
+      SELECT p.id, p.reference, p.type, p.total, p.status, p.delivery_date AS deliveryDate,
+        p.supplier_contact AS supplierContact, p.supplier_address AS supplierAddress,
+        p.subtotal, p.vat_rate AS vatRate, p.vat_amount AS vatAmount,
+        p.amount_in_words AS amountInWords,
         p.approved_at AS approvedAt, p.created_at AS createdAt,
-        s.name AS supplier, s.contact_name AS contactName, s.email AS supplierEmail,
-        r.reference AS requisition, f.reference AS rfq,
-        creator.name AS createdBy, reviewer.name AS approvedBy
+        s.name AS supplier, s.contact_name AS contactName, s.phone AS supplierPhone,
+        s.email AS supplierEmail, s.address AS registeredAddress,
+        r.reference AS requisition, r.id AS requisitionId, f.reference AS rfq, f.id AS rfqId,
+        creator.name AS preparedBy, creator.name AS createdBy, reviewer.name AS approvedBy
       FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
       JOIN rfqs f ON f.id = p.rfq_id JOIN requisitions r ON r.id = f.requisition_id
       JOIN users creator ON creator.id = p.created_by
       LEFT JOIN users reviewer ON reviewer.id = p.reviewed_by
       WHERE p.id = ?`,
     itemsSql: `
-      SELECT poi.item_name AS Item, poi.quantity AS Quantity,
+      SELECT poi.item_name AS Item, COALESCE(poi.description, '') AS Description,
+        poi.quantity AS Quantity, poi.unit AS Unit,
         poi.unit_price AS 'Unit price', poi.line_total AS 'Line total'
       FROM purchase_order_items poi WHERE poi.purchase_order_id = ? ORDER BY poi.id`,
     auditSql: `
@@ -339,6 +394,68 @@ const RECORD_QUERIES = {
         a.new_status AS 'New status', a.details AS Details
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'purchase_order' AND a.entity_id = ? ORDER BY a.created_at, a.id`
+  },
+  supplierPricingResponse: {
+    roles: ['admin', 'procurement', 'approver', 'committee', 'finance'],
+    label: 'Supplier Pricing Response',
+    sql: `
+      SELECT res.id, CONCAT(res.supplier_name, ' · ', po.reference) AS reference,
+        res.status, res.supplier_name AS supplier, res.supplier_email AS supplierEmail,
+        res.subtotal, res.vat_rate AS vatRate, res.vat_amount AS vatAmount,
+        res.other_charges AS otherCharges, res.total,
+        res.quotation_validity AS validity, res.delivery_lead_time AS leadTime,
+        res.comments, res.technical_remarks AS technicalRemarks,
+        res.submitted_at AS submittedAt, res.awarded,
+        req.reference AS pricingRequest, req.po_reference AS purchaseOrder,
+        s.name AS registeredSupplierName, s.email AS registeredSupplierEmail
+      FROM purchase_order_pricing_responses res
+      JOIN purchase_order_pricing_requests req ON req.id = res.request_id
+      JOIN purchase_orders po ON po.id = res.purchase_order_id
+      JOIN suppliers s ON s.id = res.supplier_id
+      WHERE res.id = ?`,
+    itemsSql: `
+      SELECT pri.item_no AS 'Item no', COALESCE(pri.description, pri.item_name) AS Description,
+        pri.quantity AS Quantity, pri.unit AS Unit,
+        pri.unit_price AS 'Unit price', pri.line_total AS 'Line total'
+      FROM purchase_order_pricing_response_items pri
+      WHERE pri.response_id = ? ORDER BY pri.item_no, pri.id`,
+    auditSql: `
+      SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
+        a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
+        a.new_status AS 'New status', a.details AS Details
+      FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
+      WHERE a.entity_type = 'supplier_pricing_response' AND a.entity_id = ? ORDER BY a.created_at, a.id`
+  },
+  supplierQuoteComparison: {
+    roles: ['admin', 'procurement', 'approver', 'committee', 'finance'],
+    label: 'Supplier Quotation Comparison',
+    sql: `
+      SELECT req.id AS requestId, req.reference, po.reference AS purchaseOrder,
+        f.reference AS rfq, r.reference AS requisition,
+        req.submission_deadline AS deadline, req.currency, req.status,
+        req.awarded_at AS awardedAt, req.award_comment AS awardComment
+      FROM purchase_order_pricing_requests req
+      LEFT JOIN purchase_orders po ON po.id = req.purchase_order_id
+      LEFT JOIN rfqs f ON f.id = req.rfq_id
+      LEFT JOIN requisitions r ON r.id = req.requisition_id
+      WHERE req.id = ?`,
+    itemsSql: `
+      SELECT res.supplier_name AS Supplier, res.supplier_email AS 'Supplier email',
+        pri.item_no AS 'Item no', COALESCE(pri.description, pri.item_name) AS Description,
+        pri.quantity AS Quantity, pri.unit AS Unit,
+        pri.unit_price AS 'Unit price', pri.line_total AS 'Line total',
+        res.total AS 'Quoted total', res.delivery_lead_time AS 'Delivery lead time',
+        res.quotation_validity AS Validity, res.comments AS Remarks
+      FROM purchase_order_pricing_responses res
+      JOIN purchase_order_pricing_response_items pri ON pri.response_id = res.id
+      WHERE res.request_id = ? AND res.status = 'Submitted'
+      ORDER BY res.id, pri.item_no, pri.id`,
+    auditSql: `
+      SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
+        a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
+        a.new_status AS 'New status', a.details AS Details
+      FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
+      WHERE a.entity_type = 'purchase_order_pricing_request' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
   goodsReceipt: {
     roles: ['admin', 'procurement', 'storekeeper'],
@@ -403,7 +520,18 @@ function recordMeta(row, definition) {
     purchaseOrder: 'Purchase order', requisition: 'Requisition', rfq: 'RFQ',
     invoiceDate: 'Invoice date', amount: 'Amount', total: 'Total',
     justification: 'Justification', budgetCode: 'Budget code', priority: 'Priority',
-    purpose: 'Purpose', source: 'Source', awardedSupplier: 'Awarded supplier'
+    purpose: 'Purpose', source: 'Source', awardedSupplier: 'Awarded supplier',
+    location: 'Location', remarks: 'Remarks', type: 'Type',
+    supplierContact: 'Supplier contact', supplierAddress: 'Supplier address',
+    registeredAddress: 'Registered address', subtotal: 'Subtotal',
+    vatRate: 'VAT rate', vatAmount: 'VAT amount', amountInWords: 'Amount in words',
+    preparedBy: 'Prepared by', requisitionId: 'Requisition ID', rfqId: 'RFQ ID',
+    requestId: 'Pricing request ID', pricingRequest: 'Pricing request',
+    purchaseOrderReference: 'Purchase order reference', registeredSupplierName: 'Registered supplier name',
+    registeredSupplierEmail: 'Registered supplier email', validity: 'Quotation validity',
+    leadTime: 'Delivery lead time', technicalRemarks: 'Technical remarks',
+    submittedAt: 'Submitted', awarded: 'Awarded', deadline: 'Submission deadline',
+    currency: 'Currency', awardComment: 'Award comment'
   };
   return Object.entries(row)
     .filter(([key, value]) => !['id', 'requesterId', 'requesterDepartmentId', 'supervisorDepartmentId'].includes(key))
@@ -448,6 +576,7 @@ export async function fetchRecord(type, id, user) {
   const [items] = itemsQuery ? await pool.query(itemsQuery, [id]) : [[]];
   const [activity] = historyQuery ? await pool.query(historyQuery, [id]) : [[]];
   return {
+    type,
     label: definition.label,
     reference: row.reference || String(id),
     row,
@@ -460,33 +589,278 @@ export async function fetchRecord(type, id, user) {
 
 function recordFooter(doc) {
   const pages = doc.bufferedPageRange();
-  for (let index = 0; index < pages.count; index += 1) {
+  for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     doc.switchToPage(index);
-    doc.font('Helvetica').fontSize(8).fillColor('#64748b')
+    doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
       .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, doc.page.height - 34);
-    doc.text(`Page ${index + 1} of ${pages.count}`, 40, doc.page.height - 34, {
+    doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, doc.page.height - 34, {
       width: doc.page.width - 80, align: 'right'
     });
   }
 }
 
-export async function renderRecordPdf(record) {
-  const doc = new PDFDocument({
-    size: 'A4', margin: 40,
-    info: { Title: `${record.label} ${record.reference}`, Author: BRAND.organization }
+function documentValue(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).trim();
+  return text === '—' ? '' : text;
+}
+
+function documentDate(value) {
+  const text = documentValue(value);
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(text);
+  return match ? match[1] : text;
+}
+
+function moneyText(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0.00';
+  return number.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function officialHeader(doc, record, title) {
+  const margin = 40;
+  const logo = logoPath();
+  if (logo) doc.image(logo, margin, 30, { width: 48, height: 48, fit: [48, 48], contain: true });
+  const textX = logo ? margin + 58 : margin;
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(THEME.ink)
+    .text(BRAND.organization, textX, 40, { width: 260, lineBreak: false, ellipsis: true });
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+    .text(BRAND.caption, textX, 60, { width: 260, lineBreak: false, ellipsis: true });
+  doc.moveTo(margin, 88).lineTo(doc.page.width - margin, 88).strokeColor(THEME.border).stroke();
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor(THEME.ink)
+    .text(title, margin, 104, { width: doc.page.width - 80, align: 'center', lineBreak: false });
+  const meta = [
+    `Reference: ${documentValue(record.reference)}`,
+    `Status: ${documentValue(record.row.status)}`,
+    `Date: ${documentDate(record.row.submittedAt || record.row.createdAt)}`
+  ].filter((part) => !part.endsWith(': '));
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+    .text(meta.join('  |  '), margin, 132, {
+      width: doc.page.width - 80, align: 'center', lineBreak: false, ellipsis: true
+    });
+  doc.moveTo(margin, 150).lineTo(doc.page.width - margin, 150).strokeColor(THEME.border).stroke();
+  return 166;
+}
+
+function officialPageStart(record, title) {
+  return (doc) => officialHeader(doc, record, title);
+}
+
+function ensureSpace(doc, y, height, pageStart) {
+  if (y + height <= doc.page.height - 56) return y;
+  doc.addPage();
+  return pageStart(doc);
+}
+
+function drawOfficialField(doc, label, value, x, y, width) {
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text(label, x, y, { width, lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(documentValue(value), x, y + 14, { width, lineBreak: false, ellipsis: true });
+  doc.moveTo(x, y + 29).lineTo(x + width - 8, y + 29).strokeColor(THEME.border).stroke();
+}
+
+function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, rowHeight = 22 }) {
+  const margin = 40;
+  const width = doc.page.width - 80;
+  const weightTotal = columns.reduce((sum, column) => sum + column.weight, 0);
+  const widths = columns.map((column) => width * column.weight / weightTotal);
+  let currentY = y;
+
+  function drawHeader() {
+    doc.save().rect(margin, currentY, width, 22).fill(THEME.brand).restore();
+    let x = margin;
+    columns.forEach((column, index) => {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.ink)
+        .text(column.label, x + 5, currentY + 7, {
+          width: widths[index] - 10, align: column.align || 'left', lineBreak: false, ellipsis: true
+        });
+      x += widths[index];
+    });
+    currentY += 22;
+  }
+
+  function drawRow(values, shaded) {
+    if (shaded) doc.save().rect(margin, currentY, width, rowHeight).fill(THEME.surface).restore();
+    let x = margin;
+    columns.forEach((column, index) => {
+      doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+        .text(documentValue(values[column.key]), x + 5, currentY + 6, {
+          width: widths[index] - 10, align: column.align || 'left', lineBreak: false, ellipsis: true
+        });
+      x += widths[index];
+    });
+    doc.moveTo(margin, currentY + rowHeight).lineTo(margin + width, currentY + rowHeight)
+      .strokeColor(THEME.border).stroke();
+    currentY += rowHeight;
+  }
+
+  drawHeader();
+  [...rows, ...Array.from({ length: emptyRows }, () => ({}))].forEach((values, index) => {
+    if (currentY + rowHeight > doc.page.height - 56) {
+      doc.addPage();
+      currentY = pageStart(doc);
+      drawHeader();
+    }
+    drawRow(values, index % 2 === 1);
   });
-  const chunks = [];
-  doc.on('data', (chunk) => chunks.push(chunk));
-  const done = new Promise((resolve, reject) => {
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
+  return currentY + 12;
+}
+
+function drawRequisitionDocument(doc, record) {
+  const row = record.row;
+  const pageStart = officialPageStart(record, 'MATERIAL REQUEST FORM');
+  let y = pageStart(doc);
+  const columnWidth = (doc.page.width - 100) / 2;
+  const secondColumnX = 40 + columnWidth + 20;
+
+  drawOfficialField(doc, 'Requesting Department:', row.department || row.supervisorDepartment, 40, y, columnWidth);
+  drawOfficialField(doc, 'Location where the items are needed:', row.location, secondColumnX, y, columnWidth);
+  y += 40;
+
+  const itemRows = record.items.map((item, index) => ({
+    number: String(index + 1),
+    description: [documentValue(item.Item), documentValue(item.Description)].filter(Boolean).join(' - '),
+    quantity: documentValue(item.Quantity),
+    unit: documentValue(item.Unit),
+    remarks: documentValue(item.Remarks)
+  }));
+  y = drawOfficialTable(doc, {
+    columns: [
+      { key: 'number', label: 'Item #', weight: 0.6, align: 'center' },
+      { key: 'description', label: 'Item Description', weight: 2.4 },
+      { key: 'quantity', label: 'Quantity', weight: 0.8, align: 'center' },
+      { key: 'unit', label: 'Unity of Measures', weight: 1.1 },
+      { key: 'remarks', label: 'Remarks', weight: 1.4 }
+    ],
+    rows: itemRows,
+    emptyRows: Math.max(0, 11 - itemRows.length),
+    y,
+    pageStart
   });
 
+  y = ensureSpace(doc, y, 90, pageStart);
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text('Purposes the goods are requested for:', 40, y, { width: doc.page.width - 80, lineBreak: false });
+  y += 15;
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(documentValue(row.justification), 40, y, { width: doc.page.width - 80 });
+  y = Math.max(doc.y + 10, y + 24);
+
+  y = ensureSpace(doc, y, 80, pageStart);
+  const approved = row.supervisorDecision === 'Approved' && Boolean(row.supervisorDecisionAt);
+  const signatureColumns = [
+    ['Name(Requested by):', documentValue(row.requester)],
+    ['Signature:', documentValue(row.requester)],
+    ['Date:', documentDate(row.submittedAt || row.createdAt)]
+  ];
+  const approvalColumns = [
+    ['Name(Approved by):', approved ? documentValue(row.supervisorName) : ''],
+    ['Signature:', approved ? documentValue(row.supervisorName) : ''],
+    ['Date:', approved ? documentDate(row.supervisorDecisionAt) : '']
+  ];
+  const signatureWidth = (doc.page.width - 100) / 3;
+  for (const [index, [label, value]] of signatureColumns.entries()) {
+    drawOfficialField(doc, label, value, 40 + index * (signatureWidth + 8), y, signatureWidth);
+  }
+  y += 42;
+  for (const [index, [label, value]] of approvalColumns.entries()) {
+    drawOfficialField(doc, label, value, 40 + index * (signatureWidth + 8), y, signatureWidth);
+  }
+}
+
+function drawPurchaseOrderDocument(doc, record) {
+  const row = record.row;
+  const pageStart = officialPageStart(record, 'PURCHASE ORDER');
+  let y = pageStart(doc);
+  const columnWidth = (doc.page.width - 100) / 2;
+  const secondColumnX = 40 + columnWidth + 20;
+  const contact = documentValue(row.supplierContact)
+    || [row.contactName, row.supplierPhone, row.supplierEmail].map(documentValue).filter(Boolean).join(' / ');
+  const address = documentValue(row.supplierAddress) || documentValue(row.registeredAddress);
+
+  drawOfficialField(doc, 'Supplier:', row.supplier, 40, y, columnWidth);
+  drawOfficialField(doc, 'P.O No:', row.reference, secondColumnX, y, columnWidth);
+  y += 38;
+  drawOfficialField(doc, 'Supplier Contact:', contact, 40, y, columnWidth);
+  drawOfficialField(doc, 'Type:', row.type || 'Standard', secondColumnX, y, columnWidth);
+  y += 38;
+  drawOfficialField(doc, 'Address:', address, 40, y, columnWidth);
+  drawOfficialField(doc, 'Date:', documentDate(row.createdAt), secondColumnX, y, columnWidth);
+  y += 38;
+  drawOfficialField(doc, 'Date of Delivery:', documentDate(row.deliveryDate), 40, y, columnWidth);
+  y += 40;
+
+  const itemRows = record.items.map((item, index) => ({
+    number: String(index + 1),
+    quantity: documentValue(item.Quantity),
+    unit: documentValue(item.Unit) || 'unit',
+    description: [documentValue(item.Item), documentValue(item.Description)].filter(Boolean).join(' - '),
+    unitPrice: moneyText(item['Unit price']),
+    lineTotal: moneyText(item['Line total'])
+  }));
+  y = drawOfficialTable(doc, {
+    columns: [
+      { key: 'number', label: 'Item No.', weight: 0.8, align: 'center' },
+      { key: 'quantity', label: 'Quantity', weight: 0.7, align: 'center' },
+      { key: 'unit', label: 'Unit', weight: 0.7, align: 'center' },
+      { key: 'description', label: 'Description', weight: 2.0 },
+      { key: 'unitPrice', label: 'Unit Price', weight: 1.1, align: 'right' },
+      { key: 'lineTotal', label: 'Total Price', weight: 1.1, align: 'right' }
+    ],
+    rows: itemRows,
+    emptyRows: Math.max(0, 7 - itemRows.length),
+    y,
+    pageStart
+  });
+
+  y = ensureSpace(doc, y, 120, pageStart);
+  const valueX = doc.page.width - 40 - 210;
+  const totalValue = `${moneyText(row.total)} RWF`;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text('VAT:', valueX, y, { width: 90, align: 'right', lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(`${documentValue(row.vatRate) || '0'}% - ${moneyText(row.vatAmount)} RWF`, valueX + 96, y, {
+      width: 114, align: 'right', lineBreak: false
+    });
+  y += 18;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text('Total Amount:', valueX, y, { width: 90, align: 'right', lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(totalValue, valueX + 96, y, { width: 114, align: 'right', lineBreak: false });
+  y += 24;
+
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text('Total Amount in Words: Rwandan Francs', 40, y, {
+      width: doc.page.width - 80, lineBreak: false
+    });
+  y += 15;
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(documentValue(row.amountInWords) || amountInWords(row.total), 40, y, {
+      width: doc.page.width - 80, lineBreak: false, ellipsis: true
+    });
+  y += 17;
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+    .text('Currency: Rwandan Francs (RWF)', 40, y, { width: doc.page.width - 80, lineBreak: false });
+  y += 26;
+
+  y = ensureSpace(doc, y, 60, pageStart);
+  const approved = Boolean(row.approvedAt && row.approvedBy);
+  drawOfficialField(doc, 'Prepared By:', row.preparedBy, 40, y, columnWidth);
+  drawOfficialField(
+    doc, 'Approved By:',
+    approved ? `${row.approvedBy} - ${documentDate(row.approvedAt)}` : '',
+    secondColumnX, y, columnWidth
+  );
+}
+
+async function drawGenericRecordDocument(doc, record) {
   drawBrand(doc);
   let y = 116;
-  doc.font('Helvetica-Bold').fontSize(16).fillColor('#172638').text(record.label, 40, y);
+  doc.font('Helvetica-Bold').fontSize(16).fillColor(THEME.ink).text(record.label, 40, y);
   y += 20;
-  doc.font('Helvetica').fontSize(10).fillColor('#3656a5').text(`Reference: ${record.reference}`, 40, y);
+  doc.font('Helvetica').fontSize(10).fillColor(THEME.ink).text(`Reference: ${record.reference}`, 40, y);
   y += 24;
 
   function ensure(height) {
@@ -498,7 +872,7 @@ export async function renderRecordPdf(record) {
     }
   }
 
-  doc.font('Helvetica-Bold').fontSize(10).fillColor('#334155').text('Record details', 40, y);
+  doc.font('Helvetica-Bold').fontSize(10).fillColor(THEME.ink).text('Record details', 40, y);
   y += 16;
   const half = (doc.page.width - 100) / 2;
   for (let index = 0; index < record.meta.length; index += 2) {
@@ -508,8 +882,8 @@ export async function renderRecordPdf(record) {
       const entry = record.meta[index + offset];
       if (!entry) continue;
       const x = 40 + offset * half;
-      doc.font('Helvetica-Bold').fontSize(8).fillColor('#64748b').text(entry.label.toUpperCase(), x, rowY);
-      doc.font('Helvetica').fontSize(9).fillColor('#172638')
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.ink).text(entry.label.toUpperCase(), x, rowY);
+      doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
         .text(entry.value, x, rowY + 11, { width: half - 12, lineBreak: false, ellipsis: true });
     }
     y += 32;
@@ -518,9 +892,9 @@ export async function renderRecordPdf(record) {
 
   if (record.notes) {
     ensure(60);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#334155').text('Notes / justification', 40, y);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(THEME.ink).text('Notes / justification', 40, y);
     y += 16;
-    doc.font('Helvetica').fontSize(9).fillColor('#172638')
+    doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
       .text(record.notes, 40, y, { width: doc.page.width - 80 });
     y = doc.y + 14;
   }
@@ -528,7 +902,7 @@ export async function renderRecordPdf(record) {
   async function table(title, rows) {
     if (!rows.length) return;
     ensure(60);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor('#334155').text(title, 40, y);
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(THEME.ink).text(title, 40, y);
     y += 18;
     const columns = Object.keys(rows[0]);
     const usable = doc.page.width - 80;
@@ -539,24 +913,24 @@ export async function renderRecordPdf(record) {
     const scale = usable / widths.reduce((sum, width) => sum + width, 0);
     const scaled = widths.map((width) => width * scale);
     let x = 40;
-    doc.font('Helvetica-Bold').fontSize(8).fillColor('#fff').rect(40, y, usable, 20).fill('#3656a5');
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.ink).rect(40, y, usable, 20).fill(THEME.brand);
     columns.forEach((column, index) => {
-      doc.fillColor('#fff').text(String(column).toUpperCase(), x + 4, y + 6, { width: scaled[index] - 8, ellipsis: true });
+      doc.fillColor(THEME.ink).text(String(column).toUpperCase(), x + 4, y + 6, { width: scaled[index] - 8, ellipsis: true });
       x += scaled[index];
     });
     y += 20;
-    doc.fillColor('#172638').font('Helvetica').fontSize(8);
+    doc.fillColor(THEME.ink).font('Helvetica').fontSize(8);
     rows.forEach((row, rowIndex) => {
       if (y + 20 > doc.page.height - 56) {
         doc.addPage(); y = 48; drawBrand(doc); y = 116;
-        doc.font('Helvetica-Bold').fontSize(10).fillColor('#334155').text(title, 40, y);
+        doc.font('Helvetica-Bold').fontSize(10).fillColor(THEME.ink).text(title, 40, y);
         y += 18;
-        doc.fillColor('#172638').font('Helvetica').fontSize(8);
+        doc.fillColor(THEME.ink).font('Helvetica').fontSize(8);
       }
-      if (rowIndex % 2 === 1) doc.rect(40, y, usable, 20).fillOpacity(0.05).fill('#3656a5').fillOpacity(1);
+      if (rowIndex % 2 === 1) doc.rect(40, y, usable, 20).fill(THEME.surface);
       x = 40;
       columns.forEach((column, index) => {
-        doc.fillColor('#172638').text(displayValue(row[column]), x + 4, y + 6, {
+        doc.fillColor(THEME.ink).text(displayValue(row[column]), x + 4, y + 6, {
           width: scaled[index] - 8, ellipsis: true, lineBreak: false
         });
         x += scaled[index];
@@ -568,6 +942,23 @@ export async function renderRecordPdf(record) {
 
   await table('Items and details', record.items);
   await table('Activity and approval history', record.activity);
+}
+
+export async function renderRecordPdf(record) {
+  const doc = new PDFDocument({
+    size: 'A4', margin: 40, compress: false, bufferPages: true,
+    info: { Title: `${record.label} ${record.reference}`, Author: BRAND.organization }
+  });
+  const chunks = [];
+  doc.on('data', (chunk) => chunks.push(chunk));
+  const done = new Promise((resolve, reject) => {
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+
+  if (record.type === 'requisition') drawRequisitionDocument(doc, record);
+  else if (record.type === 'purchaseOrder') drawPurchaseOrderDocument(doc, record);
+  else await drawGenericRecordDocument(doc, record);
   recordFooter(doc);
   doc.end();
   return done;
@@ -762,6 +1153,30 @@ function displayValue(value) {
   return text;
 }
 
+function textFilterClause(definition, query, params) {
+  const clauses = [];
+  for (const filter of definition.textFilters || []) {
+    const raw = String(query[filter.key] || '').trim().slice(0, 120);
+    if (!raw) continue;
+    clauses.push(filter.clause);
+    const value = filter.exact ? raw : `%${raw}%`;
+    const placeholders = (filter.clause.match(/\?/g) || []).length;
+    for (let index = 0; index < placeholders; index += 1) params.push(value);
+  }
+  for (const [param, groups] of Object.entries(definition.groupFilters || {})) {
+    const group = String(query[param] || '').trim();
+    const statuses = groups[group];
+    if (!statuses) continue;
+    clauses.push(`r.status IN (${statuses.map(() => '?').join(',')})`);
+    params.push(...statuses);
+  }
+  for (const [param, clausesByValue] of Object.entries(definition.customFilters || {})) {
+    const clause = clausesByValue[String(query[param] || '').trim()];
+    if (clause) clauses.push(clause);
+  }
+  return clauses.length ? ` AND ${clauses.join(' AND ')}` : '';
+}
+
 export async function fetchExportRows(key, query, user) {
   if (key === PORTAL_EXPORT_KEY) {
     if (!canExport(user, key)) {
@@ -789,7 +1204,8 @@ export async function fetchExportRows(key, query, user) {
     throw error;
   }
   const params = [];
-  const clause = dateFilterClause(filter, definition.dateFields, params);
+  const clause = dateFilterClause(filter, definition.dateFields, params)
+    + textFilterClause(definition, query, params);
   const sql = definition.sql.replace('{{dateFilter}}', clause);
   const [rows] = await pool.query(sql, params);
   return {
@@ -806,14 +1222,17 @@ function drawBrand(doc) {
   const margin = 40;
   if (logo) doc.image(logo, margin, 34, { width: 52, height: 52, fit: [52, 52], contain: true });
   const textX = logo ? margin + 62 : margin;
-  doc.font('Helvetica-Bold').fontSize(17).fillColor('#172638').text(BRAND.organization, textX, 38);
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#3656a5').text(BRAND.title, textX, 60);
-  doc.font('Helvetica').fontSize(8).fillColor('#64748b').text(BRAND.caption, textX, 78);
-  doc.moveTo(margin, 98).lineTo(doc.page.width - margin, 98).strokeColor('#cbd5e1').stroke();
+  doc.font('Helvetica-Bold').fontSize(17).fillColor(THEME.ink).text(BRAND.organization, textX, 38);
+  doc.font('Helvetica-Bold').fontSize(11).fillColor(THEME.ink).text(BRAND.title, textX, 60);
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink).text(BRAND.caption, textX, 78);
+  doc.moveTo(margin, 98).lineTo(doc.page.width - margin, 98).strokeColor(THEME.border).stroke();
 }
 
 export async function renderPdf(report, reference = '') {
-  const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margin: 40, info: { Title: report.label, Author: BRAND.organization } });
+  const doc = new PDFDocument({
+    size: 'A4', layout: 'landscape', margin: 40, bufferPages: true,
+    info: { Title: report.label, Author: BRAND.organization }
+  });
   const chunks = [];
   doc.on('data', (chunk) => chunks.push(chunk));
   const done = new Promise((resolve, reject) => {
@@ -823,14 +1242,14 @@ export async function renderPdf(report, reference = '') {
 
   drawBrand(doc);
   let y = 116;
-  doc.font('Helvetica-Bold').fontSize(15).fillColor('#172638').text(reference ? `${report.label}: ${reference}` : report.label, 40, y);
+  doc.font('Helvetica-Bold').fontSize(15).fillColor(THEME.ink).text(reference ? `${report.label}: ${reference}` : report.label, 40, y);
   y += 22;
   if (report.from || report.to) {
-    doc.font('Helvetica').fontSize(9).fillColor('#64748b')
+    doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
       .text(`Filtered by ${report.dateField}: ${report.from || 'beginning'} to ${report.to || 'today'}`, 40, y);
     y += 18;
   }
-  doc.font('Helvetica').fontSize(9).fillColor('#64748b')
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
     .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, y);
   y += 24;
 
@@ -845,18 +1264,18 @@ export async function renderPdf(report, reference = '') {
   const rowHeight = 24;
 
   function drawHeader() {
-    doc.font('Helvetica-Bold').fontSize(8).fillColor('#334155');
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.ink);
     let x = 40;
     for (const [index, column] of columns.entries()) {
       doc.text(String(column).toUpperCase(), x + 5, y + 7, { width: widths[index] - 10, height: 12, ellipsis: true });
       x += widths[index];
     }
     y += rowHeight;
-    doc.moveTo(40, y).lineTo(doc.page.width - 40, y).strokeColor('#cbd5e1').stroke();
+    doc.moveTo(40, y).lineTo(doc.page.width - 40, y).strokeColor(THEME.border).stroke();
   }
 
   drawHeader();
-  doc.font('Helvetica').fontSize(8).fillColor('#172638');
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink);
   report.rows.forEach((row, rowIndex) => {
     if (y + rowHeight > doc.page.height - 52) {
       doc.addPage({ layout: 'landscape' });
@@ -864,7 +1283,7 @@ export async function renderPdf(report, reference = '') {
       drawBrand(doc);
       y = 116;
       drawHeader();
-      doc.font('Helvetica').fontSize(8).fillColor('#172638');
+      doc.font('Helvetica').fontSize(8).fillColor(THEME.ink);
     }
     let x = 40;
     for (const [index, column] of columns.entries()) {
@@ -873,15 +1292,15 @@ export async function renderPdf(report, reference = '') {
     }
     y += rowHeight;
     if (rowIndex % 2 === 1) {
-      doc.rect(40, y - rowHeight, usableWidth, rowHeight).fillOpacity(0.04).fill('#3656a5').fillOpacity(1);
+      doc.rect(40, y - rowHeight, usableWidth, rowHeight).fill(THEME.surface);
     }
   });
 
   const pages = doc.bufferedPageRange();
-  for (let index = 0; index < pages.count; index += 1) {
+  for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     doc.switchToPage(index);
-    doc.font('Helvetica').fontSize(8).fillColor('#64748b')
-      .text(`Page ${index + 1} of ${pages.count}`, 40, doc.page.height - 32, { width: doc.page.width - 80, align: 'right' });
+    doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+      .text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, doc.page.height - 32, { width: doc.page.width - 80, align: 'right' });
   }
   doc.end();
   return done;

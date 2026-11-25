@@ -29,9 +29,9 @@ const DECISION_STATUSES = [
 ];
 
 const DECISION_BUTTONS = [
-  { value: 'Approve', icon: CheckCircle2, className: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-  { value: 'Request Information', icon: Info, className: 'border-amber-200 bg-amber-50 text-amber-700' },
-  { value: 'Reject', icon: XCircle, className: 'border-red-200 bg-red-50 text-red-700' }
+  { value: 'Approve', icon: CheckCircle2, className: 'border-brand bg-white text-black' },
+  { value: 'Request Information', icon: Info, className: 'border-brand bg-white text-black' },
+  { value: 'Reject', icon: XCircle, className: 'border-brand bg-white text-black' }
 ];
 
 export default function SupervisorApprovals({ portalApi, query = {}, navigate, initial = null }) {
@@ -175,13 +175,13 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
         <EmptyState title="Nothing awaiting approval" description="New submissions from your Department will appear here." /> :
         <TableScroll minWidth={1000}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-muted">
               <tr>{['Reference', 'Requester', 'Title', 'Submitted', 'Estimated cost', 'Priority', 'Status', 'Decision', ''].map((heading) =>
                 <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {pending.map((request) => <tr key={request.id} className={activeId === request.id ? 'bg-amber-50/40' : 'hover:bg-slate-50/60'}>
-                <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
+            <tbody className="divide-y divide-subtle">
+              {pending.map((request) => <tr key={request.id} className={activeId === request.id ? 'bg-white' : 'hover:bg-white'}>
+                <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
                   <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{request.reference}</TextLink>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
@@ -198,16 +198,16 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
                       <button type="button" disabled={busy} onClick={() => confirm(request)} className={primaryButtonClass('px-2.5 py-1.5')}>
                         {busy ? 'Saving…' : `Confirm ${decision}`}
                       </button>
-                      <button type="button" onClick={() => { setActiveId(null); setRowError(''); }} className="text-[11px] font-bold text-muted hover:text-brand">Cancel</button>
+                      <button type="button" onClick={() => { setActiveId(null); setRowError(''); }} className="text-[11px] font-bold text-muted hover:text-black">Cancel</button>
                     </div>
-                    {rowError && <p role="alert" className="text-[11px] text-red-600">{rowError}</p>}
+                    {rowError && <p role="alert" className="text-[11px] text-black">{rowError}</p>}
                   </div> : <div className="flex items-center gap-1.5">
                     {DECISION_BUTTONS.map(({ value, icon: Icon, className }) => <button key={value} type="button"
                       onClick={() => choose(request.id, value)} title={value}
                       className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold ${className}`}>
                       <Icon size={12} />{value === 'Request Information' ? 'Info' : value === 'Approve' ? 'Approve' : 'Reject'}
                     </button>)}
-                    <button type="button" onClick={() => navigate(PAGE, { ...query, request: request.id })} title="View full request" className="ml-1 text-muted hover:text-brand"><Eye size={14} /></button>
+                    <button type="button" onClick={() => navigate(PAGE, { ...query, request: request.id })} title="View full request" className="ml-1 text-muted hover:text-black"><Eye size={14} /></button>
                   </div>}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3" />
@@ -220,13 +220,13 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
     <div className="mt-5"><PageCard title="Recently decided" description="Your latest approval decisions for this Department.">
       {decided.length ? <TableScroll minWidth={780}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-muted">
             <tr>{['Reference', 'Requester', 'Decision', 'Note', 'Decided at', 'Status', ''].map((heading) =>
               <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
           </thead>
           <tbody className="divide-y">
             {decided.map((request) => <tr key={request.id}>
-              <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
+              <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
                 <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{request.reference}</TextLink>
               </td>
               <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
@@ -238,7 +238,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
                 <div className="flex items-center gap-3">
                   {request.supervisorDecision === 'Approved' && request.status === 'Approved by Supervisor' && !request.forwardedBySupervisor &&
                     <button type="button" disabled={forwardBusy === request.id} onClick={() => forward(request)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-brand px-2 py-1.5 text-[10px] font-bold text-white hover:bg-brand/90 disabled:opacity-50">
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand px-2 py-1.5 text-[10px] font-bold text-black hover:bg-brand disabled:opacity-50">
                       <Send size={11} />{forwardBusy === request.id ? 'Forwarding…' : 'Forward to Procurement'}
                     </button>}
                   <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>View</TextLink>
@@ -250,11 +250,11 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
       </TableScroll> : <EmptyState title="No decisions yet" description="Requests you approve, reject or query will be listed here." />}
     </PageCard></div>
 
-    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30"><LoadingState label="Opening request…" /></div>}
-    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/30 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">
+    {requestId && detailLoading && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20"><LoadingState label="Opening request…" /></div>}
+    {requestId && detailError && !detail && <div className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 ">
         <ErrorState message={detailError} onRetry={loadDetail} />
-        <button type="button" onClick={closeRequest} className="mt-2 w-full rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">Close</button>
+        <button type="button" onClick={closeRequest} className="mt-2 w-full rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">Close</button>
       </div>
     </div>}
     {detail && <RequestDetail

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, FileText, RefreshCw, Send } from 'lucide-react';
-import BrandLogo from '../ui/BrandLogo.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
 import { api } from '../../services/api.js';
 
@@ -53,32 +52,31 @@ export default function SupplierRfqPage({ token }) {
 
   return <div className="min-h-screen bg-canvas">
     <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-        <BrandLogo />
-        <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Supplier quotation portal</span>
+      <div className="mx-auto flex max-w-5xl items-center px-4 py-4">
+        <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Supplier quotation portal</span>
       </div>
     </header>
 
     <main className="mx-auto max-w-5xl space-y-5 px-4 py-8">
       {loading && <div className="rounded-xl border bg-white p-8 text-center text-sm text-muted">Opening your RFQ…</div>}
-      {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{error}</div>}
-      {!loading && notice && <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700"><CheckCircle2 size={16} />{notice}</div>}
+      {!loading && error && <div className="rounded-xl border border-brand bg-white p-5 text-sm font-semibold text-black">{error}</div>}
+      {!loading && notice && <div className="flex items-center gap-2 rounded-xl border border-brand bg-white p-4 text-sm font-semibold text-black"><CheckCircle2 size={16} />{notice}</div>}
 
       {!loading && rfq && <>
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section className="rounded-xl border border-brand bg-white p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Request for quotation</p>
-              <h1 className="display-font mt-1 text-2xl font-extrabold text-slate-900">{rfq.reference}</h1>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-black">Request for quotation</p>
+              <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{rfq.reference}</h1>
               <p className="mt-1 text-sm text-muted">Requisition {rfq.requisitionReference} · {rfq.title || 'Procurement request'}</p>
             </div>
-            <div className="rounded-lg bg-slate-50 px-4 py-3 text-right text-xs">
-              <div className="font-bold text-slate-700">Quotation deadline</div>
-              <div className="mt-1 text-base font-extrabold text-brand">{dateLabel(rfq.dueDate)}</div>
+            <div className="rounded-lg border border-brand bg-white px-4 py-3 text-right text-xs">
+              <div className="font-bold text-black">Quotation deadline</div>
+              <div className="mt-1 text-base font-extrabold text-black">{dateLabel(rfq.dueDate)}</div>
               <div className="mt-1 text-muted">Invited supplier: {rfq.supplier.name}</div>
             </div>
           </div>
-          {rfq.justification && <p className="mt-5 rounded-lg bg-emerald-50/60 p-4 text-sm leading-relaxed text-slate-700">{rfq.justification}</p>}
+          {rfq.justification && <p className="mt-5 rounded-lg border border-brand bg-white p-4 text-sm leading-relaxed text-black">{rfq.justification}</p>}
           <div className="mt-5 grid gap-3 text-xs sm:grid-cols-3">
             <div className="rounded-lg border p-3"><span className="block text-muted">Priority</span><strong className="mt-1 block">{rfq.priority || 'Medium'}</strong></div>
             <div className="rounded-lg border p-3"><span className="block text-muted">Required by</span><strong className="mt-1 block">{dateLabel(rfq.requiredBy)}</strong></div>
@@ -86,10 +84,10 @@ export default function SupplierRfqPage({ token }) {
           </div>
         </section>
 
-        <section className="rounded-xl border bg-white shadow-sm">
-          <div className="flex items-center gap-2 border-b px-6 py-4"><FileText size={16} className="text-brand" /><h2 className="text-sm font-extrabold">Requested items</h2></div>
+        <section className="rounded-xl border border-brand bg-white">
+          <div className="flex items-center gap-2 border-b px-6 py-4"><FileText size={16} className="text-black" /><h2 className="text-sm font-extrabold">Requested items</h2></div>
           {rfq.items.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Item', 'Description', 'Qty', 'Unit', 'Est. unit', 'Est. total'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
+            <thead className="bg-white text-[10px] uppercase text-muted"><tr>{['Item', 'Description', 'Qty', 'Unit', 'Est. unit', 'Est. total'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
             <tbody className="divide-y">{rfq.items.map((item, index) => <tr key={index}>
               <td className="px-4 py-3 font-bold">{item.itemName}</td>
               <td className="max-w-[260px] px-4 py-3 text-muted">{item.description || '—'}</td>
@@ -101,7 +99,25 @@ export default function SupplierRfqPage({ token }) {
           </table></div> : <p className="p-6 text-sm text-muted">No item lines were supplied with this RFQ.</p>}
         </section>
 
-        <section className="rounded-xl border bg-white p-6 shadow-sm">
+        <section className="rounded-xl border border-brand bg-white p-6">
+          <h2 className="text-sm font-extrabold">Instructions and terms</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border p-4">
+              <span className="block text-[10px] font-bold uppercase tracking-wide text-muted">Instructions to suppliers</span>
+              <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-black">
+                {rfq.instructions || 'No additional instructions were supplied with this request.'}
+              </p>
+            </div>
+            <div className="rounded-lg border p-4">
+              <span className="block text-[10px] font-bold uppercase tracking-wide text-muted">Terms and conditions</span>
+              <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-black">
+                {rfq.terms || 'No additional terms were supplied with this request.'}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-brand bg-white p-6">
           <h2 className="text-sm font-extrabold">Submit your quotation</h2>
           <p className="mt-1 text-xs text-muted">Your response is visible to Procurement only. Other invited Suppliers cannot see it.</p>
           <form onSubmit={submit} className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -109,7 +125,7 @@ export default function SupplierRfqPage({ token }) {
             <label className="text-xs font-bold">Delivery days<input required type="number" min="1" step="1" value={form.deliveryDays} onChange={(event) => setForm({ ...form, deliveryDays: event.target.value })} className="field mt-1" /></label>
             <label className="text-xs font-bold sm:col-span-2">Notes<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="field mt-1 h-auto py-2" /></label>
             <div className="sm:col-span-2">
-              <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50">
+              <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-black hover:bg-brand disabled:opacity-50">
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                 {busy ? 'Submitting…' : rfq.quotation ? 'Update quotation' : 'Submit quotation'}
               </button>

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
+import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { dateLabel } from '../utils/format.js';
 import { csvRowsToUsers, downloadCsv, parseCsv } from '../utils/csv.js';
 import { departmentDependencyText, requiresDepartmentReassignment } from '../utils/deletePolicy.js';
@@ -19,12 +20,15 @@ const ROLE_LABELS = {
 };
 const TEMPLATE_HEADERS = ['First Name', 'Last Name', 'Email', 'Role', 'Department', 'Phone Number'];
 const USERS_PAGE_SIZE = 8;
+const primaryActionClass = 'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-black bg-reference px-3.5 py-2 text-xs font-semibold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
+const secondaryActionClass = 'inline-flex min-h-9 items-center justify-center gap-1.5 rounded-lg border border-brand bg-white px-3.5 py-2 text-xs font-semibold text-black transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2';
+const iconActionClass = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-brand bg-white text-black transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-50';
 
 function Notice({ notice, onClose }) {
   if (!notice) return null;
-  return <div role="status" className={`fixed right-4 top-4 z-[60] flex max-w-sm items-start gap-3 rounded-lg border px-4 py-3 text-xs shadow-lg ${notice.type === 'error' ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+  return <div role="status" className={`fixed right-4 top-4 z-[60] flex max-w-sm items-start gap-3 rounded-lg border px-4 py-3 text-xs  ${notice.type === 'error' ? 'border-brand bg-white text-black' : 'border-brand bg-white text-black'}`}>
     <span className="flex-1">{notice.message}</span>
-    <button onClick={onClose} aria-label="Dismiss" className="rounded p-0.5 hover:bg-white/60"><X size={14} /></button>
+    <button onClick={onClose} aria-label="Dismiss" className="rounded p-0.5 hover:bg-white"><X size={14} /></button>
   </div>;
 }
 
@@ -83,15 +87,15 @@ function UserForm({ departments, initial, defaultDepartmentId, onClose, onSubmit
             ? 'The Requester must belong to the Department where they work.'
             : 'The Stock Keeper must be assigned to the Department they support.'}
       </p>}
-      {form.role === 'supervisor' && <label className="flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 p-3 text-[11px] text-amber-900">
+      {form.role === 'supervisor' && <label className="flex items-start gap-2 rounded-lg border border-brand bg-white p-3 text-[11px] text-black">
         <input type="checkbox" checked={form.replaceSupervisor} onChange={(event) => setForm({ ...form, replaceSupervisor: event.target.checked })} className="mt-0.5" />
         <span><span className="font-bold">Replace existing Supervisor</span> — deactivate the current Supervisor in this Department when saving.</span>
       </label>}
       {!editing && <label className="block text-xs font-bold">Temporary password (12+ characters)<input required minLength="12" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} className="field" /></label>}
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save changes' : 'Create account'}</button>
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save changes' : 'Create account'}</button>
       </div>
     </form>
   </Modal>;
@@ -119,9 +123,9 @@ function DepartmentForm({ initial, onClose, onSubmit }) {
       <label className="block text-xs font-bold">Department name<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="field" /></label>
       <label className="block text-xs font-bold">Description <span className="font-normal text-muted">(optional)</span><textarea rows="3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} className="field h-auto py-2" /></label>
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save department' : 'Add department'}</button>
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save department' : 'Add department'}</button>
       </div>
     </form>
   </Modal>;
@@ -130,12 +134,12 @@ function DepartmentForm({ initial, onClose, onSubmit }) {
 function ConfirmDialog({ title, message, confirmLabel = 'Confirm Delete', onClose, onConfirm, busy, error, disabled = false, children }) {
   return <Modal title={title} onClose={onClose} dismissible={!busy}>
     <div role="alertdialog" aria-modal="true" className="space-y-4">
-      <p className="text-sm text-slate-600">{message}</p>
+      <p className="text-sm text-black">{message}</p>
       {children}
-      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" disabled={busy} onClick={onClose} aria-label="Cancel deletion" className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
-        <button type="button" disabled={busy || disabled} onClick={onConfirm} aria-label={confirmLabel} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+      {error && <p role="alert" className="rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{error}</p>}
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" disabled={busy} onClick={onClose} aria-label="Cancel deletion" className="rounded-lg border border-brand px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
+        <button type="button" disabled={busy || disabled} onClick={onConfirm} aria-label={confirmLabel} className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-60">
           {busy && <LoaderCircle size={14} className="animate-spin" />}{busy ? 'Working…' : confirmLabel}
         </button>
       </div>
@@ -161,22 +165,22 @@ function ResetPasswordDialog({ user, onClose, onSubmit }) {
 
   return <Modal title={`Reset password · ${user.name}`} onClose={onClose}>
     {result ? <div className="space-y-4">
-      <p className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700"><CheckCircle2 size={16} /> Password reset successfully. Hash and audit event were saved.</p>
+      <p className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs text-black"><CheckCircle2 size={16} /> Password reset successfully. Hash and audit event were saved.</p>
       {result.temporaryPassword ? <>
-        <p className="text-xs text-slate-600">Copy this one-time temporary password and share it securely. It will not be shown again.</p>
+        <p className="text-xs text-black">Copy this one-time temporary password and share it securely. It will not be shown again.</p>
         <div className="flex gap-2">
           <input readOnly value={result.temporaryPassword} className="field font-mono text-xs" />
           <button type="button" onClick={() => navigator.clipboard?.writeText(result.temporaryPassword)} className="rounded-lg border px-3 text-xs font-bold">Copy</button>
         </div>
-      </> : <p className="text-xs text-slate-600">The supplied password is now active.</p>}
-      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button></div>
+      </> : <p className="text-xs text-black">The supplied password is now active.</p>}
+      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black">Done</button></div>
     </div> : <form onSubmit={submit} className="space-y-4">
-      <p className="text-xs text-slate-600">Leave blank to generate a secure temporary password, or enter one of at least 12 characters.</p>
+      <p className="text-xs text-black">Leave blank to generate a secure temporary password, or enter one of at least 12 characters.</p>
       <label className="block text-xs font-bold">Temporary password <span className="font-normal text-muted">(optional)</span><input type="password" minLength="12" value={password} onChange={(event) => setPassword(event.target.value)} className="field" /></label>
       <ErrorMessage>{error}</ErrorMessage>
-      <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-        <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Resetting…' : 'Reset password'}</button>
+      <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">{busy ? 'Resetting…' : 'Reset password'}</button>
       </div>
     </form>}
   </Modal>;
@@ -187,15 +191,15 @@ function UserDetailsDialog({ data, onClose }) {
   return <Modal title={`Account details · ${account.name}`} onClose={onClose}>
     <div className="space-y-4">
       <dl className="grid grid-cols-2 gap-3 text-xs">
-        {[['Email', account.email], ['Role', account.role], ['Status', account.active ? 'Active' : 'Inactive'], ['Created', dateLabel(account.createdAt)]].map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><dt className="text-[10px] uppercase text-muted">{label}</dt><dd className="mt-1 font-bold">{value}</dd></div>)}
+        {[['Email', account.email], ['Role', account.role], ['Status', account.active ? 'Active' : 'Inactive'], ['Created', dateLabel(account.createdAt)]].map(([label, value]) => <div key={label} className="rounded-lg border border-brand bg-white p-3"><dt className="text-[10px] uppercase text-muted">{label}</dt><dd className="mt-1 font-bold">{value}</dd></div>)}
       </dl>
       <div>
         <h3 className="mb-2 text-xs font-bold">Recent activity</h3>
         <div className="max-h-56 space-y-2 overflow-y-auto">
-          {activity.length ? activity.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-100 px-3 py-2 text-xs"><span className="capitalize">{item.action.replace(/_/g, ' ')}</span><span className="text-muted">{dateLabel(item.createdAt)}</span></div>) : <EmptyState>No activity recorded.</EmptyState>}
+          {activity.length ? activity.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border border-brand px-3 py-2 text-xs"><span className="capitalize">{item.action.replace(/_/g, ' ')}</span><span className="text-muted">{dateLabel(item.createdAt)}</span></div>) : <EmptyState>No activity recorded.</EmptyState>}
         </div>
       </div>
-      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Close</button></div>
+      <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black">Close</button></div>
     </div>
   </Modal>;
 }
@@ -263,7 +267,7 @@ function BulkImportDialog({ departments, defaultDepartment, onValidate, onImport
       {!summary && <>
         <div className="flex flex-wrap gap-2">
           <button onClick={downloadTemplate} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><Download size={14} />Download CSV template</button>
-          <button onClick={() => inputRef.current?.click()} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Upload size={14} />Choose completed file</button>
+          <button onClick={() => inputRef.current?.click()} className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"><Upload size={14} />Choose completed file</button>
           <input ref={inputRef} type="file" accept=".csv,text/csv" onChange={handleFile} className="hidden" />
         </div>
         <p className="text-xs text-muted">CSV opens in Excel. Required columns: First Name, Last Name, Email, Role, Department. Phone Number is optional. A secure temporary password is generated for every imported account.{defaultDepartment?.name ? ` Rows with a blank Department will be assigned to ${defaultDepartment.name}.` : ''}</p>
@@ -271,30 +275,30 @@ function BulkImportDialog({ departments, defaultDepartment, onValidate, onImport
         {busy && <p className="text-xs text-muted">Validating file…</p>}
         {report && <div className="space-y-3">
           <div className="flex flex-wrap gap-3 text-xs font-bold">
-            <span className="text-emerald-700">{report.validCount} valid</span>
-            <span className="text-red-700">{report.invalidCount} invalid</span>
-            {report.invalidCount > 0 && <button onClick={downloadErrors} className="flex items-center gap-1 text-brand underline"><FileSpreadsheet size={13} />Download error report</button>}
+            <span className="text-black">{report.validCount} valid</span>
+            <span className="text-black">{report.invalidCount} invalid</span>
+            {report.invalidCount > 0 && <button onClick={downloadErrors} className="flex items-center gap-1 text-black underline"><FileSpreadsheet size={13} />Download error report</button>}
           </div>
-          <div className="max-h-64 overflow-auto rounded-lg border border-slate-100">
+          <div className="max-h-64 overflow-auto rounded-lg border border-brand">
             <table className="w-full min-w-[560px] text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr><th className="px-3 py-2">Row</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Result</th></tr></thead>
-              <tbody className="divide-y">{report.rows.map((row) => <tr key={row.row}><td className="px-3 py-2">{row.row}</td><td className="px-3 py-2"><div className="font-bold">{row.name || '—'}</div><div className="text-muted">{row.email}</div></td><td className="px-3 py-2">{row.role}</td><td className="px-3 py-2">{row.department}</td><td className="px-3 py-2">{row.valid ? <span className="text-emerald-700">Ready</span> : <span className="text-red-700">{row.errors.join(', ')}</span>}</td></tr>)}</tbody>
+              <thead className="bg-white text-[10px] uppercase text-muted"><tr><th className="px-3 py-2">Row</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Result</th></tr></thead>
+              <tbody className="divide-y">{report.rows.map((row) => <tr key={row.row}><td className="px-3 py-2">{row.row}</td><td className="px-3 py-2"><div className="font-bold">{row.name || '—'}</div><div className="text-muted">{row.email}</div></td><td className="px-3 py-2">{row.role}</td><td className="px-3 py-2">{row.department}</td><td className="px-3 py-2">{row.valid ? <span className="text-black">Ready</span> : <span className="text-black">{row.errors.join(', ')}</span>}</td></tr>)}</tbody>
             </table>
           </div>
-          <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
+          <div className="flex justify-end gap-2 border-t border-subtle pt-4">
             <button onClick={onClose} className="rounded-lg border px-4 py-2 text-xs font-bold">Cancel</button>
-            <button disabled={!report.validCount || busy} onClick={importValid} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Importing…' : `Import ${report.validCount} user(s)`}</button>
+            <button disabled={!report.validCount || busy} onClick={importValid} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">{busy ? 'Importing…' : `Import ${report.validCount} user(s)`}</button>
           </div>
         </div>}
       </>}
       {summary && <div className="space-y-4">
-        <div className="rounded-lg bg-emerald-50 px-3 py-3 text-xs text-emerald-700"><strong>{summary.imported.length} user(s) imported.</strong> {summary.failed.length ? `${summary.failed.length} row(s) failed validation and were skipped.` : 'All rows were imported.'}</div>
+        <div className="rounded-lg bg-white px-3 py-3 text-xs text-black"><strong>{summary.imported.length} user(s) imported.</strong> {summary.failed.length ? `${summary.failed.length} row(s) failed validation and were skipped.` : 'All rows were imported.'}</div>
         <div className="flex flex-wrap gap-2">
           {summary.imported.length > 0 && <button onClick={downloadCredentials} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><Download size={14} />Download temporary passwords</button>}
           {summary.failed.length > 0 && <button onClick={downloadErrors} className="flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold"><FileSpreadsheet size={14} />Download error report</button>}
         </div>
-        {summary.failed.length > 0 && <div className="max-h-40 overflow-auto rounded-lg border border-slate-100 text-xs">{summary.failed.map((row) => <div key={row.row} className="border-b px-3 py-2 last:border-0">Row {row.row} · {row.email || '—'} · {row.errors.join(', ')}</div>)}</div>}
-        <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white">Done</button></div>
+        {summary.failed.length > 0 && <div className="max-h-40 overflow-auto rounded-lg border border-brand text-xs">{summary.failed.map((row) => <div key={row.row} className="border-b px-3 py-2 last:border-0">Row {row.row} · {row.email || '—'} · {row.errors.join(', ')}</div>)}</div>}
+        <div className="flex justify-end"><button onClick={onClose} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black">Done</button></div>
       </div>}
     </div>
   </Modal>;
@@ -476,19 +480,23 @@ export function UsersPage({
     <Notice notice={notice} onClose={() => setNotice(null)} />
 
     {selectedDepartment === null ? <PageCard
-      title="Users Management"
+      className="shadow-dashboard"
+      title="Department directory"
       description={`${departments.length} departments · ${activeAccountCount} active accounts`}
       action={<div className="flex flex-wrap gap-2">
-        <button onClick={() => setDialog('department')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand"><Building2 size={14} />Add department</button>
-        <button onClick={() => setDialog('user')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add User</button>
-        <button onClick={() => setDialog('bulk')} className="flex items-center gap-1 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand"><FileSpreadsheet size={14} />Add Users by Template</button>
+        <button type="button" onClick={() => setDialog('department')} className={secondaryActionClass}><Building2 size={14} />Add department</button>
+        <button type="button" onClick={() => setDialog('user')} className={primaryActionClass}><Plus size={14} />Add user</button>
+        <button type="button" onClick={() => setDialog('bulk')} className={secondaryActionClass}><FileSpreadsheet size={14} />Add users by template</button>
       </div>}
     >
-      <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
-        <button onClick={() => openDepartment('all')} className="rounded-xl border border-brand/20 bg-brand/5 p-4 text-left shadow-card transition hover:border-brand">
-          <div className="flex items-center justify-between"><span className="text-sm font-extrabold text-brand">All Users</span><Users size={18} className="text-brand" /></div>
-          <p className="mt-2 text-xs text-muted">{activeAccountCount} active accounts across every department</p>
-          <span className="mt-4 inline-block text-xs font-bold text-brand">Manage all users →</span>
+      <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        <button type="button" onClick={() => openDepartment('all')} className="group flex min-h-[172px] flex-col rounded-xl border border-brand bg-white p-5 text-left shadow-dashboard transition duration-200 hover:bg-accent-tint hover:border-accent-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus focus-visible:ring-offset-2">
+          <div className="flex w-full items-center justify-between gap-3">
+            <span className="text-sm font-extrabold text-black">All users</span>
+            <span className="grid h-10 w-10 place-items-center rounded-xl border border-brand bg-white text-black"><Users size={18} aria-hidden="true" /></span>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted">{activeAccountCount} active accounts across every department</p>
+          <span className="mt-auto pt-4 text-xs font-bold text-black">Manage all users <span aria-hidden="true">→</span></span>
         </button>
         {departments.map((department) => <div
           key={department.id}
@@ -496,40 +504,43 @@ export function UsersPage({
           tabIndex={0}
           onClick={() => openDepartment(department.id)}
           onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDepartment(department.id); } }}
-          className="flex cursor-pointer flex-col rounded-xl border border-slate-100 bg-white p-4 shadow-card transition hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+          className="flex min-h-[172px] cursor-pointer flex-col rounded-xl border border-brand bg-white p-5 shadow-dashboard transition duration-200 hover:bg-accent-tint hover:border-accent-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
         >
           <div className="flex items-start justify-between gap-2">
-            <div><h3 className="text-sm font-extrabold">{department.name}</h3><p className="mt-1 text-xs text-muted">{department.activeUserCount ?? department.userCount} active user(s)</p></div>
-            <Building2 size={18} className="text-muted" />
+            <div className="min-w-0">
+              <h3 className="break-words text-sm font-extrabold">{department.name}</h3>
+              <p className="mt-1 text-xs text-muted">{department.activeUserCount ?? department.userCount} active users</p>
+            </div>
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-brand bg-white text-black"><Building2 size={17} aria-hidden="true" /></span>
           </div>
-          <p className="mt-2 min-h-8 text-xs text-slate-500">{department.description || 'No description provided.'}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white">Manage users</button>
-            <button disabled={busy || dialogBusy} onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setReassignTo(''); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
-            <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} className="rounded-lg border px-2.5 py-1.5 text-xs font-bold"><Pencil size={14} /></button>
+          <p className="mt-3 min-h-8 text-xs leading-5 text-muted">{department.description || 'No description provided.'}</p>
+          <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
+            <button type="button" onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className={primaryActionClass}>Manage users</button>
+            <button type="button" disabled={busy || dialogBusy} onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setReassignTo(''); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} title={`Delete ${department.name}`} className={iconActionClass}><Trash2 size={14} /></button>
+            <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} title={`Edit ${department.name}`} className={iconActionClass}><Pencil size={14} /></button>
           </div>
         </div>)}
         {!departments.length && <EmptyState>No departments have been created yet.</EmptyState>}
       </div>
-    </PageCard> : <section className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card">
-      <div className="flex flex-col gap-5 border-b border-slate-100 px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
+    </PageCard> : <section className="overflow-hidden rounded-xl border border-brand bg-white shadow-dashboard">
+      <div className="flex flex-col gap-5 border-b border-subtle px-5 py-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <button onClick={resetView} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold"><ChevronLeft size={14} />Back to Departments</button>
+          <button type="button" onClick={resetView} className={secondaryActionClass}><ChevronLeft size={14} />Back to departments</button>
           <h2 className="mt-4 text-xl font-extrabold tracking-tight">{isAllUsersView ? 'All Users' : activeDepartment?.name || 'Department'}</h2>
           {!isAllUsersView && activeDepartment?.description && <p className="mt-1 max-w-2xl text-xs text-muted">{activeDepartment.description}</p>}
           <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-brand/10 px-3 py-1 font-bold text-brand">{totalAccounts} total user(s)</span>
+            <span className="rounded-full border border-brand bg-white px-3 py-1 font-bold text-black">{totalAccounts} total users</span>
             <span className="text-muted">{isAllUsersView ? 'Accounts from every department' : `Department ID · ${selectedDepartment}`}</span>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button onClick={() => setDialog('user')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add User</button>
-          <button onClick={() => setDialog('bulk')} className="flex items-center gap-1 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand"><FileSpreadsheet size={14} />Add Users by Template</button>
-          {!isAllUsersView && <button onClick={() => openDepartment('all')} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold">All Users</button>}
+          <button type="button" onClick={() => setDialog('user')} className={primaryActionClass}><Plus size={14} />Add user</button>
+          <button type="button" onClick={() => setDialog('bulk')} className={secondaryActionClass}><FileSpreadsheet size={14} />Add users by template</button>
+          {!isAllUsersView && <button type="button" onClick={() => openDepartment('all')} className={secondaryActionClass}>All users</button>}
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-3 border-b border-subtle px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -541,30 +552,36 @@ export function UsersPage({
         <p className="text-xs text-muted">{departmentLoading ? 'Loading users…' : `${visibleUsers.length} account(s) shown · page ${safePage} of ${totalPages}`}</p>
       </div>
 
-      {departmentLoading ? <div role="status" className="grid min-h-40 place-items-center gap-2 text-xs text-muted"><LoaderCircle size={20} className="animate-spin text-brand" />Loading users…</div>
-        : departmentError ? <div role="alert" className="m-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+      {departmentLoading ? <div role="status" className="grid min-h-40 place-items-center gap-2 text-xs text-muted"><LoaderCircle size={20} className="animate-spin text-black" />Loading users…</div>
+        : departmentError ? <div role="alert" className="m-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">
           <span>{departmentError}</span>
-          <button onClick={() => openDepartment(selectedDepartment)} className="flex items-center gap-1 rounded-lg border border-red-200 bg-white px-3 py-1.5 font-bold"><RefreshCw size={13} />Retry</button>
+          <button onClick={() => openDepartment(selectedDepartment)} className="flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 font-bold"><RefreshCw size={13} />Retry</button>
         </div>
-        : pagedUsers.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1000px] text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Full Name', 'Email', 'Role', 'Department', 'Phone Number', 'Account Status', 'Date Created', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
-          <tbody className="divide-y">{pagedUsers.map((person) => <tr key={person.id}>
-            <td className="px-4 py-3 font-bold">{person.name}</td>
-            <td className="px-4 py-3">{person.email}</td>
-            <td className="px-4 py-3 capitalize">{person.role}</td>
-            <td className="px-4 py-3">{person.department || <span className="text-muted">Unassigned</span>}</td>
-            <td className="px-4 py-3">{person.phone || '—'}</td>
-            <td className="px-4 py-3"><span className={person.active ? 'text-emerald-700' : 'text-red-700'}>{person.active ? 'Active' : 'Inactive'}</span></td>
-            <td className="px-4 py-3 text-muted">{dateLabel(person.createdAt)}</td>
-            <td className="px-4 py-3"><div className="flex items-center gap-1">
-              <button onClick={() => viewDetails(person)} title="View account details" aria-label="View account details" className="rounded p-1.5 hover:bg-slate-100"><Eye size={15} /></button>
-              <button onClick={() => { setSelectedUser(person); setDialog('user'); }} title="Edit account" aria-label="Edit account" className="rounded p-1.5 hover:bg-slate-100"><Pencil size={15} /></button>
-              <button onClick={() => { setSelectedUser(person); setDialog('reset'); }} title="Reset password" aria-label="Reset password" className="rounded p-1.5 hover:bg-slate-100"><KeyRound size={15} /></button>
+        : pagedUsers.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1100px] table-fixed text-left text-xs">
+          <colgroup>
+            <col style={{ width: '13%' }} /><col style={{ width: '16%' }} />
+            <col style={{ width: '12%' }} /><col style={{ width: '12%' }} />
+            <col style={{ width: '10%' }} /><col style={{ width: '10%' }} />
+            <col style={{ width: '9%' }} /><col style={{ width: '18%' }} />
+          </colgroup>
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55"><tr>{['Full Name', 'Email', 'Role', 'Department', 'Phone Number', 'Account Status', 'Date Created', 'Actions'].map((cell) => <th key={cell} className="whitespace-nowrap px-4 py-3.5 font-bold">{cell}</th>)}</tr></thead>
+          <tbody className="divide-y divide-subtle">{pagedUsers.map((person) => <tr key={person.id} className="transition-colors hover:bg-hover">
+            <td className="break-words px-4 py-4 align-middle font-semibold">{person.name}</td>
+            <td className="break-all px-4 py-4 align-middle">{person.email}</td>
+            <td className="px-4 py-4 align-middle capitalize">{ROLE_LABELS[person.role] || person.role}</td>
+            <td className="break-words px-4 py-4 align-middle">{person.department || <span className="text-muted">Unassigned</span>}</td>
+            <td className="px-4 py-4 align-middle">{person.phone || '—'}</td>
+            <td className="px-4 py-4 align-middle"><StatusBadge value={person.active ? 'Active' : 'Inactive'} /></td>
+            <td className="whitespace-nowrap px-4 py-4 align-middle text-muted">{dateLabel(person.createdAt)}</td>
+            <td className="px-4 py-4 align-middle"><div className="flex items-center gap-1.5">
+              <button type="button" onClick={() => viewDetails(person)} title="View account details" aria-label="View account details" className={iconActionClass}><Eye size={15} /></button>
+              <button type="button" onClick={() => { setSelectedUser(person); setDialog('user'); }} title="Edit account" aria-label="Edit account" className={iconActionClass}><Pencil size={15} /></button>
+              <button type="button" onClick={() => { setSelectedUser(person); setDialog('reset'); }} title="Reset password" aria-label="Reset password" className={iconActionClass}><KeyRound size={15} /></button>
               <div className="relative">
-                <button onClick={() => setMenuFor(menuFor === person.id ? null : person.id)} title="More actions" aria-label="More actions" className="rounded p-1.5 hover:bg-slate-100"><MoreHorizontal size={15} /></button>
-                {menuFor === person.id && <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-slate-100 bg-white p-1 shadow-lg">
-                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setRequestedActive(!person.active); setDialog('toggle-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-slate-50 disabled:opacity-50"><Ban size={13} />{person.active ? 'Deactivate' : 'Activate'}</button>
-                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setDialog('delete-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"><Trash2 size={13} />Delete account</button>
+                <button type="button" onClick={() => setMenuFor(menuFor === person.id ? null : person.id)} title="More actions" aria-label="More actions" className={iconActionClass}><MoreHorizontal size={15} /></button>
+                {menuFor === person.id && <div className="absolute right-0 z-20 mt-1 w-44 rounded-lg border border-strong bg-white p-1 ">
+                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setRequestedActive(!person.active); setDialog('toggle-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-white disabled:opacity-50"><Ban size={13} />{person.active ? 'Deactivate' : 'Activate'}</button>
+                  <button disabled={busy || dialogBusy} onClick={() => { setMenuFor(null); setSelectedUser(person); setDialog('delete-user'); }} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs text-black hover:bg-white disabled:opacity-50"><Trash2 size={13} />Delete account</button>
                 </div>}
               </div>
             </div></td>
@@ -572,12 +589,12 @@ export function UsersPage({
         </table></div>
         : <EmptyState>{isAllUsersView || (departmentUsers ?? []).length > 0 ? 'No accounts match the current search or filter.' : 'No users found in this Department'}</EmptyState>}
 
-      {!departmentLoading && !departmentError && visibleUsers.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 text-xs">
+      {!departmentLoading && !departmentError && visibleUsers.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-subtle px-5 py-3 text-xs">
         <span className="text-muted">Showing {startIndex + 1}–{Math.min(startIndex + USERS_PAGE_SIZE, visibleUsers.length)} of {visibleUsers.length}</span>
         <div className="flex items-center gap-2">
-          <button disabled={safePage <= 1} onClick={() => setPageIndex(safePage - 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold disabled:opacity-40">Previous</button>
+          <button disabled={safePage <= 1} onClick={() => setPageIndex(safePage - 1)} className="rounded-lg border border-brand px-3 py-1.5 font-bold disabled:opacity-40">Previous</button>
           <span className="font-bold">Page {safePage} of {totalPages}</span>
-          <button disabled={safePage >= totalPages} onClick={() => setPageIndex(safePage + 1)} className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold disabled:opacity-40">Next</button>
+          <button disabled={safePage >= totalPages} onClick={() => setPageIndex(safePage + 1)} className="rounded-lg border border-brand px-3 py-1.5 font-bold disabled:opacity-40">Next</button>
         </div>
       </div>}
     </section>}
@@ -616,7 +633,7 @@ export function UsersPage({
         );
       }}
     >
-      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />{requestedActive ? 'The account will be able to sign in again. Activation is blocked if this Department already has an active Supervisor.' : 'The account will no longer be able to sign in. This status change is reversible; historical records remain intact.'}</p>
+      <p className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs text-black"><AlertTriangle size={14} />{requestedActive ? 'The account will be able to sign in again. Activation is blocked if this Department already has an active Supervisor.' : 'The account will no longer be able to sign in. This status change is reversible; historical records remain intact.'}</p>
     </ConfirmDialog>}
     {dialog === 'delete-user' && selectedUser && <ConfirmDialog
       title={`Delete account · ${selectedUser.name}`}
@@ -637,7 +654,7 @@ export function UsersPage({
         );
       }}
     >
-      <p className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} />The record will disappear from this list immediately after the server confirms the deactivation. Purchase, approval, stock, and audit history is preserved.</p>
+      <p className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs text-black"><AlertTriangle size={14} />The record will disappear from this list immediately after the server confirms the deactivation. Purchase, approval, stock, and audit history is preserved.</p>
     </ConfirmDialog>}
     {dialog === 'delete-department' && selectedDepartmentForDelete && <ConfirmDialog
       title={`Delete department · ${selectedDepartmentForDelete.name}`}
@@ -664,7 +681,7 @@ export function UsersPage({
           {departments.filter((department) => department.id !== selectedDepartmentForDelete.id).map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
         </select>
       </label>}
-      <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{departmentDependencyText(selectedDepartmentForDelete)} Choose a destination department to enable deletion.</span></p>
+      <p className="flex items-start gap-2 rounded-lg bg-white px-3 py-2 text-xs text-black"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{departmentDependencyText(selectedDepartmentForDelete)} Choose a destination department to enable deletion.</span></p>
     </ConfirmDialog>}
   </>;
 }

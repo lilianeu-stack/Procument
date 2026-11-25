@@ -1,41 +1,77 @@
-import { ArrowRight, Boxes, Check, ClipboardCheck, FileText, Sparkles, Truck } from 'lucide-react';
-import PageCard, { EmptyState } from '../components/ui/PageCard.jsx';
-import StatusBadge from '../components/ui/StatusBadge.jsx';
-import { currency, dateLabel } from '../utils/format.js';
-import { RECEIVED_REQUESTS_PAGE } from '../utils/access.js';
+import {
+  AlertTriangle, ArrowUpRight, Boxes, Check, CheckCircle2, Clock3,
+  FileText, ShoppingCart, Truck, XCircle
+} from 'lucide-react';
+import {
+  canAccessPage, PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE
+} from '../utils/access.js';
 
-function Metric({ label, value, note, icon: Icon, tone = 'green' }) {
-  const tones = { green: 'bg-brand-light text-brand', blue: 'bg-blue-50 text-blue-600', amber: 'bg-amber-50 text-amber-600', violet: 'bg-violet-50 text-violet-600' };
-  return <article className="rounded-xl border border-slate-100 bg-white p-5 shadow-card">
-    <div className="flex items-start justify-between"><span className="text-[13px] font-semibold text-muted">{label}</span><span className={`grid h-9 w-9 place-items-center rounded-lg ${tones[tone]}`}><Icon size={17} /></span></div>
-    <div className="mt-4 display-font text-[27px] font-extrabold tracking-tight">{value}</div>
-    <div className="mt-1 text-xs text-muted">{note}</div>
-  </article>;
+function formatCount(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toLocaleString('en-US') : '—';
 }
 
-export default function OverviewPage({ dashboard, onNavigate }) {
-  const requests = dashboard?.recent || [];
-  return <div className="space-y-6">
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Metric label="Total requisitions" value={dashboard?.requisitions?.total ?? '—'} note={`${dashboard?.requisitions?.pending ?? 0} waiting for review`} icon={FileText} />
-      <Metric label="Awaiting approval" value={dashboard?.requisitions?.pending ?? '—'} note="Needs your team's attention" icon={ClipboardCheck} tone="amber" />
-      <Metric label="Items in catalogue" value={dashboard?.inventory?.items ?? '—'} note={`${dashboard?.inventory?.lowStock ?? 0} below reorder level`} icon={Boxes} tone="blue" />
-      <Metric label="Active suppliers" value={dashboard?.suppliers?.active ?? '—'} note="Approved supplier partners" icon={Truck} tone="violet" />
+function MetricCard({ label, value, note, icon: Icon, onClick }) {
+  const content = <>
+    <div className="flex items-start justify-between gap-3">
+      <span className="text-[11px] font-bold uppercase leading-4 tracking-[.1em] text-black/60">{label}</span>
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-brand bg-white">
+        <Icon size={15} strokeWidth={1.8} aria-hidden="true" />
+      </span>
     </div>
-    <div className="grid gap-5 xl:grid-cols-[1.55fr_1fr]">
-      <PageCard title="Recent requisitions" description="Latest requests across your organization" action={<button onClick={() => onNavigate(RECEIVED_REQUESTS_PAGE)} className="text-xs font-bold text-brand">View all <ArrowRight size={14} className="inline" /></button>}>
-        {requests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Request', 'Requester', 'Date', 'Amount', 'Status'].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y divide-slate-100">{requests.map((request) => <tr key={request.id}><td className="px-5 py-3 font-bold">{request.reference}</td><td className="px-5 py-3">{request.requester}</td><td className="px-5 py-3">{dateLabel(request.createdAt)}</td><td className="px-5 py-3">{currency(request.total)}</td><td className="px-5 py-3"><StatusBadge value={request.status} /></td></tr>)}</tbody></table></div> : <EmptyState>No requisitions yet.</EmptyState>}
-      </PageCard>
-      <PageCard title="Inventory health" description={`${dashboard?.inventory?.items ?? 0} catalogue items`}>
-        <div className="p-5">
-          <div className="rounded-xl bg-[#f7faf9] p-4"><div className="flex justify-between text-xs"><span className="font-semibold">Low-stock items</span><span className="font-bold text-amber-700">{dashboard?.inventory?.lowStock ?? 0}</span></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full bg-brand" style={{ width: `${dashboard?.inventory?.items ? Math.max(4, 100 - dashboard.inventory.lowStock / dashboard.inventory.items * 100) : 0}%` }} /></div><p className="mt-2 text-[10px] text-muted">Stock updates as receipts and issues are recorded.</p></div>
-          <button onClick={() => onNavigate('Stock overview')} className="mt-4 flex w-full items-center justify-between rounded-lg border border-slate-100 p-3 text-xs font-bold"><span className="flex items-center gap-2"><Check size={15} className="text-brand" />View inventory</span><ArrowRight size={15} /></button>
-        </div>
-      </PageCard>
+    <div className="mt-5 flex items-end justify-between gap-3">
+      <div className="min-w-0">
+        <div className="display-font text-[32px] font-extrabold leading-none tracking-[-0.02em]">{formatCount(value)}</div>
+        <div className="mt-2 min-h-8 text-[11px] leading-4 text-black/50">{note}</div>
+      </div>
+      {onClick && <ArrowUpRight size={15} className="shrink-0 text-black/40 transition group-hover:text-accent-text" aria-hidden="true" />}
     </div>
-    <div className="rounded-xl bg-[#1d4441] p-5 text-white sm:flex sm:items-center sm:justify-between sm:px-7">
-      <div className="flex items-center gap-4"><span className="grid h-11 w-11 place-items-center rounded-xl bg-white/10"><Sparkles size={20} className="text-emerald-300" /></span><div><h3 className="font-bold">Keep every request moving.</h3><p className="mt-1 text-xs text-emerald-100/70">Create a request and track its approvals in one place.</p></div></div>
-      <button onClick={() => onNavigate(RECEIVED_REQUESTS_PAGE)} className="mt-4 rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-[#1d4441] sm:mt-0">Review received requests</button>
-    </div>
+  </>;
+  const className = 'group flex h-full min-h-[148px] w-full flex-col justify-between rounded-2xl border border-brand bg-white p-5 text-left shadow-dashboard transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus';
+
+  return onClick
+    ? <button type="button" onClick={onClick} className={`${className} hover:bg-accent-tint hover:border-accent-border`} aria-label={`${label}: ${formatCount(value)}. ${note}`}>{content}</button>
+    : <article className={className}>{content}</article>;
+}
+
+function DashboardSkeleton() {
+  return <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" aria-busy="true">
+    {Array.from({ length: 10 }, (_value, index) => <div key={index} className="h-[148px] animate-pulse rounded-2xl border border-brand bg-white p-5 shadow-dashboard">
+      <div className="h-3 w-2/3 rounded bg-hover" />
+      <div className="mt-7 h-8 w-1/2 rounded bg-hover" />
+      <div className="mt-3 h-3 w-3/4 rounded bg-hover" />
+    </div>)}
   </div>;
+}
+
+export default function OverviewPage({ dashboard, role, loading, onNavigate }) {
+  const canViewRequests = canAccessPage(role, RECEIVED_REQUESTS_PAGE);
+  const canViewSuppliers = canAccessPage(role, 'Suppliers');
+  const canViewStock = canAccessPage(role, 'Stock overview');
+  const canViewPurchaseOrders = canAccessPage(role, PURCHASE_ORDERS_PAGE);
+
+  const requestNav = (query) => canViewRequests ? () => onNavigate(RECEIVED_REQUESTS_PAGE, query) : undefined;
+  const openSuppliers = canViewSuppliers ? () => onNavigate('Suppliers') : undefined;
+  const stockNav = (query) => canViewStock ? () => onNavigate('Stock overview', query) : undefined;
+  const purchaseOrderNav = (query) => canViewPurchaseOrders ? () => onNavigate(PURCHASE_ORDERS_PAGE, query) : undefined;
+
+  const metrics = [
+    { label: 'Total Purchase Requests', value: dashboard?.requisitions?.total, note: 'All recorded requests.', icon: FileText, onClick: requestNav() },
+    { label: 'Pending Requests', value: dashboard?.requisitions?.pending, note: 'Awaiting review or action.', icon: Clock3, onClick: requestNav({ statusGroup: 'underReview' }) },
+    { label: 'Approved Requests', value: dashboard?.requisitions?.approved, note: 'Approved or in progress.', icon: CheckCircle2, onClick: requestNav({ statusGroup: 'new' }) },
+    { label: 'Rejected Requests', value: dashboard?.requisitions?.rejected, note: 'Rejected during review.', icon: XCircle, onClick: requestNav({ statusGroup: 'rejected' }) },
+    { label: 'Total Purchase Orders', value: dashboard?.purchaseOrders?.total, note: 'Orders created from awarded RFQs.', icon: ShoppingCart, onClick: purchaseOrderNav() },
+    { label: 'Pending Purchase Orders', value: dashboard?.purchaseOrders?.pending, note: 'Awaiting internal approval.', icon: Clock3, onClick: purchaseOrderNav({ status: 'Pending approval' }) },
+    { label: 'Approved Purchase Orders', value: dashboard?.purchaseOrders?.approved, note: 'Approved or fulfilled orders.', icon: Check, onClick: purchaseOrderNav({ status: 'Approved' }) },
+    { label: 'Total Suppliers', value: dashboard?.suppliers?.total, note: 'Registered suppliers.', icon: Truck, onClick: openSuppliers },
+    { label: 'Total Stock Items', value: dashboard?.inventory?.items, note: 'Items in the inventory catalogue.', icon: Boxes, onClick: stockNav() },
+    { label: 'Low Stock Items', value: dashboard?.inventory?.lowStock, note: 'At or below reorder level.', icon: AlertTriangle, onClick: stockNav({ lowStock: 'true' }) }
+  ];
+
+  return loading && !dashboard
+    ? <DashboardSkeleton />
+    : <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      {metrics.map((metric) => <MetricCard key={metric.label} {...metric} />)}
+    </div>;
 }

@@ -49,6 +49,16 @@ export const PROCUREMENT_READY_STATUSES = [
   'Approved'
 ];
 
+// Groups used by the received-requests statistics and card filters. Legacy
+// labels remain included so historical forwarded records are not lost.
+export const RECEIVED_STATUS_GROUPS = {
+  new: [REQUISITION_STATUS.FORWARDED, 'Approved'],
+  underReview: [REQUISITION_STATUS.UNDER_REVIEW],
+  processing: [REQUISITION_STATUS.PROCESSING, REQUISITION_STATUS.PROCUREMENT_APPROVED],
+  completed: [REQUISITION_STATUS.COMPLETED],
+  rejected: [REQUISITION_STATUS.PROCUREMENT_REJECTED, 'Rejected']
+};
+
 // A Department request is only visible to Procurement once its forwarding
 // action completed. The forwarded_by_supervisor column is the authoritative
 // marker; the status is only the workflow label.

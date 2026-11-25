@@ -65,21 +65,21 @@ export default function StockKeeperNotifications({ notifications = [], portalApi
     <ErrorState message={error} onRetry={portalApi.reload} />
     <PageCard title="Notifications" description={unread ? `${unread} unread` : 'You are all caught up.'}
       action={<PortalBadge tone={unread ? 'amber' : 'emerald'}><Bell size={11} />{unread} unread</PortalBadge>}>
-      <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50/50 px-5 py-3">
+      <div className="flex items-center gap-2 border-b border-subtle bg-white px-5 py-3">
         <Filter size={13} className="text-muted" />
         <label className="text-[10px] font-bold uppercase text-muted" htmlFor="stock-notification-type">Type</label>
         <select id="stock-notification-type" value={type} onChange={(event) => setType(event.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
+          className="rounded-lg border border-brand bg-white px-2 py-1.5 text-xs">
           {TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
-      {filtered.length ? <div className="divide-y divide-slate-100">
+      {filtered.length ? <div className="divide-y divide-subtle">
         {filtered.map((notification) => {
           const canOpen = Boolean(parseRoute(notification.link || '').portal);
-          return <div key={notification.id} className={`flex flex-wrap items-start gap-3 px-5 py-4 ${notification.isRead ? '' : 'bg-emerald-50/50'}`}>
+          return <div key={notification.id} className={`flex flex-wrap items-start gap-3 px-5 py-4 ${notification.isRead ? '' : 'bg-white'}`}>
             <button type="button" disabled={!canOpen} onClick={() => onOpenNotification(notification)} className="min-w-0 flex-1 text-left disabled:cursor-default">
               <div className="flex flex-wrap items-center gap-2">
-                {!notification.isRead && <span className="h-2 w-2 rounded-full bg-rose-500" />}
+                {!notification.isRead && <span className="h-2 w-2 rounded-full bg-reference" />}
                 <span className="text-xs font-bold">{notification.title}</span>
                 <PortalBadge tone="slate">{TYPES.find(([value]) => value === notification.category)?.[1] || 'System'}</PortalBadge>
               </div>
@@ -87,7 +87,7 @@ export default function StockKeeperNotifications({ notifications = [], portalApi
               <p className="mt-1 text-[10px] text-muted">{dateTimeLabel(notification.createdAt)}</p>
             </button>
             {!notification.isRead && <button type="button" disabled={busy} onClick={() => markRead(notification)}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-brand disabled:opacity-50">
+              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-black disabled:opacity-50">
               <Check size={12} />Mark read
             </button>}
           </div>;

@@ -15,6 +15,7 @@ async function invitedRfq(token) {
   if (!identity) return { error: 404, message: 'This quotation link is invalid or has expired.' };
   const [rows] = await pool.execute(
     `SELECT f.id, f.reference, f.due_date AS dueDate, f.status,
+       f.instructions, f.terms,
        r.id AS requisitionId, r.reference AS requisitionReference, r.title,
        r.justification, r.priority, r.required_by AS requiredBy,
        s.id AS supplierId, s.name AS supplierName, s.contact_name AS contactName
@@ -57,6 +58,8 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
         reference: rfq.reference,
         dueDate: rfq.dueDate,
         status: rfq.status,
+        instructions: rfq.instructions || '',
+        terms: rfq.terms || '',
         requisitionReference: rfq.requisitionReference,
         title: rfq.title,
         justification: rfq.justification,
@@ -150,10 +153,56 @@ router.post('/email/webhooks/generic', async (req, res, next) => {
         WHERE provider_message_id = ?${recipientClause}`,
       params
     );
-    if (Number(result.affectedRows) > 0) {
-      log('INFO', `Email webhook updated ${result.affectedRows} delivery record(s) to ${event.status}.`);
+    const rfqUpdated = Number(result.affectedRows) || 0;
+    if (rfqUpdated > 0) {
+      log('INFO', `Email webhook updated ${rfqUpdated} RFQ delivery record(s) to ${event.status}.`);
     }
-    return res.status(202).json({ message: 'Webhook accepted.', updated: Number(result.affectedRows) || 0 });
+
+    // Supplier pricing invitations use the same provider message id. Keep the
+    // private response status untouched; only the truthful email status and
+    // provider timestamps change, and every change is audited.
+    const pricingRecipientClause = validEmail(recipient) ? ' AND supplier_email = ?' : '';
+    const pricingIdentityParams = validEmail(recipient) ? [messageId, recipient] : [messageId];
+    const [pricingRows] = await pool.execute(
+      `SELECT id, request_id AS requestId, supplier_id AS supplierId, supplier_name AS supplierName
+         FROM purchase_order_pricing_responses
+        WHERE provider_message_id = ?${pricingRecipientClause}`,
+      pricingIdentityParams
+    );
+    let pricingUpdated = 0;
+    if (pricingRows.length) {
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [pricingResult] = await connection.execute(
+          `UPDATE purchase_order_pricing_responses
+              SET email_status = ?, ${event.column} = COALESCE(${event.column}, UTC_TIMESTAMP()),
+                updated_at = UTC_TIMESTAMP()
+            WHERE provider_message_id = ?${pricingRecipientClause}`,
+          [event.status, ...pricingIdentityParams]
+        );
+        pricingUpdated = Number(pricingResult.affectedRows) || 0;
+        for (const row of pricingRows) {
+          await writeAudit(
+            connection, null, `pricing_email_${event.status.toLowerCase()}`,
+            'supplier_pricing_response', row.id,
+            {
+              requestId: row.requestId, supplierId: row.supplierId,
+              supplierName: row.supplierName, recipient, providerMessageId: messageId,
+              status: event.status
+            }
+          );
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback().catch(() => {});
+        throw error;
+      } finally {
+        connection.release();
+      }
+      log('INFO', `Email webhook updated ${pricingUpdated} supplier pricing response(s) to ${event.status}.`);
+    }
+    return res.status(202).json({ message: 'Webhook accepted.', updated: rfqUpdated + pricingUpdated });
   } catch (error) { return next(error); }
 });
 

@@ -1,6 +1,9 @@
-export default function PageCard({ title, description, action, children }) {
-  return <section className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card">
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+export default function PageCard({ title, description, action, children, surface = 'white', className = '' }) {
+  // The Overview dashboard uses the `card` surface for its subtle shadow while
+  // keeping the card itself pure white like every other panel.
+  const surfaceClass = surface === 'card' ? 'bg-white shadow-dashboard' : 'bg-white';
+  return <section className={`overflow-hidden rounded-xl border border-brand ${surfaceClass} ${className}`}>
+    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-5 py-4">
       <div>
         <h2 className="text-sm font-bold">{title}</h2>
         {description && <p className="mt-1 text-xs text-muted">{description}</p>}
@@ -16,13 +19,13 @@ export function EmptyState({ children }) {
 }
 
 export function ErrorMessage({ children }) {
-  return children ? <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{children}</p> : null;
+  return children ? <p role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-black">{children}</p> : null;
 }
 
 export function FormActions({ busy, close, label, busyLabel }) {
-  return <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-    <button type="button" onClick={close} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-    <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+  return <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+    <button type="button" onClick={close} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold transition-colors hover:bg-accent-tint hover:border-accent-border hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">Cancel</button>
+    <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:opacity-60">
       {busy ? (busyLabel || 'Saving…') : label}
     </button>
   </div>;
