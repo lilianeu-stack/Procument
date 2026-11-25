@@ -12,10 +12,9 @@ import ReceivedRequests from '../components/portals/ReceivedRequests.jsx';
 import ProcurementDocumentView from '../components/portals/ProcurementDocumentView.jsx';
 import ProcurementProcessingPage from '../components/portals/ProcurementProcessingPage.jsx';
 import ReportToolbar from '../components/ui/ReportToolbar.jsx';
-import { PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE } from '../utils/access.js';
+import { PROCUREMENT_PROCESSING_PAGE, PROFILE_PAGE, RECEIVED_REQUESTS_PAGE } from '../utils/access.js';
 import { reportForPage } from '../utils/reportFields.js';
-import SettingsPage from '../components/portals/SettingsPage.jsx';
-import { SETTINGS_PAGE } from '../utils/access.js';
+import PortalProfile from '../components/portals/PortalProfile.jsx';
 
 export default function PageContent({
   page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange,
@@ -43,8 +42,13 @@ export default function PageContent({
       loading={loading}
       onNavigate={actions.onNavigate}
     />;
-  } else if (page === SETTINGS_PAGE) {
-    content = <SettingsPage actions={actions} />;
+  } else if (page === PROFILE_PAGE) {
+    content = <PortalProfile
+      user={data.user}
+      summary={data.portalSummary}
+      portal="admin"
+      onUpdated={actions.onProfileUpdated}
+    />;
   } else if (page === PROCUREMENT_PROCESSING_PAGE) {
     content = <ProcurementProcessingPage
       data={data} query={query} actions={actions} portalApi={portalApi} navigate={navigate}

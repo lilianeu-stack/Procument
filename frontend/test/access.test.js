@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, PROCUREMENT_PROCESSING_PAGE,
-  PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, SETTINGS_PAGE,
+  PROFILE_PAGE, PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, SETTINGS_PAGE,
   STOCKKEEPER_PAGES, SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
 } from '../src/utils/access.js';
 
@@ -24,11 +25,17 @@ test('restricted pages match the backend role policy', () => {
   assert.equal(canAccessPage('admin', 'Users'), true);
 });
 
-test('only administrators can access the Settings Center', () => {
-  assert.equal(canAccessPage('admin', SETTINGS_PAGE), true);
-  assert.equal(canAccessPage('procurement', SETTINGS_PAGE), false);
-  assert.equal(canAccessPage('requestor', SETTINGS_PAGE), false);
-  assert.equal(canAccessPage('supervisor', SETTINGS_PAGE), false);
+test('the Administrator Settings page is no longer a user-facing route', () => {
+  for (const role of ['admin', 'procurement', 'approver', 'requestor', 'supervisor', 'storekeeper']) {
+    assert.equal(canAccessPage(role, SETTINGS_PAGE), false, `${role} must not open the retired Settings page`);
+  }
+});
+
+test('every authenticated role has a personal Profile page', () => {
+  for (const role of ['admin', 'procurement', 'approver', 'finance', 'committee', 'supervisor', 'requestor', 'storekeeper']) {
+    assert.equal(canAccessPage(role, PROFILE_PAGE), true, `${role} should see Profile`);
+  }
+  assert.equal(canonicalPage('My Profile'), PROFILE_PAGE);
 });
 
 test('removed administrator pages cannot be reached through direct routes', () => {
@@ -75,7 +82,7 @@ test('Stock Keepers have a dedicated portal with only its five pages', () => {
   for (const page of STOCKKEEPER_PAGES) {
     assert.equal(canAccessPage('storekeeper', page), true, `Stock Keeper should see ${page}`);
   }
-  for (const page of ['Overview', 'Users', 'Approvals', 'Stock movements', 'Requesters', 'My Profile']) {
+  for (const page of ['Overview', 'Users', 'Approvals', 'Stock movements', 'Requesters', SETTINGS_PAGE]) {
     assert.equal(canAccessPage('storekeeper', page), false, `Stock Keeper must not access ${page}`);
   }
 });
@@ -109,4 +116,21 @@ test('approver, finance, and committee roles receive the Administrator-side port
   assert.equal(canAccessPage('approver', 'Approvals'), true);
   assert.equal(canAccessPage('finance', 'Approvals'), false);
   assert.equal(canAccessPage('committee', 'Approvals'), false);
+});
+
+test('each portal sidebar has one Profile link and Administrator has no Settings link', () => {
+  const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const admin = read('../src/components/layout/Sidebar.jsx');
+  assert.match(admin, /PROFILE_PAGE/);
+  assert.doesNotMatch(admin, /SETTINGS_PAGE|icon: Settings/);
+
+  const requester = read('../src/components/portals/RequesterSidebar.jsx');
+  const stockkeeper = read('../src/components/portals/StockKeeperSidebar.jsx');
+  const supervisor = read('../src/components/portals/SupervisorSidebar.jsx');
+  assert.match(requester, /PROFILE_PAGE/);
+  assert.match(stockkeeper, /Profile: UserRound/);
+  assert.match(supervisor, /SUPERVISOR_PAGES\[9\]/);
+  assert.ok(SUPERVISOR_PAGES.includes(PROFILE_PAGE));
+  assert.ok(REQUESTER_PAGES.includes(PROFILE_PAGE));
+  assert.ok(STOCKKEEPER_PAGES.includes(PROFILE_PAGE));
 });

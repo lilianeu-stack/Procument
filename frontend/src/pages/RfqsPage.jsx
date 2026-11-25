@@ -1068,14 +1068,14 @@ export default function RfqsPage({
               label="RFQ dates" className="md:col-span-2 xl:col-span-8" />
             <div className="flex min-w-0 flex-wrap items-end gap-2 self-start md:col-span-2 xl:col-span-4">
               <label className="block min-w-0 shrink-0">
-                <span className="block text-[10px] font-bold uppercase tracking-wide text-muted">Rows per page</span>
+                <span className="block text-[10px] font-bold uppercase leading-4 tracking-wide text-muted">Rows per page</span>
                 <select value={filters.limit} onChange={(event) => updateFilter('limit', Number(event.target.value))}
-                  className="field h-9 w-24 px-2.5 text-[11px]" aria-label="Rows per page">
+                  className="field mt-0 h-10 w-24 px-2.5 text-[11px]" aria-label="Rows per page">
                   {[10, 20, 50].map((value) => <option key={value} value={value}>{value}</option>)}
                 </select>
               </label>
               <button type="button" disabled={!hasFilters} onClick={clearFilters}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40">
+                className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40">
                 <X size={13} />Clear Filters
               </button>
             </div>

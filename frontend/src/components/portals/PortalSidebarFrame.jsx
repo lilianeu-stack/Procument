@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
-import { roleLabel } from '../../utils/access.js';
+import UserAvatar from '../ui/UserAvatar.jsx';
+import { PROFILE_PAGE, roleLabel } from '../../utils/access.js';
 
 export default function PortalSidebarFrame({
   accent, portalLabel, groups, user, page, open, collapsed,
@@ -51,13 +52,15 @@ export default function PortalSidebarFrame({
       </div>
 
       <div className={`mt-4 flex items-center gap-3 border-t border-subtle px-2 pt-4 ${collapsed ? 'lg:flex-col lg:gap-2 lg:px-0' : ''}`}>
-        <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold ${accent.profile}`}>
-          {user?.initials || 'HH'}
-        </span>
-        <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
-          <div className="truncate text-xs font-bold text-black">{user?.name || 'User'}</div>
-          <div className={`mt-0.5 truncate text-[10px] ${accent.mutedText}`}>{roleLabel(user?.role)} · {user?.department || 'No Department'}</div>
-        </div>
+        <button type="button" onClick={() => { onNavigate(PROFILE_PAGE); onClose(); }}
+          aria-label="Open profile" title="Open profile"
+          className={`flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${collapsed ? 'lg:flex-none lg:justify-center' : ''}`}>
+          <UserAvatar user={user} size="h-10 w-10" textSize="text-xs" className="border border-brand" fallbackClassName={accent.profile} />
+          <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
+            <div className="truncate text-xs font-bold text-black">{user?.name || 'User'}</div>
+            <div className={`mt-0.5 truncate text-[10px] ${accent.mutedText}`}>{roleLabel(user?.role)} · {user?.department || 'No Department'}</div>
+          </div>
+        </button>
         <button type="button" onClick={onLogout} className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${accent.mutedText || 'text-black'}`} title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
       </div>
     </aside>

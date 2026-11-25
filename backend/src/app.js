@@ -6,7 +6,14 @@ import { errorCode, log } from './lib/logger.js';
 import api from './routes/api.js';
 
 const app = express();
-app.use(helmet());
+// Profile photos are loaded into object URLs by the shared avatar component;
+// allow those image sources without weakening the rest of the CSP.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: { 'img-src': ["'self'", 'data:', 'blob:'] }
+  }
+}));
 const clientOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
 app.use(cors({
   origin(origin, callback) {

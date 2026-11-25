@@ -12,7 +12,11 @@ export default function ReportToolbar({
   onDateFilterChange,
   params = {},
   reference = '',
-  professionalActions = false
+  professionalActions = false,
+  onPrint,
+  printLabel,
+  printDates = '',
+  printing = false
 }) {
   const value = {
     ...dateFilter,
@@ -21,7 +25,7 @@ export default function ReportToolbar({
   const query = { ...dateQueryForFilter(value), ...params };
 
   return <>
-    <PrintHeader title={report.title} reference={reference} />
+    <PrintHeader title={report.title} reference={reference} dates={printDates} />
     <div className="no-print mb-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -29,7 +33,12 @@ export default function ReportToolbar({
           <p className="text-[11px] text-muted">Filter the report, then print or download the current result set.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <PrintButton label={`Print ${report.title}`} tone={professionalActions ? 'primary' : 'default'} />
+          <PrintButton
+            label={printLabel || `Print ${report.title}`}
+            tone={professionalActions ? 'primary' : 'default'}
+            disabled={printing}
+            onClick={onPrint}
+          />
           <DownloadButton exportKey={report.exportKey} format="pdf" params={query} reference={reference} label="Download PDF" tone={professionalActions ? 'toolbar' : 'default'} />
           <DownloadButton exportKey={report.exportKey} format="xlsx" params={query} reference={reference} label="Download Excel" tone={professionalActions ? 'toolbar' : 'default'} />
           <DownloadButton exportKey={report.exportKey} format="csv" params={query} reference={reference} label="Download CSV" tone={professionalActions ? 'toolbar' : 'default'} />

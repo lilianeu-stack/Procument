@@ -7,6 +7,7 @@ import RequesterLayout from './components/portals/RequesterLayout.jsx';
 import StockKeeperLayout from './components/portals/StockKeeperLayout.jsx';
 import AccessDenied from './components/portals/AccessDenied.jsx';
 import RoleBasedDashboard from './components/portals/RoleBasedDashboard.jsx';
+import RequesterDashboard from './components/portals/RequesterDashboard.jsx';
 import PortalPlaceholder from './components/portals/PortalPlaceholder.jsx';
 import RequesterRequests from './components/portals/RequesterRequests.jsx';
 import CreatePurchaseRequest from './components/portals/CreatePurchaseRequest.jsx';
@@ -27,10 +28,11 @@ import SupplierRfqPage from './components/portals/SupplierRfqPage.jsx';
 import SupplierPricingPage from './components/portals/SupplierPricingPage.jsx';
 import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprovalPage.jsx';
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
+import { initialsFor } from './components/ui/UserAvatar.jsx';
 import { api } from './services/api.js';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, roleLabel,
-  PORTALS, PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE
+  PORTALS, PROCUREMENT_PROCESSING_PAGE, PROFILE_PAGE, RECEIVED_REQUESTS_PAGE
 } from './utils/access.js';
 import { buildRoute, parseRoute } from './utils/routes.js';
 import { dateQueryForFilter } from './utils/reportFields.js';
@@ -306,6 +308,19 @@ export default function App() {
     }
   }
 
+  // Profile changes are applied to the authenticated user in memory so every
+  // sidebar/header avatar and account menu updates without a new login.
+  const applyProfileUpdate = useCallback((updated) => {
+    setUser((current) => {
+      const merged = { ...(current || {}), ...updated };
+      return {
+        ...merged,
+        initials: initialsFor(merged.name) || 'HH',
+        roleLabel: merged.roleLabel || roleLabel(merged.role)
+      };
+    });
+  }, []);
+
   const mutate = useCallback(async (path, body, method = 'POST') => {
     const result = await request(path, body, method);
     await loadData();
@@ -469,6 +484,7 @@ export default function App() {
 
   const actions = {
     onNavigate: (nextPage, nextQuery) => go('admin', nextPage, nextQuery),
+    onProfileUpdated: applyProfileUpdate,
     onRefresh: loadData,
     onCreateRequisition: (form) => mutate('/requisitions', form),
     onRequisitionDecision: (id, decision) => mutate(`/requisitions/${id}/decision`, { decision }, 'PATCH'),
@@ -527,9 +543,13 @@ export default function App() {
     getAuditLogs: () => api('/admin/audit-logs')
   };
 
+  const dashboardPage = portal === 'supervisor' ? 'Supervisor Dashboard'
+    : portal === 'requester' ? 'Requester Dashboard' : 'Dashboard';
   const shellProps = {
     user: displayUser,
     page: activePage,
+    hidePageHeading: portal === 'requester' && (activePage === dashboardPage
+      || activePage === 'My Procurement Requests' || activePage === 'My Request History'),
     notifications: data.notifications,
     refreshing: loading,
     mobileNav,
@@ -555,7 +575,7 @@ export default function App() {
     && activePage !== 'Stock movements'
     && activePage !== 'Store requests'
     && activePage !== 'Users'
-    && activePage !== 'Settings';
+    && activePage !== PROFILE_PAGE;
 
   if (portal === 'admin') {
     return <AdminLayout {...shellProps}>
@@ -585,16 +605,25 @@ export default function App() {
 
   const PortalShell = portal === 'supervisor' ? SupervisorLayout
     : portal === 'requester' ? RequesterLayout : StockKeeperLayout;
-  const dashboardPage = portal === 'supervisor' ? 'Supervisor Dashboard'
-    : portal === 'requester' ? 'Requester Dashboard' : 'Dashboard';
   const extras = data.portalExtras || {};
   const navigatePage = (page, query) => go(portal, page, query);
   let portalContent;
 
   if (activePage === dashboardPage) {
-    portalContent = portal === 'stockkeeper'
-      ? <StockKeeperDashboard summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />
-      : <RoleBasedDashboard
+    if (portal === 'requester') {
+      portalContent = <RequesterDashboard
+        user={displayUser}
+        summary={data.portalSummary}
+        notifications={data.notifications}
+        onNavigate={navigatePage}
+        onOpenNotification={openNotification}
+        portalApi={portalApi}
+        initialRequests={extras.requesterRequests}
+      />;
+    } else if (portal === 'stockkeeper') {
+      portalContent = <StockKeeperDashboard summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;
+    } else {
+      portalContent = <RoleBasedDashboard
         portal={portal}
         user={displayUser}
         summary={data.portalSummary}
@@ -603,6 +632,7 @@ export default function App() {
         onOpenNotification={openNotification}
         portalApi={portalApi}
       />;
+    }
   } else if (portal === 'stockkeeper') {
     if (activePage === 'List of Requesters') {
       portalContent = <Suspense fallback={<div role="status" className="p-8 text-sm text-muted">Loading requester directory…</div>}>
@@ -623,7 +653,7 @@ export default function App() {
         navigate={navigatePage}
       />;
     } else if (activePage === 'Profile') {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} />;
+      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;
@@ -637,6 +667,8 @@ export default function App() {
         navigate={navigatePage}
         history={activePage === 'My Request History'}
         initial={activePage === 'My Request History' ? null : extras.requesterRequests}
+        user={displayUser}
+        summary={data.portalSummary}
       />;
     } else if (activePage === 'Create Purchase Request') {
       portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} user={displayUser} />;
@@ -657,8 +689,8 @@ export default function App() {
         onOpenNotification={openNotification}
         navigate={navigatePage}
       />;
-    } else if (activePage === 'My Profile') {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} />;
+    } else if (activePage === PROFILE_PAGE) {
+      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;
@@ -697,8 +729,8 @@ export default function App() {
         onOpenNotification={openNotification}
         navigate={navigatePage}
       />;
-    } else if (activePage === 'My Profile') {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} />;
+    } else if (activePage === PROFILE_PAGE) {
+      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;

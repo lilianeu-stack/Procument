@@ -2,6 +2,7 @@ import {
   Bell, ClipboardList, History, LayoutDashboard, MessageSquare, UserRound
 } from 'lucide-react';
 import PortalSidebarFrame from './PortalSidebarFrame.jsx';
+import { PROFILE_PAGE } from '../../utils/access.js';
 
 const groups = [
   { section: 'REQUESTER WORKSPACE', links: [
@@ -14,7 +15,7 @@ const groups = [
     { name: 'Notifications', icon: Bell }
   ] },
   { section: 'ACCOUNT', links: [
-    { name: 'My Profile', icon: UserRound }
+    { name: PROFILE_PAGE, icon: UserRound }
   ] }
 ];
 

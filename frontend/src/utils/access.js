@@ -15,6 +15,8 @@ export const PORTALS = {
 
 export const SUPPLIER_PAGES = ['RFQ'];
 export const SUPPLIER_PRICING_PAGES = ['Quote'];
+// One canonical personal Profile route is shared by every authenticated portal.
+export const PROFILE_PAGE = 'Profile';
 export const STOCKKEEPER_PAGES = [
   'Dashboard',
   'List of Requesters',
@@ -33,7 +35,7 @@ export const SUPERVISOR_PAGES = [
   'Stock Overview',
   'Department Messages',
   'Notifications',
-  'My Profile'
+  PROFILE_PAGE
 ];
 
 export const REQUESTER_PAGES = [
@@ -43,7 +45,7 @@ export const REQUESTER_PAGES = [
   'My Request History',
   'Messages',
   'Notifications',
-  'My Profile'
+  PROFILE_PAGE
 ];
 
 // Procurement uses the Administrator-side shell but only the pages below.
@@ -62,7 +64,10 @@ export const SETTINGS_PAGE = 'Settings';
 const ADMIN_HIDDEN_PAGES = new Set([
   'Requisitions',
   'Approvals',
-  'Audit logs'
+  'Audit logs',
+  // System settings remain available to backend services, but the user-facing
+  // Administrator Settings page has been replaced by the personal Profile page.
+  SETTINGS_PAGE
 ]);
 
 // Supervisor-facing label for the request queue; the established route name is
@@ -88,7 +93,9 @@ const PAGE_ALIASES = {
   'Department Stock Overview': 'Stock Overview',
   'Department Procurement Requests': 'Procurement Requests',
   [SUPERVISOR_INCOMING_PAGE]: 'Approvals',
-  'Supervisor Incoming Requests': 'Approvals'
+  'Supervisor Incoming Requests': 'Approvals',
+  // Existing bookmarks/links continue to open the unified Profile page.
+  'My Profile': PROFILE_PAGE
 };
 
 export function canonicalPage(page) {
@@ -102,8 +109,7 @@ const restrictedPages = {
   [PROCUREMENT_PROCESSING_PAGE]: ['admin', 'procurement'],
   [PURCHASE_ORDERS_PAGE]: ['admin', 'procurement'],
   Users: ['admin'],
-  'Audit logs': ['admin'],
-  [SETTINGS_PAGE]: ['admin']
+  'Audit logs': ['admin']
 };
 
 const ROLE_LABELS = {
@@ -156,6 +162,9 @@ export function canAccessPage(role, page) {
   // staff shell; the signed token is the only credential for that portal.
   if (SUPPLIER_PRICING_PAGE_NAMES.has(target)) return false;
   const portal = portalForRole(role);
+  // Every authenticated staff account owns the same personal Profile page,
+  // including roles that otherwise share the restricted Administrator shell.
+  if (target === PROFILE_PAGE) return Boolean(portal);
   // Department portals use their own page lists; the admin-side restricted
   // pages only apply to Administrator-side roles.
   if (portal === PORTALS.SUPERVISOR) return SUPERVISOR_PAGES.includes(target);

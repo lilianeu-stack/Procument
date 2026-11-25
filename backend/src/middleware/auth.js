@@ -19,7 +19,9 @@ export async function authenticate(req, res, next) {
 
     const [rows] = await pool.execute(
       `SELECT u.id, u.name, u.email, u.phone, u.role, u.active,
-        u.department_id AS departmentId, d.name AS department
+        u.department_id AS departmentId, d.name AS department,
+        u.created_at AS createdAt, u.last_login_at AS lastLoginAt,
+        u.profile_photo AS profilePhoto
        FROM users u LEFT JOIN departments d ON d.id = u.department_id
        WHERE u.id = ? LIMIT 1`,
       [id]
@@ -52,7 +54,9 @@ export async function optionalAuthenticate(req, res, next) {
     if (!Number.isInteger(id) || id <= 0) return next();
     const [rows] = await pool.execute(
       `SELECT u.id, u.name, u.email, u.phone, u.role, u.active,
-        u.department_id AS departmentId, d.name AS department
+        u.department_id AS departmentId, d.name AS department,
+        u.created_at AS createdAt, u.last_login_at AS lastLoginAt,
+        u.profile_photo AS profilePhoto
        FROM users u LEFT JOIN departments d ON d.id = u.department_id
        WHERE u.id = ? LIMIT 1`,
       [id]

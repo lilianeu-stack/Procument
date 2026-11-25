@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import Sidebar from './Sidebar.jsx';
 import Topbar from './Topbar.jsx';
-import { RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
+import { PROFILE_PAGE, RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 import { DISPLAY_TIMEZONE } from '../../utils/dates.js';
 
 const overviewDate = new Intl.DateTimeFormat('en-US', {
@@ -21,7 +21,7 @@ export default function AppLayout({ user, page, notifications, mobileNav, notifi
     <Sidebar user={user} page={page} open={mobileNav} collapsed={sidebarCollapsed}
       onNavigate={onNavigate} onClose={onCloseMenu} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} onLogout={onLogout} />
     <main className={`min-h-screen ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-[248px]'}`}>
-      <Topbar page={page} user={user} notifications={notifications} open={notificationsOpen} onToggle={onToggleNotifications} onMenu={onOpenMenu} onNotification={onNotification} onLogout={onLogout} />
+      <Topbar page={page} user={user} notifications={notifications} open={notificationsOpen} onToggle={onToggleNotifications} onMenu={onOpenMenu} onNotification={onNotification} onLogout={onLogout} onProfile={() => onNavigate(PROFILE_PAGE)} />
       <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
         {page !== RECEIVED_REQUESTS_PAGE && page !== 'RFQs' && (isOverview ? <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
@@ -58,8 +58,8 @@ export default function AppLayout({ user, page, notifications, mobileNav, notifi
                         ? 'Submit internal stock requests and track their approval and issue status.'
                           : page === 'Users'
                             ? 'Manage accounts, departments, and access across the organization.'
-                              : page === 'Settings'
-                                ? 'Configure organization, security, and system preferences.'
+                              : page === PROFILE_PAGE
+                                ? 'Manage your personal details, photo, and account security.'
               : 'Manage and track your organization’s procurement activity.'}</p>
         </div>)}
         {children}

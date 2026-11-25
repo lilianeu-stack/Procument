@@ -333,6 +333,105 @@ test('login returns the portal derived from the database role and department', a
   }
 });
 
+const VALID_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQImWOo2OxUsdmJAUIBACjSBbWdzFdQAAAAAElFTkSuQmCC';
+
+test('personal profile is available to every authenticated portal role', async () => {
+  for (const key of ['admin', 'supervisorA', 'requesterA', 'stockkeeper', 'procurement']) {
+    const { response, data } = await request('/profile', { user: users[key] || admin });
+    assert.equal(response.status, 200, data.message);
+    assert.equal(data.user.id, (users[key] || admin).id);
+    assert.ok(!('password_hash' in data.user));
+    assert.ok(!('passwordHash' in data.user));
+  }
+});
+
+test('profile details allow only the user-controlled name and phone fields', async () => {
+  const before = (await request('/profile', { user: users.requesterA })).data.user;
+  const changed = await request('/profile', {
+    method: 'PATCH',
+    user: users.requesterA,
+    body: {
+      name: 'QA Requester A Updated', phone: '+250700000123',
+      role: 'admin', active: false, departmentId: departments.b.id, email: 'changed@example.org'
+    }
+  });
+  assert.equal(changed.response.status, 200, changed.data.message);
+  assert.equal(changed.data.user.name, 'QA Requester A Updated');
+  assert.equal(changed.data.user.phone, '+250700000123');
+  assert.equal(changed.data.user.role, before.role);
+  assert.equal(changed.data.user.active, true);
+  assert.equal(changed.data.user.departmentId, before.departmentId);
+  assert.equal(changed.data.user.email, before.email);
+
+  // Restore the fixture name so later workflow assertions keep their identity.
+  const restored = await request('/profile', {
+    method: 'PATCH', user: users.requesterA,
+    body: { name: before.name, phone: before.phone }
+  });
+  assert.equal(restored.response.status, 200, restored.data.message);
+  assert.equal(restored.data.user.name, before.name);
+});
+
+test('profile photo accepts a valid image, rejects fakes, and is scoped to authorized viewers', async () => {
+  const invalid = await request('/profile/photo', {
+    method: 'POST',
+    user: users.requesterA,
+    body: { photo: { data: `data:image/png;base64,${Buffer.from('not an image').toString('base64')}` } }
+  });
+  assert.equal(invalid.response.status, 400);
+  assert.match(invalid.data.message, /JPG|PNG|WebP|corrupt|unsupported/i);
+
+  const uploaded = await request('/profile/photo', {
+    method: 'POST',
+    user: users.requesterA,
+    body: { photo: { data: `data:image/png;base64,${VALID_PNG_BASE64}`, mimeType: 'image/png' } }
+  });
+  assert.equal(uploaded.response.status, 201, uploaded.data.message);
+  const reference = uploaded.data.user.profilePhoto;
+  assert.match(reference, /^profiles\/\d+-[0-9a-f-]+\.webp$/);
+
+  const self = await binaryRequest(`/profile/photo/${users.requesterA.id}`, users.requesterA);
+  assert.equal(self.response.status, 200);
+  assert.match(self.response.headers.get('content-type'), /image\/webp/);
+  assert.ok(self.buffer.length > 0);
+
+  const colleague = await binaryRequest(`/profile/photo/${users.requesterA.id}`, users.supervisorA);
+  assert.equal(colleague.response.status, 200);
+
+  const otherDepartment = await binaryRequest(`/profile/photo/${users.requesterA.id}`, users.requesterB);
+  assert.equal(otherDepartment.response.status, 404);
+
+  const anonymous = await fetch(`${baseUrl}/profile/photo/${users.requesterA.id}`);
+  assert.equal(anonymous.status, 401);
+
+  const removed = await request('/profile/photo', { method: 'DELETE', user: users.requesterA });
+  assert.equal(removed.response.status, 200, removed.data.message);
+  assert.equal(removed.data.user.profilePhoto, null);
+  assert.equal((await binaryRequest(`/profile/photo/${users.requesterA.id}`, users.requesterA)).response.status, 404);
+});
+
+test('password change verifies the current password and keeps credentials out of responses', async () => {
+  const wrong = await request('/profile/password', {
+    method: 'POST', user: users.requesterB,
+    body: { currentPassword: 'WrongPassword!2026', newPassword: 'ChangedPassword!2026' }
+  });
+  assert.equal(wrong.response.status, 400);
+  assert.match(wrong.data.message, /current password/i);
+
+  const changed = await request('/profile/password', {
+    method: 'POST', user: users.requesterB,
+    body: { currentPassword: PASSWORD, newPassword: 'ChangedPassword!2026' }
+  });
+  assert.equal(changed.response.status, 200, changed.data.message);
+  assert.ok(!('passwordHash' in changed.data));
+
+  const login = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: users.requesterB.email, password: 'ChangedPassword!2026' })
+  });
+  assert.equal(login.status, 200);
+});
+
 test('administrator creates assigned Stock Keeper accounts and login resolves the dedicated portal', async () => {
   const email = `qa.stockkeeper.unassigned.${Date.now()}@example.org`;
   const payload = {
@@ -1103,6 +1202,45 @@ test('portal requisition exports only return rows the user can see', async () =>
 
   const invalid = await request('/exports/portalRequisitions/csv?from=2026-02-01&to=2026-01-01', { user: users.requesterA });
   assert.equal(invalid.response.status, 400);
+});
+
+test('portal exports apply the same search and status filters as the list', async () => {
+  const created = await submitRequest(users.requesterA, 'FILTER-PARITY', {
+    title: 'Lenovo laptop request',
+    items: [{
+      itemName: 'Lenovo laptop', description: '16GB RAM 512GB SSD',
+      quantity: 1, unit: 'unit', estimatedUnitCost: 1200
+    }]
+  });
+  assert.equal(created.response.status, 201, created.data.message);
+  const [[row]] = await pool.execute('SELECT reference FROM requisitions WHERE id = ?', [created.data.id]);
+
+  const search = encodeURIComponent('16GB RAM');
+  const list = await request(`/portal/requester/requisitions?search=${search}&limit=100`, { user: users.requesterA });
+  assert.equal(list.response.status, 200);
+  assert.ok(list.data.requisitions.some((item) => item.reference === row.reference), 'list should match an item description');
+
+  const searchedCsv = await binaryRequest(`/exports/portalRequisitions/csv?search=${search}`, users.requesterA);
+  assert.equal(searchedCsv.response.status, 200);
+  assert.ok(searchedCsv.buffer.toString('utf8').includes(row.reference), 'export should match the same item description');
+
+  const missingCsv = await binaryRequest(`/exports/portalRequisitions/csv?search=${encodeURIComponent('ZZ-NO-SUCH-ITEM')}`, users.requesterA);
+  assert.ok(!missingCsv.buffer.toString('utf8').includes(row.reference), 'export should exclude non-matching records');
+
+  const decided = await request(`/portal/supervisor/requisitions/${created.data.id}/decision`, {
+    method: 'POST', user: users.supervisorA, body: { decision: 'Approve', reason: '' }
+  });
+  assert.equal(decided.response.status, 200, decided.data.message);
+
+  const group = encodeURIComponent('Approved by Supervisor,Forwarded to Procurement');
+  const groupedList = await request(`/portal/requester/requisitions?status=${group}&limit=100`, { user: users.requesterA });
+  assert.ok(groupedList.data.requisitions.some((item) => item.reference === row.reference));
+  const groupedCsv = await binaryRequest(`/exports/portalRequisitions/csv?status=${group}`, users.requesterA);
+  assert.equal(groupedCsv.response.status, 200);
+  assert.ok(groupedCsv.buffer.toString('utf8').includes(row.reference), 'export should support comma-separated statuses');
+
+  const aliasCsv = await binaryRequest('/exports/portalRequisitions/csv?status=approved', users.requesterA);
+  assert.ok(aliasCsv.buffer.toString('utf8').includes(row.reference), 'export should normalize status aliases');
 });
 
 test('record exports are role-scoped and render the requested formats', async () => {

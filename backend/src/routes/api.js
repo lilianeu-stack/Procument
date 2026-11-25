@@ -18,6 +18,7 @@ import supplier from './supplier.js';
 import purchaseOrderApprovals from './purchase-order-approvals.js';
 import purchaseOrderPricing, { publicRouter as supplierPricingPublicRouter } from './purchase-order-pricing.js';
 import emails from './emails.js';
+import profile from './profile.js';
 
 const router = Router();
 const procurementRoles = ['admin', 'procurement'];
@@ -31,7 +32,9 @@ router.post('/auth/login', async (req, res, next) => {
     if (!email || !password) return res.status(400).json({ message: 'Email and password are required.' });
     const [rows] = await pool.execute(
       `SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.active,
-        u.department_id AS departmentId, d.name AS department
+        u.department_id AS departmentId, d.name AS department,
+        u.created_at AS createdAt, u.last_login_at AS lastLoginAt,
+        u.profile_photo AS profilePhoto
        FROM users u LEFT JOIN departments d ON d.id = u.department_id
        WHERE u.email = ? AND u.active = TRUE LIMIT 1`,
       [email]
@@ -69,6 +72,10 @@ router.use(supplierPricingPublicRouter);
 router.use(authenticate);
 
 router.get('/auth/me', (req, res) => res.json({ user: req.user }));
+
+// Personal Profile is available to every authenticated account. It is mounted
+// before the portal allow-lists below so each role can manage only itself.
+router.use('/profile', profile);
 
 // Supervisor and Requester accounts live only in their new portals. They can
 // read their session, notifications, and portal data, but never the legacy
