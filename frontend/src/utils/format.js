@@ -15,4 +15,4 @@ export const currency = (value) => {
 // configured display timezone instead of the previous en-US/local behavior.
 export const dateLabel = formatDate;
 export const dateTimeLabel = formatDateTime;
-export { formatDate, formatDateTime } from './dates.js';
+export { formatDate, formatDateTime, formatLongDate } from './dates.js';

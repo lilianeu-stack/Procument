@@ -88,6 +88,8 @@ export function badgeTone(tone) {
 }
 
 export const SUPERVISOR_PENDING = 'Pending Supervisor Approval';
+export const APPROVED_STATUSES = ['Approved by Supervisor', 'Forwarded to Procurement'];
+export const APPROVED_STATUS_FILTER = APPROVED_STATUSES.join(',');
 
 export const REQUEST_STATUS_OPTIONS = [
   'Draft',
@@ -122,7 +124,14 @@ const STATUS_ALIASES = {
 export function normalizeStatus(value) {
   const raw = String(value || '').trim();
   if (!raw || raw === 'all') return '';
-  return STATUS_ALIASES[raw.toLowerCase()] || raw;
+  const lower = raw.toLowerCase();
+  if (['approved group', 'approved-group', 'approved forwarded', 'approved or forwarded'].includes(lower)) {
+    return APPROVED_STATUS_FILTER;
+  }
+  if (raw.includes(',')) {
+    return raw.split(',').map((part) => normalizeStatus(part)).filter(Boolean).join(',');
+  }
+  return STATUS_ALIASES[lower] || raw;
 }
 
 export function isPendingApproval(status) {

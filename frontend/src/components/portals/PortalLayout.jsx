@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import SharedHeader from './SharedHeader.jsx';
-import { roleLabel } from '../../utils/access.js';
+import { PROFILE_PAGE, roleLabel } from '../../utils/access.js';
+import { formatDate } from '../../utils/format.js';
 
 export default function PortalLayout({
   sidebar: Sidebar, portal, user, page, summary, notifications,
-  mobileNav, notificationsOpen, refreshing,
+  mobileNav, notificationsOpen, refreshing, hidePageHeading = false,
   onNavigate, onNotification, onToggleNotifications,
   onOpenMenu, onCloseMenu, onLogout, children
 }) {
@@ -34,17 +35,18 @@ export default function PortalLayout({
         onNotification={onNotification}
         onMenu={onOpenMenu}
         onLogout={onLogout}
+        onProfile={() => onNavigate(PROFILE_PAGE)}
       />
       <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
-        <div className="mb-6">
+        {!hidePageHeading && <div className="mb-6">
           <div className="mb-1 text-[11px] font-semibold text-black">
-            {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+            {formatDate(new Date())}
           </div>
           <h1 className="display-font text-[25px] font-extrabold tracking-tight">{page}</h1>
           <p className="mt-1 text-xs text-muted">
             {roleLabel(user?.role)} · {departmentName}
           </p>
-        </div>
+        </div>}
         {children}
       </div>
     </main>

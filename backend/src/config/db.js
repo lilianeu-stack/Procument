@@ -216,6 +216,8 @@ export async function applySchemaMigrations() {
     { table: 'departments', column: 'updated_at', ddl: 'ALTER TABLE departments ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'users', column: 'updated_at', ddl: 'ALTER TABLE users ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'users', column: 'last_login_at', ddl: 'ALTER TABLE users ADD COLUMN last_login_at DATETIME NULL AFTER updated_at' },
+    // Self-service profile photos store only a safe storage reference here.
+    { table: 'users', column: 'profile_photo', ddl: 'ALTER TABLE users ADD COLUMN profile_photo VARCHAR(255) NULL AFTER last_login_at' },
     { table: 'suppliers', column: 'updated_at', ddl: 'ALTER TABLE suppliers ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'requisitions', column: 'updated_at', ddl: 'ALTER TABLE requisitions ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'requisitions', column: 'procurement_decision_at', ddl: 'ALTER TABLE requisitions ADD COLUMN procurement_decision_at DATETIME NULL AFTER forwarded_by_supervisor' },

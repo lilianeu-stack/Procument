@@ -55,6 +55,26 @@ export function formatDate(value) {
   return `${day}/${month}/${year}`;
 }
 
+export function formatLongDate(value = new Date()) {
+  const date = parseInstant(value) || new Date();
+  const activeTimezone = storedSetting('pims-timezone', env.VITE_DISPLAY_TIMEZONE || 'Africa/Kigali');
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: activeTimezone,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric'
+    }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Africa/Kigali',
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric'
+    }).format(date);
+  }
+}
+
 export function formatDateTime(value, { withZone = true } = {}) {
   const date = parseInstant(value);
   if (!date) return '—';
@@ -118,6 +138,38 @@ export function toUtcDateTimeInputValue(value) {
   } catch {
     return new Date(target).toISOString();
   }
+}
+
+// The native date control renders the browser locale, which can disagree with
+// the configured business format. Filter fields use a formatted text value and
+// a hidden native picker, so this helper keeps both presentations in sync.
+export function configuredDateFormat() {
+  return storedSetting('pims-date-format', 'DD/MM/YYYY');
+}
+
+export function dateInputPlaceholder() {
+  const format = configuredDateFormat();
+  return format === 'MM/DD/YYYY' ? 'MM/DD/YYYY'
+    : format === 'YYYY-MM-DD' ? 'YYYY-MM-DD' : 'DD/MM/YYYY';
+}
+
+export function parseDateInput(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const format = configuredDateFormat();
+  const parts = text.match(/^(\d{1,4})[\/-](\d{1,2})[\/-](\d{1,4})$/);
+  if (!parts) return '';
+  let year; let month; let day;
+  if (format === 'YYYY-MM-DD') {
+    [, year, month, day] = parts;
+  } else if (format === 'MM/DD/YYYY') {
+    [, month, day, year] = parts;
+  } else {
+    [, day, month, year] = parts;
+  }
+  if (year.length !== 4) return '';
+  const iso = `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  return isIsoDate(iso) ? iso : '';
 }
 
 function isoFromParts(year, month, day, offsetDays = 0) {

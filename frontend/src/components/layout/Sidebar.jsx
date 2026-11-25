@@ -1,10 +1,11 @@
 import {
   Activity, ArrowDownToLine, Boxes, BriefcaseBusiness, ChevronLeft, ChevronRight,
-  FileText, Inbox, LayoutDashboard, LogOut, Mail, Settings, ShoppingCart, Truck, Users
+  FileText, Inbox, LayoutDashboard, LogOut, Mail, ShoppingCart, Truck, UserRound, Users
 } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
+import UserAvatar from '../ui/UserAvatar.jsx';
 import {
-  canAccessPage, PROCUREMENT_COMMITTEE_PAGE, PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE, SETTINGS_PAGE
+  canAccessPage, PROCUREMENT_COMMITTEE_PAGE, PROFILE_PAGE, PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE
 } from '../../utils/access.js';
 
 const groups = [
@@ -25,8 +26,7 @@ const groups = [
   ] },
   { section: 'ADMINISTRATION', links: [
     { name: 'Users', icon: Users },
-    { name: PROCUREMENT_COMMITTEE_PAGE, icon: Users },
-    { name: SETTINGS_PAGE, icon: Settings }
+    { name: PROCUREMENT_COMMITTEE_PAGE, icon: Users }
   ] }
 ];
 
@@ -63,11 +63,15 @@ export default function Sidebar({ user, page, open, collapsed, onNavigate, onClo
         <div className="text-[11px] font-semibold text-black">All systems operational</div>
       </div>
       <div className={`mt-4 flex items-center gap-3 border-t border-subtle px-1 pt-4 ${collapsed ? 'lg:flex-col lg:gap-2 lg:px-0' : ''}`}>
-        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-reference text-xs font-extrabold text-black">{user.initials}</div>
-        <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
-          <div className="truncate text-xs font-bold text-black">{user.name}</div>
-          <div className="mt-0.5 truncate text-[10px] text-muted">{user.roleLabel || user.role} · {user.department || 'Hope Haven'}</div>
-        </div>
+        <button type="button" onClick={() => { onNavigate(PROFILE_PAGE); onClose(); }}
+          aria-label="Open profile" title="Open profile"
+          className={`flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${collapsed ? 'lg:flex-none lg:justify-center' : ''}`}>
+          <UserAvatar user={user} size="h-10 w-10" textSize="text-xs" className="border border-brand" />
+          <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
+            <div className="truncate text-xs font-bold text-black">{user.name}</div>
+            <div className="mt-0.5 truncate text-[10px] text-muted">{user.roleLabel || user.role} · {user.department || 'Hope Haven'}</div>
+          </div>
+        </button>
         <button type="button" onClick={onLogout} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus" title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
       </div>
     </aside>

@@ -507,16 +507,30 @@ function listRequisitions(role) {
       const params = [];
       if (role === 'requestor') { where.push('q.requesterId = ?'); params.push(req.user.id); }
       else { where.push('q.departmentId = ?'); params.push(department.id); }
-      const status = normalizeStatus(req.query.status);
-      if (status) { where.push('q.status = ?'); params.push(status); }
+      const statusValues = text(req.query.status, 200)
+        .split(',')
+        .map((value) => normalizeStatus(value))
+        .filter(Boolean);
+      if (statusValues.length === 1) {
+        where.push('q.status = ?');
+        params.push(statusValues[0]);
+      } else if (statusValues.length > 1) {
+        where.push(`q.status IN (${statusValues.map(() => '?').join(',')})`);
+        params.push(...statusValues);
+      }
       if (['1', 'true'].includes(String(req.query.hasDecision || '').toLowerCase())) {
         where.push('q.supervisorDecisionAt IS NOT NULL');
       }
       const search = text(req.query.search, 120);
       if (search) {
-        where.push('(q.reference LIKE ? OR q.title LIKE ? OR q.requester LIKE ? OR q.itemsSummary LIKE ? OR q.justification LIKE ?)');
+        where.push(`(q.reference LIKE ? OR q.title LIKE ? OR q.requester LIKE ? OR q.itemsSummary LIKE ?
+          OR q.justification LIKE ? OR EXISTS (
+            SELECT 1 FROM requisition_items si
+            WHERE si.requisition_id = q.id
+              AND (si.item_name LIKE ? OR COALESCE(si.description, '') LIKE ? OR COALESCE(si.remarks, '') LIKE ?)
+          ))`);
         const pattern = `%${search}%`;
-        params.push(pattern, pattern, pattern, pattern, pattern);
+        params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern);
       }
       const columns = {
         submitted: 'COALESCE(q.submittedAt, q.createdAt)',
@@ -927,7 +941,9 @@ async function validateConversation(req, otherId) {
 async function messageRows(connection, where, params) {
   const [rows] = await connection.execute(
     `SELECT m.id, m.body, m.created_at AS createdAt, m.sender_id AS senderId,
-      sender.name AS senderName, m.recipient_id AS recipientId, recipient.name AS recipientName,
+      sender.name AS senderName, sender.profile_photo AS senderPhoto,
+      m.recipient_id AS recipientId, recipient.name AS recipientName,
+      recipient.profile_photo AS recipientPhoto,
       m.requisition_id AS requisitionId, rr.reference AS requisitionReference, m.is_announcement AS isAnnouncement,
       (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = m.id) AS attachmentCount
      FROM messages m
@@ -946,7 +962,7 @@ router.get('/messages/conversations', allowRoles('supervisor', 'requestor'), asy
     if (!department) return;
     const isSupervisor = req.user.role === 'supervisor';
     const [people] = await pool.execute(
-      `SELECT u.id, u.name, u.email,
+      `SELECT u.id, u.name, u.email, u.profile_photo AS photo,
         (SELECT COUNT(*) FROM message_recipients mr
           JOIN messages m ON m.id = mr.message_id
          WHERE mr.user_id = ? AND mr.is_read = FALSE AND m.sender_id = u.id AND m.is_announcement = FALSE) AS unreadCount,
@@ -966,8 +982,9 @@ router.get('/messages/conversations', allowRoles('supervisor', 'requestor'), asy
     );
     const [announcements] = await pool.execute(
       `SELECT m.id, m.body, m.created_at AS createdAt, m.is_announcement AS isAnnouncement,
+        m.sender_id AS senderId,
         CASE WHEN m.sender_id = ? THEN TRUE ELSE COALESCE(mr.is_read, FALSE) END AS isRead,
-        sender.name AS senderName
+        sender.name AS senderName, sender.profile_photo AS senderPhoto
        FROM messages m
        LEFT JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = ?
        JOIN users sender ON sender.id = m.sender_id

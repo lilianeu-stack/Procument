@@ -1,11 +1,11 @@
-export default function PageCard({ title, description, action, children, surface = 'white', className = '' }) {
+export default function PageCard({ title, description, action, children, surface = 'white', className = '', professional = false }) {
   // The Overview dashboard uses the `card` surface for its subtle shadow while
   // keeping the card itself pure white like every other panel.
   const surfaceClass = surface === 'card' ? 'bg-white shadow-dashboard' : 'bg-white';
-  return <section className={`overflow-hidden rounded-xl border border-brand ${surfaceClass} ${className}`}>
-    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-5 py-4">
+  return <section className={`overflow-hidden rounded-2xl border border-brand ${surfaceClass} ${className}`}>
+    <header className={`flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-5 ${professional ? 'py-5 sm:px-6' : 'py-4'}`}>
       <div>
-        <h2 className="text-sm font-bold">{title}</h2>
+        <h2 className={professional ? 'display-font text-base font-extrabold tracking-tight' : 'text-sm font-bold'}>{title}</h2>
         {description && <p className="mt-1 text-xs text-muted">{description}</p>}
       </div>
       {action}

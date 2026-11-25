@@ -7,7 +7,10 @@ import pool from '../config/db.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import { amountInWords } from '../utils/money.js';
 import { withPortalIdentity } from '../utils/roles.js';
-import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
+import { getSettings } from './settings.js';
+import {
+  RECEIVED_STATUS_GROUPS, REQUISITION_STATUS
+} from '../utils/requisition-status.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOGO_CANDIDATES = [
@@ -1043,6 +1046,131 @@ const PORTAL_EXPORT_FIELDS = {
   required: 'r.required_by'
 };
 
+const APPROVED_EXPORT_STATUSES = [REQUISITION_STATUS.APPROVED, REQUISITION_STATUS.FORWARDED];
+const EXPORT_STATUS_ALIASES = {
+  draft: REQUISITION_STATUS.DRAFT,
+  submitted: REQUISITION_STATUS.SUBMITTED,
+  pending: REQUISITION_STATUS.PENDING,
+  'pending approval': REQUISITION_STATUS.PENDING,
+  information: REQUISITION_STATUS.INFORMATION,
+  'information required': REQUISITION_STATUS.INFORMATION,
+  approved: REQUISITION_STATUS.APPROVED,
+  rejected: REQUISITION_STATUS.REJECTED,
+  forwarded: REQUISITION_STATUS.FORWARDED,
+  review: REQUISITION_STATUS.UNDER_REVIEW,
+  'under procurement review': REQUISITION_STATUS.UNDER_REVIEW,
+  completed: REQUISITION_STATUS.COMPLETED,
+  cancelled: REQUISITION_STATUS.CANCELLED
+};
+
+function normalizeExportStatuses(value) {
+  const raw = String(value || '').trim().slice(0, 200);
+  if (!raw) return [];
+  const values = raw.split(',').flatMap((part) => {
+    const status = part.trim();
+    if (!status) return [];
+    const lower = status.toLowerCase();
+    if (['approved group', 'approved-group', 'approved forwarded', 'approved or forwarded'].includes(lower)) {
+      return APPROVED_EXPORT_STATUSES;
+    }
+    return [EXPORT_STATUS_ALIASES[lower] || status];
+  });
+  return [...new Set(values.filter(Boolean))];
+}
+
+async function reportFormatting() {
+  try {
+    const settings = await getSettings();
+    return {
+      currency: settings.default_currency || 'USD',
+      currencySymbol: settings.currency_symbol || '',
+      precision: Number.isInteger(Number(settings.decimal_precision))
+        ? Number(settings.decimal_precision) : 2,
+      timezone: settings.timezone || 'UTC',
+      dateFormat: settings.date_format || 'DD/MM/YYYY',
+      timeFormat: settings.time_format || '24'
+    };
+  } catch {
+    return {
+      currency: 'USD', currencySymbol: '', precision: 2,
+      timezone: 'UTC', dateFormat: 'DD/MM/YYYY', timeFormat: '24'
+    };
+  }
+}
+
+function isMoneyColumn(column) {
+  return /cost|total|amount|price|balance/i.test(String(column || ''));
+}
+
+function isNumericValue(value) {
+  return typeof value === 'number' || /^-?\d+(\.\d+)?$/.test(String(value ?? ''));
+}
+
+const EXPORT_DATE_VALUE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?(?:\s*UTC)?$/;
+
+function isDateValue(value) {
+  return typeof value === 'string' && EXPORT_DATE_VALUE.test(value.trim());
+}
+
+function parseReportDate(value) {
+  if (value instanceof Date) return value;
+  const match = EXPORT_DATE_VALUE.exec(String(value || '').trim());
+  if (!match) return new Date(value);
+  return new Date(`${match[1]}T${match[2]}:${match[3] || '00'}Z`);
+}
+
+function formatReportDateTime(value, report = {}) {
+  const date = parseReportDate(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: report.timezone || 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short'
+    }).formatToParts(date).reduce((result, part) => ({ ...result, [part.type]: part.value }), {});
+  } catch {
+    parts = { year: '', month: '', day: '', hour: '', minute: '', timeZoneName: 'UTC' };
+  }
+  const { year, month, day } = parts;
+  const dateText = report.dateFormat === 'MM/DD/YYYY' ? `${month}/${day}/${year}`
+    : report.dateFormat === 'YYYY-MM-DD' ? `${year}-${month}-${day}`
+      : `${day}/${month}/${year}`;
+  let timeText = `${parts.hour}:${parts.minute}`;
+  if (report.timeFormat === '12') {
+    const hour = Number(parts.hour);
+    timeText = `${hour % 12 || 12}:${parts.minute} ${hour >= 12 ? 'PM' : 'AM'}`;
+  }
+  return `${dateText} ${timeText}${parts.timeZoneName ? ` ${parts.timeZoneName}` : ''}`;
+}
+
+function exportFormatValue(value, column, report = {}) {
+  if (value instanceof Date || isDateValue(value)) return formatReportDateTime(value, report);
+  if (isMoneyColumn(column) && isNumericValue(value)) {
+    const precision = Number.isInteger(report.precision) ? report.precision : 2;
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency', currency: report.currency || 'USD',
+      minimumFractionDigits: precision, maximumFractionDigits: precision
+    }).format(Number(value));
+  }
+  return displayValue(value);
+}
+
+function xlsxCellValue(value, column) {
+  if (isMoneyColumn(column) && isNumericValue(value)) return Number(value);
+  if (isDateValue(value)) return parseReportDate(value);
+  return value == null ? '—' : value;
+}
+
+function xlsxNumberFormat(column, report = {}) {
+  const precision = Number.isInteger(report.precision) ? report.precision : 2;
+  const digits = precision > 0 ? `.${'0'.repeat(precision)}` : '';
+  if (isMoneyColumn(column)) {
+    const symbol = report.currencySymbol || { USD: '$', EUR: '€', GBP: '£' }[report.currency];
+    return symbol ? `"${symbol}"#,##0${digits}` : `#,##0${digits} "${report.currency || 'USD'}"`;
+  }
+  return undefined;
+}
+
 // Portal reports are never global: Requesters receive only their own rows and
 // Supervisors only rows from their assigned Department. The same predicates
 // used by the list screens are applied here so downloads match what is visible.
@@ -1070,19 +1198,29 @@ export async function fetchPortalRequisitions(query, user) {
     params.push(account.department_id);
   }
 
-  const status = String(query.status || '').trim().slice(0, 80);
-  if (status) {
+  const rawStatus = String(query.status || '').trim().slice(0, 200);
+  const statuses = normalizeExportStatuses(rawStatus);
+  if (statuses.length === 1) {
     where.push('r.status = ?');
-    params.push(status);
+    params.push(statuses[0]);
+  } else if (statuses.length > 1) {
+    where.push(`r.status IN (${statuses.map(() => '?').join(',')})`);
+    params.push(...statuses);
   }
   if (['1', 'true'].includes(String(query.hasDecision || '').toLowerCase())) {
     where.push('r.supervisor_decision_at IS NOT NULL');
   }
   const search = String(query.search || '').trim().toLowerCase().slice(0, 120);
   if (search) {
-    where.push(`(LOWER(r.reference) LIKE ? OR LOWER(r.title) LIKE ? OR LOWER(u.name) LIKE ?)`);
+    where.push(`(LOWER(r.reference) LIKE ? OR LOWER(r.title) LIKE ? OR LOWER(u.name) LIKE ?
+      OR LOWER(COALESCE(r.justification, '')) LIKE ? OR EXISTS (
+        SELECT 1 FROM requisition_items si
+        WHERE si.requisition_id = r.id
+          AND (LOWER(si.item_name) LIKE ? OR LOWER(COALESCE(si.description, '')) LIKE ?
+            OR LOWER(COALESCE(si.remarks, '')) LIKE ?)
+      ))`);
     const pattern = `%${search}%`;
-    params.push(pattern, pattern, pattern);
+    params.push(pattern, pattern, pattern, pattern, pattern, pattern, pattern);
   }
   const filter = parseDateFilter(query, PORTAL_EXPORT_FIELDS, { defaultField: 'submitted' });
   if (filter.error) {
@@ -1112,12 +1250,20 @@ export async function fetchPortalRequisitions(query, user) {
     params
   );
 
+  const appliedFilters = [];
+  if (statuses.length) appliedFilters.push(`Status: ${statuses.join(', ')}`);
+  if (query.search) appliedFilters.push(`Search: ${String(query.search).trim()}`);
+  if (filter.active) {
+    appliedFilters.push(`${filter.field}: ${query.from || 'beginning'} to ${query.to || 'today'}`);
+  }
   return {
     label: identity.role === 'requestor' ? 'My purchase requisitions' : 'Department purchase requisitions',
     rows,
     dateField: filter.field,
     from: query.from || '',
-    to: query.to || ''
+    to: query.to || '',
+    filters: appliedFilters.join(' · ') || 'None',
+    ...await reportFormatting()
   };
 }
 
@@ -1213,7 +1359,10 @@ export async function fetchExportRows(key, query, user) {
     rows,
     dateField: filter.field,
     from: query.from || '',
-    to: query.to || ''
+    to: query.to || '',
+    filters: filter.active
+      ? `${filter.field}: ${query.from || 'beginning'} to ${query.to || 'today'}` : 'None',
+    ...await reportFormatting()
   };
 }
 
@@ -1244,6 +1393,9 @@ export async function renderPdf(report, reference = '') {
   let y = 116;
   doc.font('Helvetica-Bold').fontSize(15).fillColor(THEME.ink).text(reference ? `${report.label}: ${reference}` : report.label, 40, y);
   y += 22;
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text(`Applied filters: ${report.filters || 'None'}`, 40, y, { width: doc.page.width - 80 });
+  y += 18;
   if (report.from || report.to) {
     doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
       .text(`Filtered by ${report.dateField}: ${report.from || 'beginning'} to ${report.to || 'today'}`, 40, y);
@@ -1287,7 +1439,7 @@ export async function renderPdf(report, reference = '') {
     }
     let x = 40;
     for (const [index, column] of columns.entries()) {
-      doc.text(displayValue(row[column]), x + 5, y + 7, { width: widths[index] - 10, height: 12, ellipsis: true, lineBreak: false });
+      doc.text(exportFormatValue(row[column], column, report), x + 5, y + 7, { width: widths[index] - 10, height: 12, ellipsis: true, lineBreak: false });
       x += widths[index];
     }
     y += rowHeight;
@@ -1330,9 +1482,7 @@ export async function renderXlsx(report, reference = '') {
   sheet.getCell('B4').font = { size: 9, color: { argb: 'FF64748B' } };
   sheet.getCell('B5').value = reference ? `${report.label}: ${reference}` : report.label;
   sheet.getCell('B5').font = { bold: true, size: 11 };
-  sheet.getCell('B6').value = report.from || report.to
-    ? `Filtered by ${report.dateField}: ${report.from || 'beginning'} to ${report.to || 'today'}`
-    : `Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  sheet.getCell('B6').value = `Applied filters: ${report.filters || 'None'} · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
   sheet.getCell('B6').font = { size: 9, color: { argb: 'FF64748B' } };
 
   const columns = report.rows.length ? Object.keys(report.rows[0]) : ['No records found'];
@@ -1348,20 +1498,15 @@ export async function renderXlsx(report, reference = '') {
   headerRow.height = 22;
 
   report.rows.forEach((row) => {
-    const values = columns.map((column) => {
-      const value = row[column];
-      if (typeof value === 'string' && /^-?\d+(\.\d+)?$/.test(value) && /cost|total|amount|rating|balance|quantity|level/i.test(column)) {
-        return Number(value);
-      }
-      return displayValue(value);
-    });
+    const values = columns.map((column) => xlsxCellValue(row[column], column, report));
     const sheetRow = sheet.addRow(values);
     sheetRow.eachCell((cell) => {
+      const column = columns[cell.col - 1];
       cell.alignment = { vertical: 'top', wrapText: true };
       cell.border = { bottom: { style: 'hair', color: { argb: 'FFE2E8F0' } } };
-      if (/cost|total|amount|rating/i.test(String(columns[cell.col - 1])) && typeof cell.value === 'number') {
-        cell.numFmt = '#,##0.00';
-      }
+      const format = xlsxNumberFormat(column, report);
+      if (format && typeof cell.value === 'number') cell.numFmt = format;
+      else if (cell.value instanceof Date) cell.numFmt = 'dd/mm/yyyy hh:mm';
     });
   });
   sheet.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: columns.length } };
@@ -1376,8 +1521,10 @@ export function renderCsv(report) {
     `"${BRAND.organization}"`,
     `"${BRAND.title}"`,
     `"${report.label}"`,
+    `"Applied filters: ${String(report.filters || 'None').replace(/"/g, '""')}"`,
+    `"Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC"`,
     columns.map(escape).join(','),
-    ...report.rows.map((row) => columns.map((column) => escape(row[column])).join(','))
+    ...report.rows.map((row) => columns.map((column) => `"${exportFormatValue(row[column], column, report).replace(/"/g, '""')}"`).join(','))
   ];
   return Buffer.from(`\uFEFF${lines.join('\r\n')}\r\n`, 'utf8');
 }

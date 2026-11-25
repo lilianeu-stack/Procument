@@ -3,6 +3,7 @@ import {
   ArrowLeft, Check, ChevronRight, Megaphone, Paperclip, Send
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import UserAvatar from '../ui/UserAvatar.jsx';
 import {
   AttachmentPicker, EmptyState, ErrorState, LoadingState, PageHeader,
   PortalBadge, primaryButtonClass, secondaryButtonClass
@@ -13,9 +14,8 @@ import { filesToAttachments } from '../../utils/attachments.js';
 function ConversationRow({ conversation, active, onClick }) {
   return <button type="button" onClick={onClick}
     className={`flex w-full items-center gap-3 border-b border-subtle px-4 py-3 text-left transition ${active ? 'bg-white' : 'hover:bg-white'}`}>
-    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-extrabold ${active ? 'border border-brand bg-white text-black' : 'bg-white text-muted'}`}>
-      {String(conversation.name || '?').split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
-    </span>
+    <UserAvatar userId={conversation.id} name={conversation.name}
+      size="h-9 w-9" textSize="text-xs" className={active ? 'border border-brand' : 'border border-brand'} />
     <span className="min-w-0 flex-1">
       <span className="flex items-center justify-between gap-2">
         <span className="truncate text-xs font-bold text-ink">{conversation.name}</span>
@@ -33,6 +33,7 @@ function MessageBubble({ message, userId }) {
   return <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
     <div className={`max-w-[85%] rounded-2xl border border-brand px-4 py-3 sm:max-w-[70%] ${mine ? 'rounded-br-sm bg-white text-black' : 'rounded-bl-sm bg-white text-ink'}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] font-bold">
+        <UserAvatar userId={message.senderId} name={message.senderName} size="h-5 w-5" textSize="text-[8px]" className="border border-brand" />
         <span>{mine ? 'You' : message.senderName || 'Other party'}</span>
         <span className={mine ? 'text-black' : 'text-muted'}>{dateTimeLabel(message.createdAt)}</span>
         {mine && <Check size={11} className="text-black" />}
@@ -260,6 +261,7 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
         {announcements.map((announcement) => <div key={announcement.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${announcement.isRead ? '' : 'bg-white'}`}>
           <div className="min-w-0 max-w-3xl">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-muted">
+              <UserAvatar userId={announcement.senderId} name={announcement.senderName} size="h-6 w-6" textSize="text-[8px]" className="border border-brand" />
               <span>{announcement.senderName || 'Department Supervisor'}</span>
               <span>·</span><span>{dateTimeLabel(announcement.createdAt)}</span>
               {!announcement.isRead && <PortalBadge tone="indigo">New</PortalBadge>}

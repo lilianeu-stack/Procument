@@ -265,6 +265,15 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   .print-header strong { display: block; font-size: 14pt; }
   .print-header span { display: block; font-size: 9pt; color: var(--pims-ink); }
 
+  .requester-print-register { font-size: 9pt; }
+  .print-register-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14mm; row-gap: 4px; margin-bottom: 12px; }
+  .print-register-meta > div { display: flex; gap: 6px; min-width: 0; }
+  .print-register-meta strong { min-width: 26mm; font-weight: 800; }
+  .print-register-meta span { min-width: 0; overflow-wrap: anywhere; }
+  .print-register-table { table-layout: fixed; font-size: 8pt; }
+  .print-register-table th, .print-register-table td { padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; }
+  .print-register-note { margin-top: 8px; font-size: 9pt; }
+
   main, .min-h-screen, .mx-auto { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .fixed.inset-0 { position: static !important; display: block !important; background: transparent !important; padding: 0 !important; }
   .portal-modal { width: 100% !important; max-width: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; padding: 0 !important; }

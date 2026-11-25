@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, RefreshCw, Search, Send, ShoppingCart, X as XIcon } from 'lucide-react';
+import {
+  Archive, Check, CheckCircle2, ChevronDown, Clock3, FileEdit, FileText,
+  RefreshCw, Search, Send, ShoppingCart, X as XIcon
+} from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import CommitteeReviewModal from './CommitteeReviewModal.jsx';
@@ -181,12 +184,32 @@ export function emailResultNotice(result) {
   return `Unable to send RFQ emails. ${failed} recipient(s) failed. Review the individual Supplier statuses below and retry after correcting the problem.`;
 }
 
+function fallbackRfqStats(rfqs) {
+  return {
+    total: rfqs.length,
+    draft: rfqs.filter((rfq) => rfq.status === 'Draft').length,
+    sent: rfqs.filter((rfq) => rfq.status === 'Sent').length,
+    awaitingResponses: rfqs.filter((rfq) => rfq.status === 'Sent' && Number(rfq.quotations) === 0).length,
+    receivedQuotations: rfqs.filter((rfq) => Number(rfq.quotations) > 0).length,
+    closed: rfqs.filter((rfq) => rfq.status === 'Closed').length
+  };
+}
+
+const SUMMARY_CARDS = [
+  { key: 'total', label: 'Total RFQs', icon: FileText, note: 'All registered RFQs', status: '', response: 'all' },
+  { key: 'draft', label: 'Draft RFQs', icon: FileEdit, note: 'Not sent to suppliers', status: 'Draft', response: 'all' },
+  { key: 'sent', label: 'Sent RFQs', icon: Send, note: 'Invitations issued', status: 'Sent', response: 'all' },
+  { key: 'awaitingResponses', label: 'Awaiting Supplier Responses', icon: Clock3, note: 'Sent, no quotation yet', status: 'Sent', response: 'awaiting' },
+  { key: 'receivedQuotations', label: 'Received Quotations', icon: CheckCircle2, note: 'At least one quotation', status: '', response: 'responded' },
+  { key: 'closed', label: 'Closed RFQs', icon: Archive, note: 'Closed without award', status: 'Closed', response: 'all' }
+];
+
 export default function RfqsPage({
   rfqs = [], requisitions = [], suppliers = [], quotations = [], purchaseOrders = [], user = {}, query = {},
   committeeMembers = [], initialRequisitionId, autoOpenCreate = false,
   onCreate, onCreatePO, onLoadQuotes, onQuote, onAward, onLoadEmailDeliveries,
   onRetryFailedEmails, onResendRfqEmail, onSendToCommittee, onPreviewCommittee,
-  onLoadCommitteeReviews, onResendCommitteeReview
+  onLoadCommitteeReviews, onResendCommitteeReview, getRfqStats
 }) {
   const sendingRfq = useRef(false);
   const notificationRfqHandled = useRef('');
@@ -207,9 +230,20 @@ export default function RfqsPage({
   const [emailBusy, setEmailBusy] = useState(false);
   const [committeeBusy, setCommitteeBusy] = useState(false);
   const [selectedRfqIds, setSelectedRfqIds] = useState([]);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [rfqStats, setRfqStats] = useState(null);
   const canEvaluate = ['admin', 'committee', 'procurement'].includes(user.role);
   const canAward = ['admin', 'committee'].includes(user.role);
   const canSendToCommittee = ['admin', 'procurement'].includes(user.role);
+
+  useEffect(() => {
+    if (!getRfqStats) return undefined;
+    let active = true;
+    getRfqStats()
+      .then((response) => { if (active) setRfqStats(response.stats || null); })
+      .catch((exception) => { if (active) setError(exception.message || 'RFQ statistics could not be loaded.'); });
+    return () => { active = false; };
+  }, [getRfqStats, rfqs]);
 
   const loadEmailStatus = useCallback(async (rfqId) => {
     if (!onLoadEmailDeliveries || !rfqId) return;
@@ -342,10 +376,13 @@ export default function RfqsPage({
 
   const summary = emailData?.summary;
   const deliveries = emailData?.deliveries || [];
+  const currentStats = rfqStats || fallbackRfqStats(rfqs);
   const respondedCount = rfqs.filter((rfq) => (rfq.responses || []).length > 0).length;
   const visibleRfqs = rfqs.filter((rfq) => {
     const responded = (rfq.responses || []).length > 0;
-    return responseFilter === 'all' || (responseFilter === 'responded' ? responded : !responded);
+    const matchesStatus = !statusFilter || rfq.status === statusFilter;
+    const matchesResponses = responseFilter === 'all' || (responseFilter === 'responded' ? responded : !responded);
+    return matchesStatus && matchesResponses;
   });
   const eligibleVisibleRfqs = visibleRfqs.filter((rfq) => (rfq.responses || []).length > 0);
   const allVisibleEligibleSelected = eligibleVisibleRfqs.length > 0 &&
@@ -407,6 +444,21 @@ export default function RfqsPage({
   return <>
     {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">{notice}</div>}
     {error && <div className="mb-4"><ErrorMessage>{error}</ErrorMessage></div>}
+
+    <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {SUMMARY_CARDS.map((card) => {
+        const active = statusFilter === card.status && responseFilter === card.response;
+        return <button key={card.key} type="button" aria-pressed={active}
+          onClick={() => { setStatusFilter(card.status); setResponseFilter(card.response); }}
+          className={`flex min-h-[126px] flex-col justify-between rounded-xl border p-4 text-left shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? 'border-black bg-reference text-black' : 'border-brand bg-white text-black hover:bg-hover'}`}>
+          <span className="flex items-start justify-between gap-2 text-xs font-semibold">
+            {card.label}<card.icon size={16} aria-hidden="true" />
+          </span>
+          <span className="display-font mt-3 text-2xl font-extrabold">{currentStats[card.key] ?? '—'}</span>
+          <span className="mt-1 text-[10px] text-muted">{card.note}</span>
+        </button>;
+      })}
+    </div>
 
     <div>
       <div className="mb-3 flex justify-end">

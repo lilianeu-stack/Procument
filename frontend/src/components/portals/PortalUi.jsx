@@ -79,12 +79,22 @@ export function FilterField({ label, children, className = 'w-full sm:w-48' }) {
   </label>;
 }
 
-export function SearchField({ value, onChange, placeholder = 'Search…', className = 'w-full sm:w-64' }) {
+export function SearchField({ value, onChange, onClear, placeholder = 'Search…', className = 'w-full sm:w-64' }) {
+  const showClear = Boolean(value) && typeof onClear === 'function';
   return <FilterField label="Search" className={className}>
     <span className="relative block">
-      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" aria-hidden="true" />
       <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder}
-        className="field pl-9" />
+        className={`field pl-9 ${showClear ? 'pr-9' : ''}`} />
+      {showClear && <button
+        type="button"
+        onClick={onClear}
+        aria-label="Clear search"
+        title="Clear search"
+        className="absolute right-2.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md border border-brand bg-white text-muted"
+      >
+        <X size={12} aria-hidden="true" />
+      </button>}
     </span>
   </FilterField>;
 }
@@ -94,8 +104,8 @@ export function TableScroll({ minWidth = 900, children, label = '', className = 
   return <div className={`overflow-x-auto ${className}`} {...regionProps}><div style={{ minWidth }}>{children}</div></div>;
 }
 
-export function TextLink({ onClick, children, className = '' }) {
-  return <button type="button" onClick={onClick} className={`text-xs font-bold text-black hover:text-accent-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${className}`}>{children}</button>;
+export function TextLink({ onClick, children, className = '', ...props }) {
+  return <button type="button" onClick={onClick} className={`text-xs font-bold text-black hover:text-accent-text hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${className}`} {...props}>{children}</button>;
 }
 
 function paginationWindow(page, pages) {
