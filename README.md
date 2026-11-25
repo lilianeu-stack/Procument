@@ -27,11 +27,11 @@ The backend requires `DB_HOST`, `DB_USER`, `DB_NAME`, and `JWT_SECRET`. `DB_PORT
 Start the database from the project root:
 
 ```powershell
-docker compose up -d
-docker compose ps
+docker compose up -d mysql
+docker compose ps mysql
 ```
 
-The backend connects to the published MySQL port on `127.0.0.1:3307` (the container listens on 3306). The schema and sample supplier and inventory records are initialized only when the Docker volume is empty.
+The backend container connects to MySQL at `mysql:3306`; local Node processes connect through the published port at `127.0.0.1:3307`. The schema and sample supplier and inventory records are initialized only when the Docker volume is empty.
 
 If Docker is not available, an existing local MySQL/MariaDB server can be used instead: set `DB_PORT=3306` (or the local server's port), `DB_HOST`, `DB_USER`, `DB_PASSWORD` and `DB_NAME` in `backend\.env` to match that server, and make sure the `Procument` schema from `backend/database/schema.sql` is loaded. Generate `JWT_SECRET` locally with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. The backend refuses to accept placeholder values or start before the database connection succeeds.
 
@@ -76,15 +76,40 @@ Use the configured email and the password you entered to sign in. Do not commit 
 
 The backend uses one generic SMTP integration (`nodemailer`). No provider is assumed: set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_FROM_NAME` and `APP_BASE_URL` in `backend\.env` using the values issued by your organization's email provider. Use implicit TLS with `SMTP_SECURE=true` on port 465, or STARTTLS with `SMTP_SECURE=false` and `SMTP_REQUIRE_TLS=true` on the provider's submission port. Start the backend to see a warning when any value is missing; RFQs still save correctly, but their invitation deliveries are recorded as `Failed` until the configuration is corrected.
 
-When an RFQ is created, each selected Supplier receives one individual email containing their own signed `#/supplier/RFQ?token=…` link. The token is HMAC-signed with `JWT_SECRET` and contains only that RFQ and Supplier's identifiers; it cannot be used to open another Supplier's quotation. The Supplier page is public but token-gated and lets the Supplier view the request and submit or update their quotation. No other Supplier's email address or link is included in the message.
+The Create RFQ form takes a send-date range (start date and deadline) and a searchable multi-select of active Suppliers showing each Supplier's name and email; multiple Suppliers can be invited in one RFQ. When the RFQ is created, each selected Supplier receives one individual email built as a requisition form: request details, the send-date range, a requested-items table with quantities, unit prices and totals, plus their own signed `#/supplier/RFQ?token=…` response link. The token is HMAC-signed with `JWT_SECRET` and contains only that RFQ and Supplier's identifiers; it cannot be used to open another Supplier's quotation. The Supplier page is public but token-gated and shows the same requisition form, where the Supplier can submit or update their response and notes. No other Supplier's email address or link is included in the message.
 
 Delivery status is intentionally truthful: SMTP acceptance is shown as **Accepted by Email Provider**, never **Delivered**. Set `EMAIL_WEBHOOK_SECRET` and point the provider's generic delivery webhook to `POST /api/email/webhooks/generic` with header `x-email-webhook-secret` to record provider-confirmed `Delivered`, `Bounced` and `Opened` statuses. Opening the signed link also records `Opened`. Administrators can verify SMTP authentication, send a test to their own account, retry only failed recipients, and explicitly resend an individual link from the RFQs page.
 
 **Domain authentication is the domain owner's responsibility.** Ask the actual email provider for the exact SPF, DKIM and DMARC records required for the sending domain and enter those values at the DNS registrar; no records are invented by this application. Also verify the sender email/domain in the provider account, confirm the account is activated, and check its sending limits. SPF/DKIM/DMARC problems usually cause spam placement or rejection even when SMTP authentication succeeds.
 
+### Google inbox and email composition
+
+The **Email Inbox** page is available to Administrators and Procurement users. It can connect one Google mailbox, sync the 25 most recent inbox messages (up to 100 are retained in the app), display plain-text message bodies, and send one-recipient messages through Gmail API. Existing SMTP settings remain supported and are used for RFQ/supplier email delivery when configured; Gmail API is the fallback when SMTP is not configured. Inbox sync is manual, and messages opened in the app are not marked read in Gmail.
+
+On a received request, **Send to another user** sends a formatted requisition form built from the saved request items, including item descriptions, unit prices, quantities and totals. The email contains a public `#/response?token=…` link where the recipient can view the same form, write a comment and submit it directly into Procurement without signing in. The token is a unique database-backed value created for that outbound form and recipient. Each form also carries a reply tag linked to the requisition, so a recipient who prefers email can reply instead: when the mailbox is synced, a matching `Re:` reply is stored as a comment on that requisition. Either submission method adds the comment to request history, shows it under **G. Email comments**, and notifies Administrators and Procurement users. The **Check email replies** button on the document page triggers mailbox sync and refreshes the comments.
+
+To connect Google:
+
+1. In Google Cloud Console, enable the Gmail API for the project and create a **Web application** OAuth client. For a Workspace organization, use the internal audience where available.
+2. Add this exact local authorized redirect URI to the OAuth client: `http://localhost:4000/api/email/google/callback`. In production, use `https://<your-api-domain>/api/email/google/callback` and set that same value in `GOOGLE_OAUTH_REDIRECT_URI`.
+3. Configure the OAuth consent screen to request `openid`, `email`, `https://www.googleapis.com/auth/gmail.readonly`, and `https://www.googleapis.com/auth/gmail.send`. The connected Google account must match `GOOGLE_MAILBOX`.
+4. In `backend\.env`, set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI`, and `GOOGLE_MAILBOX`. Generate `GOOGLE_TOKEN_ENCRYPTION_KEY` as a random 32-byte (64-character hex) key using the command in `backend\.env.example`. Back up this key securely; losing it makes the stored refresh token unreadable.
+5. Restart the backend, sign in as an Administrator or Procurement user, open **Email Inbox**, and choose **Connect Google mailbox**. Approve access for the configured mailbox, then use **Sync inbox** to fetch messages.
+
+The backend stores the OAuth refresh token encrypted with AES-256-GCM and stores only a hash of each short-lived OAuth state value. Never commit `backend\.env` or share OAuth client secrets. If a client secret has been exposed, rotate it in Google Cloud before configuring the app. A non-local production callback must use HTTPS. Gmail API access may require Workspace policy approval or Google OAuth verification, depending on the consent-screen audience.
+
 ### 3. Run the application
 
-From the project root, start the full application:
+To build and run the frontend, API, and MySQL in Docker from the project root:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost:5173`. The API is at `http://localhost:4000`; follow container output with `docker compose logs -f frontend backend`. Stop the containers with `docker compose down`; the database volume is preserved.
+
+To run the frontend and API as local Node processes instead:
 
 ```powershell
 npm run dev
@@ -155,6 +180,10 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `PATCH` | `/requisitions/:id/decision` | Admin, approver |
 | `GET` | `/rfqs`, `/rfqs/:id/quotations` | Signed in |
 | `POST` | `/rfqs` | Admin, procurement |
+| `GET` | `/email/google/callback` | Public OAuth callback (one-time state required) |
+| `GET` | `/email/google/status`, `/email/google/connect` | Admin, procurement |
+| `POST` | `/email/google/disconnect`, `/email/inbox/sync`, `/email/send`, `/email/requisitions/:id/send` | Admin, procurement |
+| `GET` | `/email/inbox/messages`, `/email/inbox/messages/:id` | Admin, procurement |
 | `POST` | `/rfqs/:id/quotations` | Admin, procurement, committee |
 | `POST` | `/rfqs/:id/award` | Admin, committee |
 | `GET`, `POST` | `/purchase-orders` | Signed in / Admin, procurement |
@@ -209,4 +238,13 @@ docker-compose.yml                  Persistent MySQL 8.4 service
 
 This project includes the core end-to-end workflows and generic SMTP supplier email delivery, but still needs deployment-specific production work: realtime push notifications, password reset, document uploads/attachments, formal forecasting, and payment-provider integration. The bundled Docker credentials are for local development only; replace them before exposing the database beyond your machine. The bundled supplier and inventory records are sample data.
 
-The browser UI calls `/api` on the same origin as the page; Vite proxies that path to `http://localhost:4000` in both `npm run dev` and `vite preview`. This keeps sign-in working even when you open the frontend at `http://<your-ip>:5173` instead of `localhost` (no CORS preflight involved). If the API runs on a different host or port, set `API_PROXY_TARGET` (for example `http://192.168.1.10:4000`) when starting Vite. Copy `frontend\.env.example` to `frontend\.env.local` to override `VITE_API_URL`. During development, localhost and private-network origins are allowed by the API; production permits only `CLIENT_ORIGIN`.
+The browser UI calls `/api` on the same origin as the page; Vite proxies that path to `http://localhost:4000` in both `npm run dev` and `vite preview`. This keeps sign-in working even when you open the frontend at `http://<your-ip>:5173` instead of `localhost` (no CORS preflight involved). If the API runs on a different host or port, set `API_PROXY_TARGET` (for example `http://192.168.1.10:4000`) when starting Vite. In Docker Compose the frontend container sets `API_PROXY_TARGET=http://backend:4000`, because `localhost` inside that container is the frontend itself. Copy `frontend\.env.example` to `frontend\.env.local` to override `VITE_API_URL`. During development, localhost and private-network origins are allowed by the API; production permits only `CLIENT_ORIGIN`.
+
+### Department hierarchy
+
+Admin → Users is organised as **Department → Subdepartment → User**:
+
+- Top-level departments: `Administration`, `Education`, `Facilities`, `Finance`.
+- Add subdepartments inside a department (for example `IT` and `Stores` inside `Facilities`, `Procurement` and `Administration Office` inside `Administration`).
+- Add users only inside a subdepartment. The API rejects assigning a user directly to a top-level department.
+- Deleting a department with subdepartments is blocked until those subdepartments are moved or deleted.

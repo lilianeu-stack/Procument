@@ -1,45 +1,42 @@
 import { useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Check, Info, Paperclip, Plus, Save, Send, Trash2
+  AlertTriangle, ArrowLeft, ArrowRight, Check, Info, Plus, Save, Send, Trash2
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import {
-  AttachmentPicker, EmptyState, ErrorState, KeyValue, PageHeader,
-  TableScroll, primaryButtonClass, secondaryButtonClass
+  ErrorState, KeyValue, PageHeader, TableScroll, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
-import { currency, dateLabel } from '../../utils/format.js';
-import { filesToAttachments } from '../../utils/attachments.js';
+import { currency } from '../../utils/format.js';
 
-const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
+const MAX_ITEMS = 100;
 const UNITS = ['unit', 'box', 'kg', 'litre', 'hour', 'day', 'set', 'piece'];
 
-const emptyItem = () => ({ itemName: '', description: '', quantity: '1', unit: 'unit', estimatedUnitCost: '' });
+const emptyItem = () => ({
+  itemName: '', description: '', quantity: '1', unit: 'unit', estimatedUnitCost: ''
+});
 
-function itemTotals(items) {
-  return items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0), 0);
+function lineTotal(item) {
+  return (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0);
 }
 
 export default function CreatePurchaseRequest({ portalApi, navigate, query = {} }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
-    title: query.title || '',
-    justification: '',
-    budgetCode: '',
-    requiredBy: '',
-    priority: 'Medium'
+    title: query.title || ''
   });
   const [items, setItems] = useState([emptyItem()]);
-  const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
 
-  const total = useMemo(() => itemTotals(items), [items]);
-  const budgetMissing = !form.budgetCode.trim();
+  const total = useMemo(
+    () => items.reduce((sum, item) => sum + lineTotal(item), 0),
+    [items]
+  );
   const needsAdministrator = /no active supervisor|contact an administrator/i.test(error);
   const hasUnsavedChanges = Boolean(
-    form.title || form.justification || form.budgetCode || form.requiredBy || form.priority !== 'Medium' ||
-    items.some((item) => item.itemName || item.description || item.estimatedUnitCost || item.quantity !== '1' || item.unit !== 'unit') ||
-    files.length
+    form.title || items.some((item) =>
+      item.itemName || item.description || item.estimatedUnitCost ||
+      item.quantity !== '1' || item.unit !== 'unit')
   );
 
   function cancelRequest() {
@@ -49,26 +46,33 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
   }
 
   function updateItem(index, key, value) {
-    setItems((current) => current.map((item, position) => position === index ? { ...item, [key]: value } : item));
+    setItems((current) => current.map((item, position) =>
+      position === index ? { ...item, [key]: value } : item));
   }
 
-  function validate() {
+  function validate(action = 'submit') {
     if (!form.title.trim()) return 'A request title is required.';
-    if (!form.justification.trim()) return 'A justification is required.';
-    if (!form.budgetCode.trim()) return 'A budget code is required.';
     if (!items.length) return 'Add at least one item.';
     for (const [index, item] of items.entries()) {
-      if (!item.itemName.trim()) return `Item ${index + 1} needs a name.`;
-      if (!Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1) return `Item ${index + 1} needs a whole quantity of at least 1.`;
-      if (item.estimatedUnitCost === '' || !Number.isFinite(Number(item.estimatedUnitCost)) || Number(item.estimatedUnitCost) < 0) {
-        return `Item ${index + 1} needs a valid estimated unit cost.`;
+      const number = index + 1;
+      if (!item.itemName.trim()) return `Item ${number} needs a title.`;
+      if (!Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1) {
+        return `Item ${number} needs a whole quantity of at least 1.`;
+      }
+      if (!UNITS.includes(item.unit)) return `Choose a unit of quantity measure for item ${number}.`;
+      if (action === 'submit' && !item.description.trim()) {
+        return `Item ${number} needs a description or purpose.`;
+      }
+      if (action === 'submit' && (item.estimatedUnitCost === '' ||
+          !Number.isFinite(Number(item.estimatedUnitCost)) || Number(item.estimatedUnitCost) < 0)) {
+        return `Item ${number} needs a valid unit cost.`;
       }
     }
     return '';
   }
 
   function goToReview() {
-    const problem = validate();
+    const problem = validate('submit');
     if (problem) { setError(problem); return; }
     setError('');
     setStep(2);
@@ -76,32 +80,32 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
 
   async function save(action) {
     setError('');
-    if (action === 'submit') {
-      const problem = validate();
-      if (problem) { setError(problem); setStep(1); return; }
-    } else if (!items.some((item) => item.itemName.trim())) {
-      setError('Add at least one item before saving a draft.');
+    const problem = validate(action);
+    if (problem) {
+      setError(problem);
       setStep(1);
       return;
     }
     setBusy(action);
     try {
-      const attachments = files.length ? await filesToAttachments(files) : undefined;
+      const justification = items
+        .map((item) => `${item.itemName.trim()}: ${item.description.trim()}`)
+        .filter((description) => !description.endsWith(': '))
+        .join('\n')
+        .slice(0, 5000);
       const result = await portalApi.createRequesterRequest({
         title: form.title.trim(),
-        justification: form.justification.trim(),
-        budgetCode: form.budgetCode.trim(),
-        requiredBy: form.requiredBy || undefined,
-        priority: form.priority,
+        justification,
+        budgetCode: '',
+        priority: 'Medium',
         items: items.map((item) => ({
           itemName: item.itemName.trim(),
           description: item.description.trim(),
           quantity: Number(item.quantity),
-          unit: item.unit || 'unit',
-          estimatedUnitCost: Number(item.estimatedUnitCost)
+          unit: item.unit,
+          estimatedUnitCost: Number(item.estimatedUnitCost || 0)
         })),
-        action,
-        attachments
+        action
       });
       navigate('My Procurement Requests', { request: result.id });
     } catch (exception) {
@@ -119,7 +123,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
     <PageHeader
       eyebrow="Step 1 of 2 · Request builder"
       title="Create purchase request"
-      description="Describe what your Department needs, attach supporting documents, then review before saving or submitting for approval."
+      description="Describe the request and add one or more items before reviewing it."
       actions={<div className="flex items-center gap-2">
         <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'bg-brand text-white' : 'bg-slate-100 text-muted'}`}>1 · Details</span>
         <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'bg-brand text-white' : 'bg-slate-100 text-muted'}`}>2 · Review</span>
@@ -142,35 +146,14 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
     {!needsAdministrator && <ErrorState message={error && step === 2 ? '' : error} />}
 
     {step === 1 ? <div className="space-y-5">
-      <PageCard title="Request details" description="Fields marked * are required before submitting.">
+      <PageCard title="Request details" description="Enter an overall title for this request.">
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           <label className="block text-xs font-bold sm:col-span-2">
             Title *
             <input required value={form.title} maxLength={180} onChange={(event) => setForm({ ...form, title: event.target.value })}
-              placeholder="e.g. Office laptops for procurement team" className="field" />
+              placeholder="e.g. Office supplies for the department" className="field" />
           </label>
-          <label className="block text-xs font-bold sm:col-span-2">
-            Justification *
-            <textarea required rows="4" value={form.justification} onChange={(event) => setForm({ ...form, justification: event.target.value })}
-              placeholder="Explain why these items are needed and how they will be used." className="field h-auto py-2" />
-          </label>
-          <label className="block text-xs font-bold">
-            Budget code *
-            <input required value={form.budgetCode} maxLength={60} onChange={(event) => setForm({ ...form, budgetCode: event.target.value })}
-              placeholder="e.g. OPS-2026-004" className="field" />
-            {budgetMissing && <span className="mt-1 block text-[10px] font-normal text-amber-600">Required when submitting.</span>}
-          </label>
-          <label className="block text-xs font-bold">
-            Required by
-            <input type="date" value={form.requiredBy} onChange={(event) => setForm({ ...form, requiredBy: event.target.value })} className="field" />
-          </label>
-          <label className="block text-xs font-bold">
-            Priority
-            <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} className="field">
-              {PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}
-            </select>
-          </label>
-          <div className="rounded-lg bg-slate-50 p-3 text-[11px] leading-5 text-muted sm:col-span-1">
+          <div className="rounded-lg bg-slate-50 p-3 text-[11px] leading-5 text-muted sm:col-span-2">
             <Info size={14} className="mb-1 text-brand" />
             Drafts stay with you until submitted. Once submitted, your Department Supervisor receives the request for approval.
           </div>
@@ -179,65 +162,68 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
 
       <PageCard
         title="Request items"
-        description="Add every item or service needed. Line totals update automatically."
-        action={<button type="button" onClick={() => setItems((current) => [...current, emptyItem()])} className={secondaryButtonClass()}>
+        description="Each item has its own quantity, unit of measure, cost, total, and purpose."
+        action={<button type="button" disabled={Boolean(busy) || items.length >= MAX_ITEMS}
+          onClick={() => setItems((current) => [...current, emptyItem()])}
+          className={secondaryButtonClass()}>
           <Plus size={14} />Add item
         </button>}>
-        {items.length === 0 ? <EmptyState title="No items added" description="Add at least one item to continue." /> :
-          <TableScroll minWidth={820}>
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
-                <tr>
-                  {['Item name *', 'Description', 'Qty *', 'Unit', 'Unit cost *', 'Line total', ''].map((heading) =>
-                    <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {items.map((item, index) => <tr key={index} className="align-top">
-                  <td className="px-3 py-3">
-                    <input required value={item.itemName} onChange={(event) => updateItem(index, 'itemName', event.target.value)}
-                      placeholder="Item or service" className="field mt-0" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <input value={item.description} onChange={(event) => updateItem(index, 'description', event.target.value)}
-                      placeholder="Optional detail" className="field mt-0" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <input required type="number" min="1" step="1" value={item.quantity}
-                      onChange={(event) => updateItem(index, 'quantity', event.target.value)} className="field mt-0 w-20" />
-                  </td>
-                  <td className="px-3 py-3">
-                    <select value={item.unit} onChange={(event) => updateItem(index, 'unit', event.target.value)} className="field mt-0 w-24">
-                      {[...new Set([item.unit, ...UNITS])].filter(Boolean).map((unit) => <option key={unit}>{unit}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-3 py-3">
-                    <input required type="number" min="0" step="0.01" value={item.estimatedUnitCost}
-                      onChange={(event) => updateItem(index, 'estimatedUnitCost', event.target.value)}
-                      placeholder="0.00" className="field mt-0 w-28" />
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-4 font-bold">{currency((Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0))}</td>
-                  <td className="px-3 py-3">
-                    <button type="button" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((_, position) => position !== index))}
-                      aria-label={`Remove item ${index + 1}`} className="rounded-lg p-2 text-muted hover:bg-red-50 hover:text-red-600 disabled:opacity-30">
-                      <Trash2 size={15} />
-                    </button>
-                  </td>
-                </tr>)}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-slate-200 bg-slate-50">
-                  <td colSpan="5" className="px-3 py-3 text-right text-xs font-bold">Estimated total</td>
-                  <td className="px-3 py-3 text-sm font-extrabold text-brand">{currency(total)}</td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-          </TableScroll>}
-      </PageCard>
-
-      <PageCard title="Supporting documents" description="Optional. Up to five files, 5 MB each.">
-        <div className="p-5"><AttachmentPicker files={files} onChange={setFiles} /></div>
+        <TableScroll minWidth={1050}>
+          <table className="w-full text-left text-xs">
+            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+              <tr>
+                {['Item title *', 'Quantity *', 'Unit of quantity measure *', 'Unit cost *', 'Total', 'Description / purpose *', ''].map((heading) =>
+                  <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {items.map((item, index) => <tr key={index} className="align-top">
+                <td className="px-3 py-3">
+                  <input required aria-label={`Item ${index + 1} title`} maxLength={180}
+                    value={item.itemName} onChange={(event) => updateItem(index, 'itemName', event.target.value)}
+                    placeholder="Item or service" className="field mt-0 min-w-36" />
+                </td>
+                <td className="px-3 py-3">
+                  <input required aria-label={`Item ${index + 1} quantity`} type="number" min="1" step="1"
+                    value={item.quantity} onChange={(event) => updateItem(index, 'quantity', event.target.value)}
+                    className="field mt-0 w-24" />
+                </td>
+                <td className="px-3 py-3">
+                  <select required aria-label={`Item ${index + 1} unit of quantity measure`} value={item.unit}
+                    onChange={(event) => updateItem(index, 'unit', event.target.value)} className="field mt-0 w-36">
+                    {UNITS.map((unit) => <option key={unit}>{unit}</option>)}
+                  </select>
+                </td>
+                <td className="px-3 py-3">
+                  <input required aria-label={`Item ${index + 1} unit cost`} type="number" min="0" step="0.01"
+                    value={item.estimatedUnitCost} onChange={(event) => updateItem(index, 'estimatedUnitCost', event.target.value)}
+                    placeholder="0.00" className="field mt-0 w-28" />
+                </td>
+                <td className="whitespace-nowrap px-3 py-4 font-bold">{currency(lineTotal(item))}</td>
+                <td className="px-3 py-3">
+                  <textarea required aria-label={`Item ${index + 1} description or purpose`} rows="2" maxLength={1000}
+                    value={item.description} onChange={(event) => updateItem(index, 'description', event.target.value)}
+                    placeholder="Describe the item and its purpose" className="field mt-0 min-w-48 py-2" />
+                </td>
+                <td className="px-3 py-3">
+                  <button type="button" disabled={items.length === 1 || Boolean(busy)}
+                    onClick={() => setItems((current) => current.filter((_, position) => position !== index))}
+                    aria-label={`Remove item ${index + 1}`}
+                    className="rounded-lg p-2 text-muted hover:bg-red-50 hover:text-red-600 disabled:opacity-30">
+                    <Trash2 size={15} />
+                  </button>
+                </td>
+              </tr>)}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-slate-200 bg-slate-50">
+                <td colSpan="4" className="px-3 py-3 text-right text-xs font-bold">Request total</td>
+                <td className="px-3 py-3 text-sm font-extrabold text-brand">{currency(total)}</td>
+                <td colSpan="2" />
+              </tr>
+            </tfoot>
+          </table>
+        </TableScroll>
       </PageCard>
 
       <div className="flex flex-wrap justify-end gap-2">
@@ -255,33 +241,33 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
       <PageCard title="Review your request" description="Check the details below before saving or submitting.">
         <dl className="grid gap-5 p-5 sm:grid-cols-2">
           <KeyValue label="Title">{form.title}</KeyValue>
-          <KeyValue label="Budget code">{form.budgetCode}</KeyValue>
-          <KeyValue label="Required by">{dateLabel(form.requiredBy)}</KeyValue>
-          <KeyValue label="Priority">{form.priority}</KeyValue>
-          <KeyValue label="Justification" className="sm:col-span-2">{form.justification}</KeyValue>
+          <KeyValue label="Items">{items.length}</KeyValue>
         </dl>
-        <TableScroll minWidth={520}>
+        <TableScroll minWidth={700}>
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50 text-[10px] uppercase text-muted">
-              <tr>{['Item', 'Description', 'Quantity', 'Unit cost', 'Line total'].map((heading) => <th key={heading} className="px-4 py-3 font-bold">{heading}</th>)}</tr>
+              <tr>{['Item title', 'Quantity', 'Unit of quantity measure', 'Unit cost', 'Total', 'Description / purpose'].map((heading) =>
+                <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item, index) => <tr key={index}>
-                <td className="px-4 py-3 font-bold">{item.itemName}</td>
-                <td className="px-4 py-3 text-muted">{item.description || '—'}</td>
-                <td className="px-4 py-3">{item.quantity} {item.unit}</td>
-                <td className="px-4 py-3">{currency(Number(item.estimatedUnitCost))}</td>
-                <td className="px-4 py-3 font-bold">{currency(itemTotals([item]))}</td>
+                <td className="px-3 py-3 font-bold">{item.itemName}</td>
+                <td className="px-3 py-3">{item.quantity}</td>
+                <td className="px-3 py-3">{item.unit}</td>
+                <td className="px-3 py-3">{currency(Number(item.estimatedUnitCost))}</td>
+                <td className="px-3 py-3 font-bold">{currency(lineTotal(item))}</td>
+                <td className="px-3 py-3 text-muted">{item.description || '—'}</td>
               </tr>)}
             </tbody>
-            <tfoot><tr className="bg-slate-50"><td colSpan="4" className="px-4 py-3 text-right font-bold">Estimated total</td><td className="px-4 py-3 font-extrabold text-brand">{currency(total)}</td></tr></tfoot>
+            <tfoot>
+              <tr className="bg-slate-50">
+                <td colSpan="4" className="px-3 py-3 text-right font-bold">Request total</td>
+                <td className="px-3 py-3 font-extrabold text-brand">{currency(total)}</td>
+                <td />
+              </tr>
+            </tfoot>
           </table>
         </TableScroll>
-        <div className="border-t border-slate-100 px-5 py-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-bold"><Paperclip size={14} />Attachments ({files.length})</div>
-          {files.length ? <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-[11px] text-muted">• {file.name}</li>)}</ul>
-            : <p className="text-[11px] text-muted">No documents attached.</p>}
-        </div>
       </PageCard>
       <ErrorState message={error} />
       <div className="flex flex-wrap justify-between gap-2">
@@ -303,7 +289,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {} 
     </div>}
 
     {step === 1 && <p className="mt-4 flex items-center gap-2 text-[11px] text-muted">
-      <Check size={13} className="text-emerald-600" />You can save a draft with just one item; full details are required to submit.
+      <Check size={13} className="text-emerald-600" />Save a draft with item titles; complete each item before submitting.
     </p>}
   </>;
 }

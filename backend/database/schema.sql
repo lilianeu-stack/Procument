@@ -12,8 +12,10 @@ CREATE TABLE IF NOT EXISTS departments (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL UNIQUE,
   description VARCHAR(255) NULL,
+  parent_id INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_departments_parent FOREIGN KEY (parent_id) REFERENCES departments(id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -39,6 +41,16 @@ CREATE TABLE IF NOT EXISTS suppliers (
   phone VARCHAR(50) NULL,
   rating DECIMAL(2,1) NOT NULL DEFAULT 0,
   status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS procurement_committee_members (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  first_name VARCHAR(100) NOT NULL,
+  last_name VARCHAR(100) NOT NULL,
+  email VARCHAR(190) NOT NULL UNIQUE,
+  phone VARCHAR(50) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -216,10 +228,11 @@ CREATE TABLE IF NOT EXISTS rfqs (
   reference VARCHAR(30) NOT NULL UNIQUE,
   idempotency_key VARCHAR(80) NULL,
   requisition_id INT UNSIGNED NOT NULL,
-  due_date DATE NULL,
+  due_date DATETIME NULL,
   status ENUM('Sent','Evaluating','Awarded','Closed') NOT NULL DEFAULT 'Sent',
   selected_quotation_id INT UNSIGNED NULL,
   issued_at DATETIME NULL,
+  message TEXT NULL,
   closed_at DATETIME NULL,
   created_by INT UNSIGNED NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -260,6 +273,44 @@ CREATE TABLE IF NOT EXISTS rfq_email_deliveries (
   INDEX idx_rfq_email_status (rfq_id, status)
 );
 
+-- One token per Committee member and RFQ. The same token is reused if the
+-- batch is resent, so each public form accepts exactly one decision set.
+CREATE TABLE IF NOT EXISTS rfq_committee_reviews (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  rfq_id INT UNSIGNED NOT NULL,
+  token CHAR(64) NOT NULL UNIQUE,
+  committee_member_id INT UNSIGNED NULL,
+  created_by INT UNSIGNED NULL,
+  recipient_name VARCHAR(200) NOT NULL,
+  recipient_email VARCHAR(190) NOT NULL,
+  report_snapshot JSON NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+  sent_at DATETIME NULL,
+  opened_at DATETIME NULL,
+  submitted_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uq_rfq_committee_review_token UNIQUE (token),
+  CONSTRAINT fk_rfq_committee_review_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_committee_review_member FOREIGN KEY (committee_member_id) REFERENCES procurement_committee_members(id) ON DELETE SET NULL,
+  CONSTRAINT fk_rfq_committee_review_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_rfq_committee_review_rfq (rfq_id, status)
+);
+
+CREATE TABLE IF NOT EXISTS rfq_committee_decisions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  review_id BIGINT UNSIGNED NOT NULL,
+  supplier_id INT UNSIGNED NOT NULL,
+  decision ENUM('Accepted','Rejected') NOT NULL,
+  reason TEXT NULL,
+  responder_name VARCHAR(150) NULL,
+  decided_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_rfq_committee_decision UNIQUE (review_id, supplier_id),
+  CONSTRAINT fk_rfq_committee_decision_review FOREIGN KEY (review_id) REFERENCES rfq_committee_reviews(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_committee_decision_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+);
+
 CREATE TABLE IF NOT EXISTS quotations (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   rfq_id INT UNSIGNED NOT NULL,
@@ -275,6 +326,22 @@ CREATE TABLE IF NOT EXISTS quotations (
   UNIQUE KEY uq_quotation_supplier (rfq_id, supplier_id),
   CONSTRAINT fk_quote_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
   CONSTRAINT fk_quote_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+);
+
+CREATE TABLE IF NOT EXISTS quotation_items (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  quotation_id INT UNSIGNED NOT NULL,
+  requisition_item_id INT UNSIGNED NULL,
+  item_name VARCHAR(180) NOT NULL,
+  description TEXT NULL,
+  quantity DECIMAL(12,2) NOT NULL DEFAULT 1,
+  unit VARCHAR(30) NOT NULL DEFAULT 'unit',
+  unit_price DECIMAL(12,2) NOT NULL,
+  line_total DECIMAL(12,2) NOT NULL,
+  comment TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_quotation_item (quotation_id, requisition_item_id),
+  CONSTRAINT fk_quotation_item_quote FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
@@ -408,8 +475,94 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   INDEX idx_audit_entity_date (entity_type, entity_id, created_at)
 );
 
-INSERT IGNORE INTO departments (name) VALUES
-  ('Finance'), ('Procurement'), ('Stores'), ('Facilities'), ('Education'), ('Administration');
+CREATE TABLE IF NOT EXISTS google_email_connection (
+  id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  mailbox VARCHAR(190) NOT NULL,
+  refresh_token MEDIUMTEXT NOT NULL,
+  token_iv CHAR(24) NOT NULL,
+  token_tag CHAR(32) NOT NULL,
+  granted_scopes TEXT NOT NULL,
+  connected_by INT UNSIGNED NULL,
+  connected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_google_email_connected_by FOREIGN KEY (connected_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS google_email_oauth_states (
+  state_hash CHAR(64) NOT NULL PRIMARY KEY,
+  created_by INT UNSIGNED NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_google_email_state_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_google_email_state_expiry (expires_at)
+);
+
+CREATE TABLE IF NOT EXISTS google_email_messages (
+  gmail_message_id VARCHAR(190) NOT NULL PRIMARY KEY,
+  thread_id VARCHAR(190) NOT NULL,
+  sender VARCHAR(500) NOT NULL DEFAULT '',
+  recipient VARCHAR(500) NOT NULL DEFAULT '',
+  subject VARCHAR(998) NOT NULL DEFAULT '',
+  snippet VARCHAR(1000) NOT NULL DEFAULT '',
+  body_text MEDIUMTEXT NOT NULL,
+  labels JSON NOT NULL,
+  unread BOOLEAN NOT NULL DEFAULT FALSE,
+  received_at DATETIME NULL,
+  synced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_google_email_received (received_at)
+);
+
+-- One row per outbound requisition form email. The token is included in the
+-- subject so a recipient reply can be linked back to the correct request.
+CREATE TABLE IF NOT EXISTS requisition_email_threads (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  token CHAR(32) NOT NULL,
+  recipient_email VARCHAR(190) NOT NULL,
+  recipient_phone VARCHAR(50) NULL,
+  message TEXT NULL,
+  created_by INT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  response_submitted_at DATETIME NULL,
+  CONSTRAINT uq_requisition_email_thread_token UNIQUE (token),
+  CONSTRAINT fk_requisition_email_thread_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_requisition_email_thread_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Comments received by email from people who were sent a requisition form.
+CREATE TABLE IF NOT EXISTS requisition_email_comments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  thread_id BIGINT UNSIGNED NULL,
+  gmail_message_id VARCHAR(190) NOT NULL,
+  sender VARCHAR(500) NOT NULL DEFAULT '',
+  recipient VARCHAR(500) NOT NULL DEFAULT '',
+  subject VARCHAR(998) NOT NULL DEFAULT '',
+  comment TEXT NOT NULL,
+  body_text MEDIUMTEXT NULL,
+  received_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT uq_requisition_email_comment_message UNIQUE (gmail_message_id),
+  CONSTRAINT fk_requisition_email_comment_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_requisition_email_comment_thread FOREIGN KEY (thread_id) REFERENCES requisition_email_threads(id) ON DELETE SET NULL,
+  INDEX idx_requisition_email_comment_req_date (requisition_id, received_at)
+);
+
+-- Departments form a two-level hierarchy: department -> subdepartment.
+-- Users belong to a subdepartment. Seed the four required departments first.
+INSERT IGNORE INTO departments (name, parent_id) VALUES
+  ('Administration', NULL), ('Education', NULL), ('Facilities', NULL), ('Finance', NULL);
+
+INSERT IGNORE INTO departments (name, parent_id)
+SELECT 'Administration Office', id FROM departments WHERE name = 'Administration';
+
+INSERT IGNORE INTO departments (name, parent_id)
+SELECT 'Procurement', id FROM departments WHERE name = 'Administration';
+
+INSERT IGNORE INTO departments (name, parent_id)
+SELECT 'Stores', id FROM departments WHERE name = 'Facilities';
+
+INSERT IGNORE INTO departments (name, parent_id)
+SELECT 'IT', id FROM departments WHERE name = 'Facilities';
 
 INSERT IGNORE INTO suppliers (id, name, contact_name, email, phone, rating) VALUES
   (1, 'Bright Office Supplies', 'Grace Niyonzima', 'sales@brightoffice.example', '+250 788 120 400', 4.8),

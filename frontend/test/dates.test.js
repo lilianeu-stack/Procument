@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   datePresets, formatDate, formatDateTime, isIsoDate,
-  toDateInputValue, validateBusinessDate, validateDateOrder, validateDateRange
+  toDateInputValue, toDateTimeInputValue, toUtcDateTimeInputValue,
+  validateBusinessDate, validateDateOrder, validateDateRange
 } from '../src/utils/dates.js';
 import { dateQueryForFilter, reportForPage } from '../src/utils/reportFields.js';
 
@@ -17,6 +18,15 @@ test('MySQL timestamps and invalid values are handled safely', () => {
   assert.equal(formatDate('2026-01-15 20:00:00'), '15/01/2026');
   assert.equal(formatDate('not-a-date'), '—');
   assert.equal(formatDateTime('', { withZone: false }), '—');
+});
+
+test('datetime-local values keep hours and minutes through a timezone round trip', () => {
+  const local = '2026-11-25T10:30';
+  const utc = toUtcDateTimeInputValue(local);
+  assert.equal(utc, '2026-11-25T08:30:00.000Z');
+  assert.equal(formatDateTime(utc, { withZone: false }), '25/11/2026 10:30');
+  assert.equal(toDateTimeInputValue(utc), local);
+  assert.equal(toUtcDateTimeInputValue(''), '');
 });
 
 test('date presets cover every required range and start weeks on Monday', () => {

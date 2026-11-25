@@ -15,11 +15,15 @@ import inventoryWorkflows from './inventory-workflows.js';
 import workflows from './workflows.js';
 import supplier from './supplier.js';
 import emails from './emails.js';
+import googleEmail, { googleEmailPublicRouter } from './google-email.js';
+import requestResponse from './request-response.js';
+import committeeReview from './committee-review.js';
 
 const router = Router();
 const procurementRoles = ['admin', 'procurement'];
 const approverRoles = ['admin', 'approver'];
 const storeRoles = ['admin', 'storekeeper'];
+const COMMITTEE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 router.post('/auth/login', async (req, res, next) => {
   try {
@@ -57,7 +61,10 @@ router.post('/auth/login', async (req, res, next) => {
 
 // Token-gated Supplier quotation links and provider delivery webhooks must be
 // reachable without a staff session. They are mounted before authenticate().
+router.use(googleEmailPublicRouter);
 router.use(supplier);
+router.use(requestResponse);
+router.use(committeeReview);
 
 router.use(authenticate);
 
@@ -394,6 +401,13 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
        FROM requisition_activity WHERE requisition_id = ? ORDER BY created_at ASC, id ASC`,
       [requisitionId]
     );
+    const [emailComments] = await connection.execute(
+      `SELECT id, sender, subject, comment,
+        received_at AS receivedAt, gmail_message_id AS gmailMessageId
+       FROM requisition_email_comments
+       WHERE requisition_id = ? ORDER BY received_at DESC, id DESC`,
+      [requisitionId]
+    );
     const subtotal = items.reduce((sum, item) => sum + Number(item.lineTotal || 0), 0);
     await connection.commit();
     return res.json({
@@ -405,6 +419,7 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
           ...entry,
           details: typeof entry.details === 'string' ? JSON.parse(entry.details) : (entry.details || {})
         })),
+        emailComments,
         financials: { subtotal, taxes: 0, otherCosts: 0, grandTotal: subtotal }
       }
     });
@@ -658,7 +673,178 @@ router.post('/suppliers', allowRoles(...procurementRoles), async (req, res, next
   }
 });
 
+router.patch('/suppliers/:id', allowRoles(...procurementRoles), async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: 'Invalid supplier identifier.' });
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ message: 'Supplier name is required.' });
+  const email = String(req.body.email || '').trim() || null;
+  const phone = String(req.body.phone || '').trim() || null;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [existing] = await connection.execute(
+      'SELECT id, name FROM suppliers WHERE id = ? LIMIT 1 FOR UPDATE', [id]
+    );
+    if (!existing.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Supplier not found.' });
+    }
+    await connection.execute(
+      'UPDATE suppliers SET name = ?, email = ?, phone = ? WHERE id = ?',
+      [name, email, phone, id]
+    );
+    await writeAudit(connection, req.user.id, 'updated', 'supplier', String(id), {
+      name: existing[0].name, updatedName: name
+    });
+    await connection.commit();
+    return res.json({ id, message: 'Supplier updated.' });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally { connection.release(); }
+});
+
+router.delete('/suppliers/:id', allowRoles(...procurementRoles), async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: 'Invalid supplier identifier.' });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [existing] = await connection.execute(
+      'SELECT id, name, status FROM suppliers WHERE id = ? LIMIT 1 FOR UPDATE', [id]
+    );
+    if (!existing.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Supplier not found.' });
+    }
+    await connection.execute("UPDATE suppliers SET status = 'Inactive' WHERE id = ?", [id]);
+    await writeAudit(connection, req.user.id, 'deleted', 'supplier', String(id), {
+      name: existing[0].name, softDeleted: true
+    }, { previousStatus: existing[0].status, newStatus: 'Inactive' });
+    await connection.commit();
+    return res.json({ deleted: true, softDeleted: true, message: 'Supplier removed from the directory.' });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally { connection.release(); }
+});
+
+function committeeMemberInput(body = {}) {
+  const member = {
+    firstName: String(body.firstName || '').trim(),
+    lastName: String(body.lastName || '').trim(),
+    email: String(body.email || '').trim().toLowerCase(),
+    phone: String(body.phone || '').trim()
+  };
+  if (!member.firstName || !member.lastName || !member.email || !member.phone) {
+    return { error: 'First name, last name, email, and phone number are required.' };
+  }
+  if (member.firstName.length > 100 || member.lastName.length > 100 ||
+    member.email.length > 190 || member.phone.length > 50) {
+    return { error: 'One or more fields exceed the maximum allowed length.' };
+  }
+  if (!COMMITTEE_EMAIL_PATTERN.test(member.email)) {
+    return { error: 'Enter a valid email address.' };
+  }
+  return { member };
+}
+
+router.get('/procurement-committee', allowRoles(...procurementRoles), async (_req, res, next) => {
+  try {
+    const [members] = await pool.query(
+      `SELECT id, first_name AS firstName, last_name AS lastName, email, phone,
+        created_at AS createdAt, updated_at AS updatedAt
+       FROM procurement_committee_members
+       ORDER BY last_name, first_name, id`
+    );
+    return res.json({ members });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/procurement-committee', allowRoles(...procurementRoles), async (req, res, next) => {
+  const { member, error: validationError } = committeeMemberInput(req.body);
+  if (validationError) return res.status(400).json({ message: validationError });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.execute(
+      `INSERT INTO procurement_committee_members (first_name, last_name, email, phone)
+       VALUES (?, ?, ?, ?)`,
+      [member.firstName, member.lastName, member.email, member.phone]
+    );
+    await writeAudit(connection, req.user.id, 'created', 'procurement_committee_member', String(result.insertId), member);
+    await connection.commit();
+    return res.status(201).json({ id: result.insertId, message: 'Committee member added.' });
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'A committee member with this email already exists.' });
+    return next(error);
+  } finally { connection.release(); }
+});
+
+router.patch('/procurement-committee/:id', allowRoles(...procurementRoles), async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: 'Invalid committee member identifier.' });
+  const { member, error: validationError } = committeeMemberInput(req.body);
+  if (validationError) return res.status(400).json({ message: validationError });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [existing] = await connection.execute(
+      'SELECT id, first_name AS firstName, last_name AS lastName, email, phone FROM procurement_committee_members WHERE id = ? LIMIT 1 FOR UPDATE',
+      [id]
+    );
+    if (!existing.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Committee member not found.' });
+    }
+    await connection.execute(
+      `UPDATE procurement_committee_members
+       SET first_name = ?, last_name = ?, email = ?, phone = ?
+       WHERE id = ?`,
+      [member.firstName, member.lastName, member.email, member.phone, id]
+    );
+    await writeAudit(connection, req.user.id, 'updated', 'procurement_committee_member', String(id), {
+      before: existing[0], after: member
+    });
+    await connection.commit();
+    return res.json({ id, message: 'Committee member updated.' });
+  } catch (error) {
+    await connection.rollback();
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'A committee member with this email already exists.' });
+    return next(error);
+  } finally { connection.release(); }
+});
+
+router.delete('/procurement-committee/:id', allowRoles(...procurementRoles), async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ message: 'Invalid committee member identifier.' });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [existing] = await connection.execute(
+      'SELECT id, first_name AS firstName, last_name AS lastName, email, phone FROM procurement_committee_members WHERE id = ? LIMIT 1 FOR UPDATE',
+      [id]
+    );
+    if (!existing.length) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Committee member not found.' });
+    }
+    await connection.execute('DELETE FROM procurement_committee_members WHERE id = ?', [id]);
+    await writeAudit(connection, req.user.id, 'deleted', 'procurement_committee_member', String(id), existing[0]);
+    await connection.commit();
+    return res.json({ deleted: true, message: 'Committee member deleted.' });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally { connection.release(); }
+});
+
 router.use(emails);
+router.use(googleEmail);
 router.use(workflows);
 router.use(inventoryWorkflows);
 router.use('/admin', admin);

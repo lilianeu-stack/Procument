@@ -97,6 +97,61 @@ async function departmentExists(connection, id) {
   return rows.length > 0;
 }
 
+// A department with a parent is a subdepartment. Users are only ever assigned
+// to subdepartments; top-level departments are containers for them.
+async function isSubdepartment(connection, id) {
+  if (!id) return false;
+  const [rows] = await connection.execute('SELECT parent_id FROM departments WHERE id = ? LIMIT 1', [id]);
+  return rows.length > 0 && rows[0].parent_id !== null && rows[0].parent_id !== undefined;
+}
+
+// The target itself plus its direct children (the hierarchy is two levels).
+async function departmentAndChildIds(connection, id) {
+  const [rows] = await connection.execute(
+    'SELECT id FROM departments WHERE id = ? OR parent_id = ?', [id, id]
+  );
+  return rows.map((row) => Number(row.id));
+}
+
+async function departmentDependencies(connection, departmentId) {
+  const [[usage]] = await connection.execute(
+    `SELECT
+      (SELECT COUNT(*) FROM users WHERE department_id = ?) AS users,
+      (SELECT COUNT(*) FROM requisitions WHERE department_id = ?) AS requisitions,
+      (SELECT COUNT(*) FROM store_requests WHERE department_id = ?) AS storeRequests,
+      (SELECT COUNT(*) FROM items WHERE department_id = ?) AS items,
+      (SELECT COUNT(*) FROM inventory_movements WHERE department_id = ?) AS inventoryMovements,
+      (SELECT COUNT(*) FROM messages WHERE department_id = ?) AS messages,
+      (SELECT COUNT(*) FROM departments WHERE parent_id = ?) AS children`,
+    [departmentId, departmentId, departmentId, departmentId, departmentId, departmentId, departmentId]
+  );
+  return {
+    users: Number(usage.users),
+    requisitions: Number(usage.requisitions),
+    storeRequests: Number(usage.storeRequests),
+    items: Number(usage.items),
+    inventoryMovements: Number(usage.inventoryMovements),
+    messages: Number(usage.messages),
+    children: Number(usage.children)
+  };
+}
+
+function departmentDependencyMessage(usage) {
+  const labels = {
+    children: 'subdepartment(s)',
+    users: 'user(s)',
+    requisitions: 'requisition(s)',
+    storeRequests: 'store request(s)',
+    items: 'inventory item(s)',
+    inventoryMovements: 'stock movement(s)',
+    messages: 'message(s)'
+  };
+  const linked = Object.entries(labels)
+    .filter(([key]) => Number(usage[key]) > 0)
+    .map(([key, label]) => `${Number(usage[key])} ${label}`);
+  return `This department is referenced by ${linked.join(', ')}. Reassign all of them to another department before deleting; none of them will be deleted.`;
+}
+
 async function activeAdminCount(connection) {
   const [[result]] = await connection.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = TRUE");
   return Number(result.total);
@@ -114,7 +169,7 @@ function wantsReplacement(value) {
 function departmentAssignmentError(role, departmentId, active = true) {
   if (active && DEPARTMENT_ASSIGNED_ROLES.includes(role) && !departmentId) {
     const label = role === 'supervisor' ? 'A Supervisor' : role === 'requestor' ? 'A Requester' : 'A Stock Keeper';
-    return `${label} must be assigned to a Department.`;
+    return `${label} must be assigned to a Subdepartment.`;
   }
   return null;
 }
@@ -200,12 +255,16 @@ router.get('/audit-logs', async (req, res, next) => {
 router.get('/departments', async (_req, res, next) => {
   try {
     const [departments] = await pool.query(
-      `SELECT d.id, d.name, d.description, d.created_at AS createdAt,
+      `SELECT d.id, d.name, d.description, d.parent_id AS parentId, d.created_at AS createdAt,
         COUNT(u.id) AS userCount,
+        COALESCE(SUM(u.active = TRUE), 0) AS activeUserCount,
         (SELECT COUNT(*) FROM requisitions r WHERE r.department_id = d.id) AS requisitionCount,
-        (SELECT COUNT(*) FROM store_requests s WHERE s.department_id = d.id) AS storeRequestCount
+        (SELECT COUNT(*) FROM store_requests s WHERE s.department_id = d.id) AS storeRequestCount,
+        (SELECT COUNT(*) FROM items i WHERE i.department_id = d.id) AS itemCount,
+        (SELECT COUNT(*) FROM inventory_movements m WHERE m.department_id = d.id) AS stockMovementCount,
+        (SELECT COUNT(*) FROM messages msg WHERE msg.department_id = d.id) AS messageCount
        FROM departments d LEFT JOIN users u ON u.department_id = d.id
-       GROUP BY d.id ORDER BY d.name`
+       GROUP BY d.id, d.parent_id ORDER BY d.name`
     );
     return res.json({ departments });
   } catch (error) { return next(error); }
@@ -216,33 +275,60 @@ router.get('/departments/:id/users', async (req, res, next) => {
   if (!id) return badRequest(res, 'Invalid department identifier.');
   try {
     const [[department]] = await pool.execute(
-      `SELECT d.id, d.name, d.description,
-        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) AS userCount
+      `SELECT d.id, d.name, d.description, d.parent_id AS parentId,
+        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) AS userCount,
+        (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id AND u.active = TRUE) AS activeUserCount
        FROM departments d WHERE d.id = ? LIMIT 1`,
       [id]
     );
     if (!department) return res.status(404).json({ message: 'Department not found.' });
+    // Selecting a top-level department shows everyone in its subdepartments.
+    const ids = await departmentAndChildIds(pool, id);
+    const placeholders = ids.map(() => '?').join(',');
     const [users] = await pool.execute(
       `SELECT u.id, u.name, u.email, u.phone, u.role, u.active, u.created_at AS createdAt,
-        u.department_id AS departmentId, d.name AS department
+        u.department_id AS departmentId, d.name AS department,
+        p.name AS parentDepartment
        FROM users u JOIN departments d ON d.id = u.department_id
-       WHERE u.department_id = ? ORDER BY u.name, u.id`,
-      [id]
+       LEFT JOIN departments p ON p.id = d.parent_id
+       WHERE u.department_id IN (${placeholders}) ORDER BY d.name, u.name, u.id`,
+      ids
     );
-    return res.json({ department: { ...department, userCount: Number(department.userCount) }, users: users.map(mapUser) });
+    return res.json({
+      department: {
+        ...department,
+        userCount: Number(department.userCount),
+        activeUserCount: Number(department.activeUserCount)
+      },
+      users: users.map(mapUser)
+    });
   } catch (error) { return next(error); }
 });
 
 router.post('/departments', async (req, res, next) => {
   const name = text(req.body.name, 100);
   const description = text(req.body.description, 255) || null;
+  const parentId = req.body.parentId === undefined || req.body.parentId === null || req.body.parentId === ''
+    ? null : parseId(req.body.parentId);
   if (!name) return badRequest(res, 'Department name is required.');
+  if (parentId === null && req.body.parentId !== undefined && req.body.parentId !== null && req.body.parentId !== '') {
+    return badRequest(res, 'Invalid parent department.');
+  }
   try {
     const [existing] = await pool.execute('SELECT id FROM departments WHERE name = ? LIMIT 1', [name]);
     if (existing.length) return badRequest(res, 'A department with that name already exists.');
-    const [result] = await pool.execute('INSERT INTO departments (name, description) VALUES (?, ?)', [name, description]);
-    await writeAudit(pool, req.user.id, 'department_created', 'department', String(result.insertId), { name });
-    return res.status(201).json({ id: result.insertId, name, description });
+    if (parentId !== null) {
+      if (!(await departmentExists(pool, parentId))) return badRequest(res, 'The parent department does not exist.');
+      if (await isSubdepartment(pool, parentId)) {
+        return badRequest(res, 'Subdepartments can only be created inside a top-level department.');
+      }
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO departments (name, description, parent_id) VALUES (?, ?, ?)', [name, description, parentId]
+    );
+    await writeAudit(pool, req.user.id, parentId ? 'subdepartment_created' : 'department_created',
+      'department', String(result.insertId), { name, parentId });
+    return res.status(201).json({ id: result.insertId, name, description, parentId });
   } catch (error) { return next(error); }
 });
 
@@ -250,29 +336,59 @@ router.patch('/departments/:id', async (req, res, next) => {
   const id = parseId(req.params.id);
   const name = req.body.name === undefined ? undefined : text(req.body.name, 100);
   const description = req.body.description === undefined ? undefined : (text(req.body.description, 255) || null);
+  const parentSupplied = req.body.parentId !== undefined;
+  const parentId = !parentSupplied ? undefined
+    : (req.body.parentId === null || req.body.parentId === '' ? null : parseId(req.body.parentId));
   if (!id) return badRequest(res, 'Invalid department identifier.');
-  if (name === undefined && description === undefined) return badRequest(res, 'No department changes were supplied.');
+  if (name === undefined && description === undefined && !parentSupplied) return badRequest(res, 'No department changes were supplied.');
   if (name === '') return badRequest(res, 'Department name is required.');
+  if (parentSupplied && parentId === null && req.body.parentId !== null && req.body.parentId !== '') {
+    return badRequest(res, 'Invalid parent department.');
+  }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [existing] = await connection.execute('SELECT id, name, description FROM departments WHERE id = ? LIMIT 1 FOR UPDATE', [id]);
+    const [existing] = await connection.execute(
+      'SELECT id, name, description, parent_id AS parentId FROM departments WHERE id = ? LIMIT 1 FOR UPDATE', [id]
+    );
     if (!existing.length) {
       await connection.rollback();
       return res.status(404).json({ message: 'Department not found.' });
     }
-    const nextName = name === undefined ? existing[0].name : name;
+    const current = existing[0];
+    const nextParentId = parentSupplied ? parentId : current.parentId;
+    if (parentSupplied && nextParentId !== current.parentId) {
+      if (nextParentId === id) {
+        await connection.rollback();
+        return badRequest(res, 'A department cannot be its own parent.');
+      }
+      if (nextParentId === null) {
+        await connection.rollback();
+        return badRequest(res, 'A subdepartment cannot be converted into a top-level department here.');
+      }
+      if (!(await departmentExists(connection, nextParentId)) || await isSubdepartment(connection, nextParentId)) {
+        await connection.rollback();
+        return badRequest(res, 'Choose a top-level department as the parent.');
+      }
+      if (current.parentId === null) {
+        await connection.rollback();
+        return badRequest(res, 'A top-level department cannot become a subdepartment. Create a new subdepartment instead.');
+      }
+    }
+    const nextName = name === undefined ? current.name : name;
     const [duplicate] = await connection.execute('SELECT id FROM departments WHERE name = ? AND id <> ? LIMIT 1', [nextName, id]);
     if (duplicate.length) {
       await connection.rollback();
       return badRequest(res, 'A department with that name already exists.');
     }
-    await connection.execute('UPDATE departments SET name = ?, description = ? WHERE id = ?', [
-      nextName, description === undefined ? existing[0].description : description, id
+    await connection.execute('UPDATE departments SET name = ?, description = ?, parent_id = ? WHERE id = ?', [
+      nextName, description === undefined ? current.description : description, nextParentId, id
     ]);
-    await writeAudit(connection, req.user.id, 'department_updated', 'department', String(id), { from: existing[0].name, to: nextName });
+    await writeAudit(connection, req.user.id, 'department_updated', 'department', String(id), {
+      from: current.name, to: nextName, parentId: nextParentId
+    });
     await connection.commit();
-    return res.json({ id, name: nextName });
+    return res.json({ id, name: nextName, parentId: nextParentId });
   } catch (error) {
     await connection.rollback();
     return next(error);
@@ -292,33 +408,45 @@ router.delete('/departments/:id', async (req, res, next) => {
       await connection.rollback();
       return res.status(404).json({ message: 'Department not found.' });
     }
-    const [[usage]] = await connection.execute(
-      `SELECT
-        (SELECT COUNT(*) FROM users WHERE department_id = ?) AS users,
-        (SELECT COUNT(*) FROM requisitions WHERE department_id = ?) AS requisitions,
-        (SELECT COUNT(*) FROM store_requests WHERE department_id = ?) AS storeRequests`,
-      [id, id, id]
-    );
-    const assigned = Number(usage.users) + Number(usage.requisitions) + Number(usage.storeRequests);
+    const usage = await departmentDependencies(connection, id);
+    if (usage.children > 0) {
+      await connection.rollback();
+      return badRequest(res, 'This department still has subdepartments. Move or delete its subdepartments before deleting the department.');
+    }
+    const assigned = Object.entries(usage)
+      .filter(([key]) => key !== 'children')
+      .reduce((total, [, count]) => total + count, 0);
     if (assigned > 0) {
       if (!reassignTo || reassignTo === id) {
         await connection.rollback();
-        return badRequest(res, `This department has ${usage.users} user(s), ${usage.requisitions} requisition(s) and ${usage.storeRequests} store request(s). Reassign them to another department before deleting.`);
+        return badRequest(res, departmentDependencyMessage(usage));
       }
       if (!(await departmentExists(connection, reassignTo))) {
         await connection.rollback();
         return badRequest(res, 'The reassignment department does not exist.');
       }
-      await connection.execute('UPDATE users SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
-      await connection.execute('UPDATE requisitions SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
-      await connection.execute('UPDATE store_requests SET department_id = ? WHERE department_id = ?', [reassignTo, id]);
+      // Reassigning an active Supervisor into a Department that already has one
+      // would break the one-active-Supervisor rule, so block with an actionable reason.
+      const [[supervisors]] = await connection.execute(
+        `SELECT
+          (SELECT COUNT(*) FROM users WHERE department_id = ? AND role = 'supervisor' AND active = TRUE) AS sourceActive,
+          (SELECT COUNT(*) FROM users WHERE department_id = ? AND role = 'supervisor' AND active = TRUE) AS destinationActive`,
+        [id, reassignTo]
+      );
+      if (Number(supervisors.sourceActive) > 0 && Number(supervisors.destinationActive) > 0) {
+        await connection.rollback();
+        return badRequest(res, 'The destination department already has an active Supervisor. Reassign or deactivate that Supervisor before deleting this department.');
+      }
+      for (const table of ['users', 'requisitions', 'store_requests', 'items', 'inventory_movements', 'messages']) {
+        await connection.execute(`UPDATE ${table} SET department_id = ? WHERE department_id = ?`, [reassignTo, id]);
+      }
     }
     await connection.execute('DELETE FROM departments WHERE id = ?', [id]);
     await writeAudit(connection, req.user.id, 'department_deleted', 'department', String(id), {
-      name: existing[0].name, reassignedTo: assigned ? reassignTo : null
+      name: existing[0].name, reassignedTo: assigned ? reassignTo : null, dependencies: usage
     });
     await connection.commit();
-    return res.json({ deleted: true, reassigned: assigned > 0 ? reassignTo : null });
+    return res.json({ deleted: true, reassigned: assigned > 0 ? reassignTo : null, dependencies: usage });
   } catch (error) {
     await connection.rollback();
     return next(error);
@@ -353,6 +481,10 @@ router.post('/users', async (req, res, next) => {
     if (!(await departmentExists(connection, departmentId))) {
       await connection.rollback();
       return badRequest(res, 'The selected department does not exist.');
+    }
+    if (departmentId !== null && !(await isSubdepartment(connection, departmentId))) {
+      await connection.rollback();
+      return badRequest(res, 'Users must be added inside a subdepartment, not a top-level department.');
     }
     let replacedSupervisor = false;
     if (role === 'supervisor') {
@@ -421,6 +553,10 @@ router.patch('/users/:id', async (req, res, next) => {
     if (!(await departmentExists(connection, nextDepartmentId))) {
       await connection.rollback();
       return badRequest(res, 'The selected department does not exist.');
+    }
+    if (nextDepartmentId !== null && !(await isSubdepartment(connection, nextDepartmentId))) {
+      await connection.rollback();
+      return badRequest(res, 'Users must be added inside a subdepartment, not a top-level department.');
     }
     const assignmentError = departmentAssignmentError(nextRole, nextDepartmentId, Boolean(current.active));
     if (assignmentError) {
@@ -506,7 +642,6 @@ router.patch('/users/:id/status', async (req, res, next) => {
 router.delete('/users/:id', async (req, res, next) => {
   const id = parseId(req.params.id);
   if (!id) return badRequest(res, 'Invalid user identifier.');
-  if (Number(req.user.id) === id) return badRequest(res, 'You cannot delete your own account.');
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -518,6 +653,10 @@ router.delete('/users/:id', async (req, res, next) => {
     if (existing[0].role === 'admin' && existing[0].active && await activeAdminCount(connection) <= 1) {
       await connection.rollback();
       return badRequest(res, 'The last active administrator cannot be deleted.');
+    }
+    if (Number(req.user.id) === id) {
+      await connection.rollback();
+      return badRequest(res, 'You cannot delete your own account.');
     }
     // Soft deletion preserves all historical purchase, approval, and audit references.
     await connection.execute('UPDATE users SET active = FALSE WHERE id = ?', [id]);
@@ -581,7 +720,11 @@ router.get('/users/:id/activity', async (req, res, next) => {
 });
 
 async function validateBulkUsers(rows, connection) {
-  const [departments] = await connection.execute('SELECT id, name FROM departments ORDER BY name');
+  const [departments] = await connection.execute(
+    `SELECT d.id, d.name, p.name AS parentName FROM departments d
+      LEFT JOIN departments p ON p.id = d.parent_id
+      WHERE d.parent_id IS NOT NULL ORDER BY p.name, d.name`
+  );
   const [supervisors] = await connection.execute(
     `SELECT id, name, department_id AS departmentId FROM users
       WHERE role = 'supervisor' AND active = TRUE ORDER BY id`
@@ -597,20 +740,22 @@ async function validateBulkUsers(rows, connection) {
     const name = [firstName, lastName].filter(Boolean).join(' ') || text(source.name, 150);
     const email = text(source.email ?? source.Email, 190).toLowerCase();
     const role = text(source.role ?? source.Role, 40).toLowerCase();
-    const departmentName = text(source.department ?? source.Department, 100);
+    const departmentName = text(
+      source.subdepartment ?? source.Subdepartment ?? source.department ?? source.Department, 100
+    );
     const phone = text(source.phone ?? source['Phone Number'] ?? source['phone number'] ?? source.phoneNumber, 50);
     const department = departments.find((item) => item.name.toLowerCase() === departmentName.toLowerCase());
     const errors = [];
     if (!name) errors.push('Missing name');
     if (!EMAIL_PATTERN.test(email)) errors.push('Invalid email');
     if (!ROLES.includes(role)) errors.push('Invalid role');
-    if (!department) errors.push('Invalid department');
+    if (!department) errors.push('Invalid subdepartment');
     if (DEPARTMENT_ASSIGNED_ROLES.includes(role) && !department) {
-      errors.push('A Supervisor or Requester must have a Department');
+      errors.push('A Supervisor, Requester or Stock Keeper must have a Subdepartment');
     }
     if (role === 'supervisor' && department) {
       const existing = supervisors.find((item) => Number(item.departmentId) === department.id);
-      if (existing) errors.push(`Department already has an active Supervisor (${existing.name})`);
+      if (existing) errors.push(`Subdepartment already has an active Supervisor (${existing.name})`);
     }
     return {
       row: index + 1, name, email, role, phone,
@@ -642,7 +787,7 @@ async function validateBulkUsers(rows, connection) {
     if (!result.valid || result.role !== 'supervisor' || !result.departmentId) continue;
     if (seenSupervisorDepartments.has(result.departmentId)) {
       result.valid = false;
-      result.errors.push('Multiple Supervisors for the same Department in this file');
+      result.errors.push('Multiple Supervisors for the same Subdepartment in this file');
     } else {
       seenSupervisorDepartments.add(result.departmentId);
     }

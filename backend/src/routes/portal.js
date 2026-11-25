@@ -315,8 +315,8 @@ async function submitRequisition(connection, requisition, req, response = '', at
   }
   const [items] = await connection.execute('SELECT id FROM requisition_items WHERE requisition_id = ? LIMIT 1', [requisition.id]);
   if (!items.length) throw httpError(400, 'Add at least one item before submitting.');
-  if (!text(requisition.title) || !text(requisition.justification) || !text(requisition.budgetCode)) {
-    throw httpError(400, 'Complete the title, justification, and budget code before submitting.');
+  if (!text(requisition.title) || !text(requisition.justification)) {
+    throw httpError(400, 'Complete the title and description or purpose before submitting.');
   }
 
   await connection.execute(
@@ -448,6 +448,21 @@ router.get('/supervisor/requesters', allowRoles('supervisor'), async (req, res, 
   } catch (error) { return next(error); }
 });
 
+router.get('/supervisor/department-users', allowRoles('supervisor'), async (req, res, next) => {
+  try {
+    const department = await assignedDepartment(req, res);
+    if (!department) return;
+    const [users] = await pool.execute(
+      `SELECT u.id, u.name, u.email, u.phone, u.role, u.active, u.created_at AS createdAt,
+        (SELECT COUNT(*) FROM requisitions r WHERE r.requester_id = u.id) AS requestCount
+       FROM users u WHERE u.department_id = ? AND u.active = TRUE
+       ORDER BY FIELD(u.role, 'supervisor', 'requestor', 'storekeeper', 'approver', 'procurement', 'finance', 'committee', 'admin'), u.name, u.id`,
+      [department.id]
+    );
+    return res.json({ department, users });
+  } catch (error) { return next(error); }
+});
+
 router.get('/department', allowRoles('supervisor', 'requestor'), async (req, res, next) => {
   try {
     const department = await assignedDepartment(req, res);
@@ -549,8 +564,8 @@ router.post('/requester/requisitions', allowRoles('requestor'), async (req, res,
     const budgetCode = text(req.body.budgetCode, 60);
     const requiredBy = /^\d{4}-\d{2}-\d{2}$/.test(req.body.requiredBy || '') ? req.body.requiredBy : null;
     const priority = ['Low', 'Medium', 'High', 'Urgent'].includes(req.body.priority) ? req.body.priority : 'Medium';
-    if (action === 'submit' && (!title || !justification || !budgetCode)) {
-      return res.status(400).json({ message: 'Complete the title, justification, and budget code before submitting.' });
+    if (action === 'submit' && (!title || !justification)) {
+      return res.status(400).json({ message: 'Complete the title and description or purpose before submitting.' });
     }
     return await transaction(async (connection) => {
       const reqReference = await reference();

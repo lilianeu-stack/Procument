@@ -14,9 +14,9 @@ async function invitedRfq(token) {
   const identity = parseRfqToken(token);
   if (!identity) return { error: 404, message: 'This quotation link is invalid or has expired.' };
   const [rows] = await pool.execute(
-    `SELECT f.id, f.reference, f.due_date AS dueDate, f.status,
+    `SELECT f.id, f.reference, f.due_date AS dueDate, f.status, f.message,
        r.id AS requisitionId, r.reference AS requisitionReference, r.title,
-       r.justification, r.priority, r.required_by AS requiredBy,
+       r.priority, r.required_by AS requiredBy,
        s.id AS supplierId, s.name AS supplierName, s.contact_name AS contactName
      FROM rfqs f
      JOIN rfq_suppliers fs ON fs.rfq_id = f.id AND fs.supplier_id = ?
@@ -41,17 +41,31 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
     await markRfqLinkOpened(rfq.id, identity.supplierId);
 
     const [items] = await pool.execute(
-      `SELECT item_name AS itemName, description, quantity, unit,
+      `SELECT id AS requisitionItemId, item_name AS itemName, description, quantity, unit,
          estimated_unit_cost AS estimatedUnitCost,
          (quantity * estimated_unit_cost) AS lineTotal
        FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
       [rfq.requisitionId]
     );
     const [quotation] = await pool.execute(
-      `SELECT amount, delivery_days AS deliveryDays, notes, submitted_at AS submittedAt
+      `SELECT id, amount, delivery_days AS deliveryDays, notes, submitted_at AS submittedAt
        FROM quotations WHERE rfq_id = ? AND supplier_id = ?`,
       [rfq.id, identity.supplierId]
     );
+    let quotationItems = [];
+    if (quotation[0]) {
+      const [rows] = await pool.execute(
+        `SELECT requisition_item_id AS requisitionItemId, item_name AS itemName, description,
+           quantity, unit, unit_price AS unitPrice, line_total AS lineTotal, comment
+         FROM quotation_items WHERE quotation_id = ? ORDER BY id`,
+        [quotation[0].id]
+      );
+      quotationItems = rows.map((item) => ({
+        ...item,
+        unitPrice: Number(item.unitPrice) || 0,
+        lineTotal: Number(item.lineTotal) || 0
+      }));
+    }
     return res.json({
       rfq: {
         reference: rfq.reference,
@@ -59,9 +73,9 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
         status: rfq.status,
         requisitionReference: rfq.requisitionReference,
         title: rfq.title,
-        justification: rfq.justification,
         priority: rfq.priority,
         requiredBy: rfq.requiredBy,
+        message: rfq.message || '',
         supplier: { name: rfq.supplierName, contactName: rfq.contactName },
         items: items.map((item) => ({
           ...item,
@@ -69,46 +83,138 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
           lineTotal: Number(item.lineTotal) || 0
         })),
         total: items.reduce((sum, item) => sum + (Number(item.lineTotal) || 0), 0),
-        quotation: quotation[0] || null
+        quotation: quotation[0] ? { ...quotation[0], items: quotationItems } : null
       }
     });
   } catch (error) { return next(error); }
 });
 
+function roundMoney(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
 router.post('/supplier/rfq/:token/quotation', async (req, res, next) => {
+  const connection = await pool.getConnection();
   try {
     const result = await invitedRfq(req.params.token);
     if (result.error) return res.status(result.error).json({ message: result.message });
     const { rfq, identity } = result;
-    const amount = Number(req.body.amount);
-    const deliveryDays = Number(req.body.deliveryDays);
+    const rawDeliveryDays = req.body.deliveryDays;
+    const deliveryDays = rawDeliveryDays === undefined || rawDeliveryDays === null || rawDeliveryDays === ''
+      ? 0
+      : Number(rawDeliveryDays);
     const notes = String(req.body.notes || '').trim().slice(0, 2000);
-    if (!Number.isFinite(amount) || amount <= 0 || !Number.isInteger(deliveryDays) || deliveryDays < 1) {
-      return res.status(400).json({ message: 'Enter a positive quotation amount and a delivery time of at least one day.' });
+    if (!Number.isInteger(deliveryDays) || deliveryDays < 0) {
+      return res.status(400).json({ message: 'Enter a valid delivery time.' });
     }
 
-    await pool.execute(
-      `INSERT INTO quotations
-         (rfq_id, supplier_id, amount, delivery_days, notes, submitted_at)
-       VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())
-       ON DUPLICATE KEY UPDATE
-         amount = VALUES(amount), delivery_days = VALUES(delivery_days),
-         notes = VALUES(notes), submitted_at = UTC_TIMESTAMP(), updated_at = UTC_TIMESTAMP()`,
-      [rfq.id, identity.supplierId, amount, deliveryDays, notes || null]
+    const [requestItems] = await connection.execute(
+      `SELECT id, item_name AS itemName, description, quantity, unit
+       FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+      [rfq.requisitionId]
     );
-    await pool.execute("UPDATE rfqs SET status = 'Evaluating' WHERE id = ?", [rfq.id]);
-    await markRfqLinkOpened(rfq.id, identity.supplierId);
+    const itemMap = new Map(requestItems.map((item) => [Number(item.id), item]));
+    const rawItems = Array.isArray(req.body.items) ? req.body.items : [];
+    let pricedItems = [];
+    let amount;
+
+    if (rawItems.length) {
+      const seen = new Set();
+      for (const entry of rawItems) {
+        const requisitionItemId = Number(entry?.requisitionItemId);
+        const unitPrice = Number(entry?.unitPrice);
+        const source = itemMap.get(requisitionItemId);
+        if (!source || !Number.isFinite(unitPrice) || unitPrice <= 0 || seen.has(requisitionItemId)) {
+          return res.status(400).json({ message: 'Enter a valid unit price for each requested item.' });
+        }
+        seen.add(requisitionItemId);
+        const quantity = Number(source.quantity) || 0;
+        if (quantity <= 0) {
+          return res.status(400).json({ message: 'Every requested item needs a positive quantity.' });
+        }
+        pricedItems.push({
+          requisitionItemId,
+          itemName: source.itemName,
+          description: source.description || '',
+          quantity,
+          unit: source.unit || 'unit',
+          unitPrice: roundMoney(unitPrice),
+          lineTotal: roundMoney(quantity * unitPrice),
+          comment: String(entry?.comment || '').trim().slice(0, 1000) || null
+        });
+      }
+      if (pricedItems.length !== requestItems.length) {
+        return res.status(400).json({ message: 'Enter a unit price for every requested item.' });
+      }
+      amount = roundMoney(pricedItems.reduce((sum, item) => sum + item.lineTotal, 0));
+    } else {
+      amount = Number(req.body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: 'Enter the prices for each requested item.' });
+      }
+      amount = roundMoney(amount);
+    }
+
+    await connection.beginTransaction();
+    const [[existing]] = await connection.execute(
+      'SELECT id FROM quotations WHERE rfq_id = ? AND supplier_id = ? FOR UPDATE',
+      [rfq.id, identity.supplierId]
+    );
+    if (existing) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'A response has already been submitted for this RFQ.' });
+    }
+    try {
+      await connection.execute(
+        `INSERT INTO quotations
+           (rfq_id, supplier_id, amount, delivery_days, notes, submitted_at)
+         VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+        [rfq.id, identity.supplierId, amount, deliveryDays, notes || null]
+      );
+    } catch (error) {
+      if (error.code === 'ER_DUP_ENTRY') {
+        await connection.rollback();
+        return res.status(409).json({ message: 'A response has already been submitted for this RFQ.' });
+      }
+      throw error;
+    }
+    const [[saved]] = await connection.execute(
+      'SELECT id FROM quotations WHERE rfq_id = ? AND supplier_id = ?',
+      [rfq.id, identity.supplierId]
+    );
+    await connection.execute('DELETE FROM quotation_items WHERE quotation_id = ?', [saved.id]);
+    for (const item of pricedItems) {
+      await connection.execute(
+        `INSERT INTO quotation_items
+           (quotation_id, requisition_item_id, item_name, description, quantity, unit, unit_price, line_total, comment)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [saved.id, item.requisitionItemId, item.itemName, item.description || null, item.quantity,
+          item.unit, item.unitPrice, item.lineTotal, item.comment]
+      );
+    }
+    await connection.execute("UPDATE rfqs SET status = 'Evaluating' WHERE id = ?", [rfq.id]);
+
+    const firstComment = notes || pricedItems.find((item) => item.comment)?.comment || '';
+    const commentPart = firstComment ? ` Comment: ${firstComment.slice(0, 140)}` : '';
+    const itemPart = pricedItems.length ? ` ${pricedItems.length} item(s) were priced individually.` : '';
     await writeAudit(
-      pool, null, 'submitted', 'quotation', rfq.id,
-      { rfqReference: rfq.reference, supplierId: identity.supplierId, supplierName: rfq.supplierName, amount, deliveryDays }
+      connection, null, 'submitted', 'quotation', rfq.id,
+      { rfqReference: rfq.reference, supplierId: identity.supplierId, supplierName: rfq.supplierName, amount, deliveryDays, itemCount: pricedItems.length, comment: firstComment.slice(0, 300) || null }
     );
     await createNotification(
-      pool, null, 'Supplier quotation received',
-      `${rfq.supplierName} submitted a quotation for ${rfq.reference}.`,
+      connection, null, 'Supplier quotation received',
+      `${rfq.supplierName} replied to ${rfq.reference} with a quote of RWF ${amount.toFixed(2)}.${itemPart}${commentPart}`,
       `#/admin/RFQs?rfq=${rfq.id}`
     );
-    return res.status(200).json({ message: 'Quotation submitted successfully.', reference: rfq.reference });
-  } catch (error) { return next(error); }
+    await connection.commit();
+    await markRfqLinkOpened(rfq.id, identity.supplierId);
+    return res.status(200).json({ message: 'Quotation submitted successfully.', reference: rfq.reference, amount });
+  } catch (error) {
+    try { await connection.rollback(); } catch { /* ignore rollback errors */ }
+    return next(error);
+  } finally {
+    connection.release();
+  }
 });
 
 // Optional provider-agnostic delivery webhook. Delivered/Bounced/Opened are

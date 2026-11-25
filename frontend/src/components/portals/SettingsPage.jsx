@@ -58,7 +58,7 @@ const DESCRIPTIONS = {
   password_min_length: 'Minimum length for newly created or reset passwords.',
   session_timeout_minutes: 'Informational session policy; authentication middleware applies the existing JWT lifetime.',
   maintenance_mode: 'Reserved control. It is persisted and audited but does not bypass authentication or existing routes.',
-  email_notifications: 'Enabled only after email integration is configured and verified.'
+  email_notifications: 'Controls email notifications when SMTP is configured through the backend environment.'
 };
 
 function Field({ name, value, onChange }) {
@@ -73,7 +73,7 @@ function Field({ name, value, onChange }) {
     date_format: [['DD/MM/YYYY','DD/MM/YYYY'],['MM/DD/YYYY','MM/DD/YYYY'],['YYYY-MM-DD','YYYY-MM-DD']],
     time_format: [['12','12-hour'],['24','24-hour']],
     week_start: [['Monday','Monday'],['Sunday','Sunday']],
-    default_currency: [['USD','US Dollar (USD)'],['EUR','Euro (EUR)'],['GBP','British Pound (GBP)'],['RWF','Rwandan Franc (RWF)']],
+    default_currency: [['RWF','Rwandan Franc (RWF)']],
     document_page_size: [['A4','A4'],['Letter','US Letter']],
     default_export_format: [['xlsx','Excel (.xlsx)'],['csv','CSV (.csv)'],['pdf','PDF (.pdf)']],
   };
@@ -141,7 +141,7 @@ export default function SettingsPage({ actions }) {
       await actions.saveSettings(changes);
       const next = { ...saved, ...changes };
       setSaved(next); setNotice('Settings saved successfully.');
-      localStorage.setItem('pims-currency', next.default_currency);
+      localStorage.setItem('pims-currency', 'RWF');
       localStorage.setItem('pims-currency-precision', String(next.decimal_precision));
       localStorage.setItem('pims-date-format', next.date_format);
       localStorage.setItem('pims-time-format', next.time_format);

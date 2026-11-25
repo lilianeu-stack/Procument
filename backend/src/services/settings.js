@@ -16,8 +16,8 @@ export const SETTINGS_DEFAULTS = {
   time_format: '24',
   timezone: 'UTC',
   week_start: 'Monday',
-  default_currency: 'USD',
-  currency_symbol: '$',
+  default_currency: 'RWF',
+  currency_symbol: 'RWF',
   decimal_precision: 2,
   tax_rate: 0,
   payment_terms_days: 30,
@@ -70,7 +70,7 @@ const ENUMS = {
   date_format: ['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD'],
   time_format: ['12', '24'],
   week_start: ['Monday', 'Sunday'],
-  default_currency: ['USD', 'EUR', 'GBP', 'RWF'],
+  default_currency: ['RWF'],
   document_page_size: ['A4', 'Letter'],
   default_export_format: ['xlsx', 'csv', 'pdf']
 };
@@ -157,6 +157,8 @@ export async function getSettings() {
   for (const row of rows) {
     stored[row.setting_key] = decodeSettingValue(row.setting_value, row.setting_key);
   }
+  if (stored.default_currency !== 'RWF') stored.default_currency = 'RWF';
+  if (stored.currency_symbol !== 'RWF') stored.currency_symbol = 'RWF';
   cache = { ...SETTINGS_DEFAULTS, ...stored };
   cacheTime = Date.now();
   return { ...cache };

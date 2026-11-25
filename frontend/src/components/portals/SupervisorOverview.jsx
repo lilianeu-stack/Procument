@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ArrowRight, Boxes, Building2, ClipboardCheck, ClipboardList,
-  Mail, MessageSquare, PackageSearch, UsersRound
+  MessageSquare, PackageSearch, UsersRound
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
@@ -10,26 +10,29 @@ import {
   TableScroll, TextLink, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
 
 function useDepartmentExtras(portalApi, includeRequests = true) {
-  const [state, setState] = useState({ requests: [], stock: [], requesters: [], loading: true, error: '' });
+  const [state, setState] = useState({ requests: [], stock: [], requesters: [], departmentUsers: [], loading: true, error: '' });
   useEffect(() => {
     let active = true;
     Promise.all([
       includeRequests ? portalApi.getSupervisorRequests({ page: 1, limit: 6, status: '' }) : Promise.resolve({ requisitions: [] }),
       portalApi.getStock({}),
-      portalApi.getRequesters()
-    ]).then(([requests, stock, requesters]) => {
+      portalApi.getRequesters(),
+      includeRequests ? Promise.resolve({ users: [] }) : portalApi.getDepartmentUsers()
+    ]).then(([requests, stock, requesters, departmentUsers]) => {
       if (!active) return;
       setState({
         requests: requests.requisitions || [],
         stock: stock.items || [],
         requesters: requesters.requesters || [],
+        departmentUsers: departmentUsers.users || [],
         loading: false, error: ''
       });
     }).catch((exception) => {
       if (!active) return;
-      setState({ requests: [], stock: [], requesters: [], loading: false, error: exception.message || 'Department data could not be loaded.' });
+      setState({ requests: [], stock: [], requesters: [], departmentUsers: [], loading: false, error: exception.message || 'Department data could not be loaded.' });
     });
     return () => { active = false; };
   }, [portalApi, includeRequests]);
@@ -52,43 +55,37 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
     <PageHeader
       eyebrow="Department"
       title="My Department"
-      description="Details of your assigned Department and the Requesters who work in it."
-      actions={<button type="button" onClick={() => navigate('Requesters')} className={secondaryButtonClass()}>
-        <UsersRound size={14} />View all Requesters
-      </button>}
+      description={`All users assigned to ${department.name || 'your Department'}.`}
+      actions={<span className="text-xs font-semibold text-muted">{extras.departmentUsers.length} user{extras.departmentUsers.length === 1 ? '' : 's'}</span>}
     />
-    <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
-      <PageCard title="Department details">
-        <dl className="space-y-4 p-5 text-xs">
-          {[
-            ['Name', department.name], ['ID', department.id ?? '—'],
-            ['Description', department.description || 'No description supplied.'],
-            ['Total users', department.userCount ?? '—'],
-            ['Active Requesters', department.requesterCount ?? '—']
-          ].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
-            <dt className="font-semibold text-muted">{label}</dt><dd className="max-w-[65%] text-right font-bold">{value}</dd>
-          </div>)}
-        </dl>
-      </PageCard>
-      <PageCard title="Requesters in this Department" description="Message a Requester directly from the list.">
-        {extras.loading ? <LoadingState label="Loading Requesters…" /> : extras.error ? <ErrorState message={extras.error} /> :
-          !extras.requesters.length ? <EmptyState title="No Requesters assigned" description="Ask an Administrator to assign Requesters to this Department." /> :
-            <div className="divide-y">
-              {extras.requesters.map((requester) => <div key={requester.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
-                <div>
-                  <div className="text-xs font-bold">{requester.name}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted">
-                    <Mail size={12} />{requester.email}
-                    <span>·</span><span>{requester.requestCount || 0} request{(requester.requestCount || 0) === 1 ? '' : 's'}</span>
-                  </div>
-                </div>
-                <button type="button" onClick={() => navigate('Department Messages', { userId: requester.id })} className={secondaryButtonClass()}>
-                  <MessageSquare size={13} />Message
-                </button>
-              </div>)}
-            </div>}
-      </PageCard>
-    </div>
+    <PageCard title={`Users in ${department.name || 'your Department'}`} description="Everyone assigned to your Department.">
+      {extras.loading ? <LoadingState label="Loading department users…" /> : extras.error ? <ErrorState message={extras.error} /> :
+        !extras.departmentUsers.length ? <EmptyState title="No users assigned" description="Ask an Administrator to assign users to this Department." /> :
+          <TableScroll minWidth={760}>
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+                <tr>{['Name', 'Role', 'Email', 'Phone', 'Requests', 'Status', 'Action'].map((heading) => <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y">
+                {extras.departmentUsers.map((member) => <tr key={member.id}>
+                  <td className="whitespace-nowrap px-4 py-3 font-bold">{member.name}</td>
+                  <td className="whitespace-nowrap px-4 py-3"><PortalBadge tone="indigo">{roleLabel(member.role)}</PortalBadge></td>
+                  <td className="whitespace-nowrap px-4 py-3">{member.email}</td>
+                  <td className="whitespace-nowrap px-4 py-3">{member.phone || '—'}</td>
+                  <td className="whitespace-nowrap px-4 py-3">{member.requestCount || 0}</td>
+                  <td className="whitespace-nowrap px-4 py-3"><PortalBadge tone="emerald">Active</PortalBadge></td>
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {member.id !== summary?.user?.id
+                      ? <button type="button" onClick={() => navigate('Department Messages', { userId: member.id })} className={secondaryButtonClass()}>
+                          <MessageSquare size={13} />Message
+                        </button>
+                      : <span className="text-muted">You</span>}
+                  </td>
+                </tr>)}
+              </tbody>
+            </table>
+          </TableScroll>}
+    </PageCard>
   </>;
 
   return <>

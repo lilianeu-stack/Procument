@@ -8,7 +8,6 @@ import { SUPERVISOR_PAGES } from '../../utils/access.js';
 const groups = [
   { section: 'SUPERVISOR WORKSPACE', links: [
     { name: SUPERVISOR_PAGES[0], icon: LayoutDashboard },
-    { name: SUPERVISOR_PAGES[1], icon: Building2 },
     { name: SUPERVISOR_PAGES[2], icon: Building2 },
     { name: SUPERVISOR_PAGES[3], icon: UsersRound }
   ] },

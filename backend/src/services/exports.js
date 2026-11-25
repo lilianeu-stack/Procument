@@ -255,12 +255,7 @@ const RECORD_QUERIES = {
         ri.estimated_unit_cost AS 'Unit cost',
         ri.quantity * ri.estimated_unit_cost AS 'Line total'
       FROM requisition_items ri WHERE ri.requisition_id = ? ORDER BY ri.id`,
-    activitySql: `
-      SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
-        a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
-      FROM requisition_activity a LEFT JOIN users u ON u.id = a.user_id
-      WHERE a.requisition_id = ? ORDER BY a.created_at, a.id`
+    activitySql: null
   },
   storeRequest: {
     roles: ['admin', 'storekeeper'],
@@ -567,7 +562,6 @@ export async function renderRecordPdf(record) {
   }
 
   await table('Items and details', record.items);
-  await table('Activity and approval history', record.activity);
   recordFooter(doc);
   doc.end();
   return done;
@@ -606,7 +600,6 @@ export async function renderRecordXlsx(record) {
     sheet.headerFooter.oddFooter = '&CPage &P of &N';
   }
   addSheet('Items', record.items);
-  addSheet('Activity', record.activity);
   summary.headerFooter.oddFooter = '&CPage &P of &N';
   return workbook.xlsx.writeBuffer();
 }

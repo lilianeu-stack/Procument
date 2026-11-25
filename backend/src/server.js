@@ -199,11 +199,15 @@ async function start() {
   const config = getConfig();
 
   const { emailConfigStatus } = await import('./utils/email-config.js');
+  const { googleEmailConfigStatus } = await import('./services/google-email.js');
   const email = emailConfigStatus();
+  const googleEmail = googleEmailConfigStatus();
   if (email.configured) {
-    log('INFO', 'Supplier email delivery is configured (SMTP credentials hidden).');
+    log('INFO', 'Supplier email delivery is configured through SMTP (credentials hidden).');
+  } else if (googleEmail.configured) {
+    log('INFO', 'SMTP is unavailable; Google Gmail API can send email after the mailbox is connected.');
   } else {
-    log('WARN', `Supplier email delivery is disabled. Missing environment variable(s): ${email.missing.join(', ')}. RFQs will be created with failed email delivery records that can be retried after configuration.`);
+    log('WARN', `Email sending needs SMTP or Google OAuth. Missing SMTP variable(s): ${email.missing.join(', ')}. Missing Google variable(s): ${googleEmail.missing.join(', ')}.`);
   }
 
   startupStage = 'database configuration';

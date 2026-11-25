@@ -1,5 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -13,6 +14,7 @@ let baseUrl;
 let admin;
 let departments;
 let users;
+let testDepartmentRoot;
 const createdUserIds = [];
 const createdDepartmentIds = [];
 const createdRequisitionIds = [];
@@ -22,6 +24,7 @@ const createdStoreRequestIds = [];
 const createdRfqIds = [];
 const createdPurchaseOrderIds = [];
 const createdSupplierIds = [];
+const createdCommitteeMemberIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
@@ -48,9 +51,14 @@ async function binaryRequest(path, user) {
 }
 
 async function createDepartment(name) {
-  const [result] = await pool.execute('INSERT INTO departments (name, description) VALUES (?, ?)', [name, 'QA portal test department']);
+  // Departments in the test suite are subdepartments under one test root,
+  // matching the production hierarchy (department -> subdepartment -> user).
+  const [result] = await pool.execute(
+    'INSERT INTO departments (name, description, parent_id) VALUES (?, ?, ?)',
+    [name, 'QA portal test department', testDepartmentRoot?.id || null]
+  );
   createdDepartmentIds.push(Number(result.insertId));
-  return { id: Number(result.insertId), name };
+  return { id: Number(result.insertId), name, parentId: testDepartmentRoot?.id || null };
 }
 
 async function createUser(name, email, role, departmentId, active = true) {
@@ -81,19 +89,20 @@ async function submitRequest(user, suffix, extra = {}) {
   return response;
 }
 
-async function createInventoryItem(name, quantity, reorderLevel = 2) {
+async function createInventoryItem(name, quantity, reorderLevel = 2, departmentId = departments.a.id) {
   const sku = `QA-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`.toUpperCase();
   const [result] = await pool.execute(
     `INSERT INTO items (department_id, sku, name, category, unit, quantity, reorder_level)
      VALUES (?, ?, ?, 'QA', 'unit', ?, ?)`,
-    [departments.a.id, sku, name, quantity, reorderLevel]
+    [departmentId, sku, name, quantity, reorderLevel]
   );
   createdItemIds.push(Number(result.insertId));
-  return { id: Number(result.insertId), sku, name };
+  return { id: Number(result.insertId), sku, name, departmentId };
 }
 
 async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
-  const reference = `QA-SR-${Date.now()}-${suffix}`;
+  // store_requests.reference is VARCHAR(30), so keep the generated value short.
+  const reference = `QASR-${Date.now().toString(36).toUpperCase()}`;
   const [result] = await pool.execute(
     `INSERT INTO store_requests
        (reference, requester_id, department_id, purpose, status, approved_at)
@@ -109,6 +118,42 @@ async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
   return { id, reference };
 }
 
+async function createRequisitionInDepartment(departmentId, requesterId, suffix) {
+  // requisitions.reference is VARCHAR(30), so keep the generated value short.
+  const reference = `QADEL-${Date.now().toString(36).toUpperCase()}`;
+  const [result] = await pool.execute(
+    `INSERT INTO requisitions
+      (reference, requester_id, department_id, title, justification, budget_code, priority)
+     VALUES (?, ?, ?, ?, ?, ?, 'Medium')`,
+    [reference, requesterId, departmentId, `QA delete test ${suffix}`, 'Delete dependency test', `QA-${suffix}`]
+  );
+  const id = Number(result.insertId);
+  createdRequisitionIds.push(id);
+  return { id };
+}
+
+async function createMessageInDepartment(departmentId, senderId, suffix) {
+  const [result] = await pool.execute(
+    'INSERT INTO messages (department_id, sender_id, body, is_announcement) VALUES (?, ?, ?, FALSE)',
+    [departmentId, senderId, `QA delete dependency message ${suffix}`]
+  );
+  return Number(result.insertId);
+}
+
+async function createMovementInDepartment(itemId, departmentId, suffix) {
+  // inventory_movements.reference_no is VARCHAR(40), so keep this short too.
+  const reference = `QAMV-${Date.now().toString(36).toUpperCase()}`;
+  const [result] = await pool.execute(
+    `INSERT INTO inventory_movements
+      (item_id, department_id, movement_type, direction, quantity, reference_no, source, balance_after)
+     VALUES (?, ?, 'Receipt', 'In', 5, ?, 'QA delete dependency test', 5)`,
+    [itemId, departmentId, reference]
+  );
+  const id = Number(result.insertId);
+  createdMovementIds.push(id);
+  return { id, reference };
+}
+
 before(async () => {
   await applySchemaMigrations();
   server = app.listen(0);
@@ -120,6 +165,11 @@ before(async () => {
   admin = admins[0];
 
   const stamp = Date.now();
+  const [rootResult] = await pool.execute(
+    'INSERT INTO departments (name, description) VALUES (?, ?)',
+    [`QA Hierarchy Root ${stamp}`, 'QA test hierarchy root']
+  );
+  testDepartmentRoot = { id: Number(rootResult.insertId), name: `QA Hierarchy Root ${stamp}` };
   departments = {
     a: await createDepartment(`QA Dept A ${stamp}`),
     b: await createDepartment(`QA Dept B ${stamp}`)
@@ -170,6 +220,8 @@ after(async () => {
   if (createdRequisitionIds.length) {
     const placeholders = createdRequisitionIds.map(() => '?').join(',');
     await pool.execute(`DELETE FROM requisition_attachments WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
+    await pool.execute(`DELETE FROM requisition_email_comments WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
+    await pool.execute(`DELETE FROM requisition_email_threads WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
     await pool.execute(`DELETE FROM requisition_activity WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
     await pool.execute(`DELETE FROM requisition_items WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
   }
@@ -182,7 +234,22 @@ after(async () => {
     await pool.execute(`DELETE FROM rfqs WHERE id IN (${createdRfqIds.map(() => '?').join(',')})`, createdRfqIds);
   }
   if (createdSupplierIds.length) {
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'supplier' AND entity_id IN (${createdSupplierIds.map(() => '?').join(',')})`,
+      createdSupplierIds.map(String)
+    );
     await pool.execute(`DELETE FROM suppliers WHERE id IN (${createdSupplierIds.map(() => '?').join(',')})`, createdSupplierIds);
+  }
+  if (createdCommitteeMemberIds.length) {
+    const ids = createdCommitteeMemberIds.map(String);
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'procurement_committee_member' AND entity_id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    await pool.execute(
+      `DELETE FROM procurement_committee_members WHERE id IN (${createdCommitteeMemberIds.map(() => '?').join(',')})`,
+      createdCommitteeMemberIds
+    );
   }
   if (createdRequisitionIds.length) {
     const placeholders = createdRequisitionIds.map(() => '?').join(',');
@@ -198,6 +265,10 @@ after(async () => {
   if (createdDepartmentIds.length) {
     await pool.execute(`DELETE FROM audit_logs WHERE entity_type = 'department' AND entity_id IN (${createdDepartmentIds.map(() => '?').join(',')})`, createdDepartmentIds.map(String));
     await pool.execute(`DELETE FROM departments WHERE id IN (${createdDepartmentIds.map(() => '?').join(',')})`, createdDepartmentIds);
+  }
+  if (testDepartmentRoot) {
+    await pool.execute("DELETE FROM audit_logs WHERE entity_type = 'department' AND entity_id = ?", [String(testDepartmentRoot.id)]);
+    await pool.execute('DELETE FROM departments WHERE id = ?', [testDepartmentRoot.id]);
   }
   if (server?.listening) {
     const closed = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -625,6 +696,104 @@ test('administrator keeps system-wide management access', async () => {
   assert.ok(Array.isArray(data.users));
 });
 
+test('procurement can edit and safely remove suppliers', async () => {
+  const suffix = Date.now();
+  const created = await request('/suppliers', {
+    method: 'POST', user: admin,
+    body: { name: `QA Editable Supplier ${suffix}`, email: `qa.supplier.${suffix}@example.test`, phone: '12345' }
+  });
+  assert.equal(created.response.status, 201, created.data.message);
+  createdSupplierIds.push(created.data.id);
+
+  const denied = await request(`/suppliers/${created.data.id}`, {
+    method: 'PATCH', user: users.requesterA,
+    body: { name: 'Unauthorized edit' }
+  });
+  assert.equal(denied.response.status, 403);
+
+  const invalid = await request(`/suppliers/${created.data.id}`, {
+    method: 'PATCH', user: users.procurement, body: { name: '  ' }
+  });
+  assert.equal(invalid.response.status, 400);
+
+  const updated = await request(`/suppliers/${created.data.id}`, {
+    method: 'PATCH', user: users.procurement,
+    body: { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890' }
+  });
+  assert.equal(updated.response.status, 200, updated.data.message);
+  const [rowsAfterUpdate] = await pool.execute(
+    'SELECT name, email, phone, status FROM suppliers WHERE id = ?', [created.data.id]
+  );
+  assert.deepEqual(
+    { name: rowsAfterUpdate[0].name, email: rowsAfterUpdate[0].email, phone: rowsAfterUpdate[0].phone, status: rowsAfterUpdate[0].status },
+    { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890', status: 'Active' }
+  );
+
+  const removed = await request(`/suppliers/${created.data.id}`, {
+    method: 'DELETE', user: users.procurement, body: {}
+  });
+  assert.equal(removed.response.status, 200, removed.data.message);
+  assert.equal(removed.data.softDeleted, true);
+  const [rowsAfterRemoval] = await pool.execute('SELECT status FROM suppliers WHERE id = ?', [created.data.id]);
+  assert.equal(rowsAfterRemoval[0].status, 'Inactive');
+});
+
+test('procurement committee contacts support authorized create, edit, and delete', async () => {
+  const suffix = Date.now();
+  const member = {
+    firstName: 'QA',
+    lastName: `Committee ${suffix}`,
+    email: `qa.committee.${suffix}@example.test`,
+    phone: '+250 700 000 000'
+  };
+  const denied = await request('/procurement-committee', { user: users.requesterA });
+  assert.equal(denied.response.status, 403);
+
+  const invalid = await request('/procurement-committee', {
+    method: 'POST', user: admin, body: { ...member, email: 'not-an-email' }
+  });
+  assert.equal(invalid.response.status, 400);
+
+  const created = await request('/procurement-committee', { method: 'POST', user: admin, body: member });
+  assert.equal(created.response.status, 201, created.data.message);
+  createdCommitteeMemberIds.push(created.data.id);
+
+  const duplicate = await request('/procurement-committee', { method: 'POST', user: admin, body: member });
+  assert.equal(duplicate.response.status, 409);
+
+  const listed = await request('/procurement-committee', { user: users.procurement });
+  assert.equal(listed.response.status, 200);
+  assert.ok(listed.data.members.some((item) => item.id === created.data.id && item.email === member.email));
+
+  const updatedMember = { ...member, firstName: 'Updated', phone: '+250 700 111 111' };
+  const updated = await request(`/procurement-committee/${created.data.id}`, {
+    method: 'PATCH', user: users.procurement, body: updatedMember
+  });
+  assert.equal(updated.response.status, 200, updated.data.message);
+  const [rowsAfterUpdate] = await pool.execute(
+    'SELECT first_name AS firstName, last_name AS lastName, email, phone FROM procurement_committee_members WHERE id = ?',
+    [created.data.id]
+  );
+  assert.deepEqual(rowsAfterUpdate[0], updatedMember);
+
+  const deleted = await request(`/procurement-committee/${created.data.id}`, {
+    method: 'DELETE', user: users.procurement, body: {}
+  });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  const [remaining] = await pool.execute(
+    'SELECT id FROM procurement_committee_members WHERE id = ?', [created.data.id]
+  );
+  assert.equal(remaining.length, 0);
+});
+
+test('committee reviews endpoint is restricted to procurement staff', async () => {
+  const denied = await request('/rfqs/999999/committee-reviews', { user: users.requesterA });
+  assert.equal(denied.response.status, 403);
+
+  const allowed = await request('/rfqs/999999/committee-reviews', { user: users.procurement });
+  assert.equal(allowed.response.status, 404);
+});
+
 test('administrator settings are validated, persisted and restricted', async () => {
   const denied = await request('/admin/settings', { user: users.procurement });
   assert.equal(denied.response.status, 403);
@@ -653,6 +822,30 @@ test('administrator settings are validated, persisted and restricted', async () 
     method: 'POST', user: admin,
     body: { keys: ['system_name', 'table_page_size'] }
   });
+});
+
+test('Google inbox endpoints require authorized staff and expose no OAuth secrets', async () => {
+  const anonymous = await request('/email/google/status');
+  assert.equal(anonymous.response.status, 401);
+
+  const requester = await request('/email/google/status', { user: users.requesterA });
+  assert.equal(requester.response.status, 403);
+
+  const adminStatus = await request('/email/google/status', { user: admin });
+  assert.equal(adminStatus.response.status, 200, adminStatus.data.message);
+  assert.equal(typeof adminStatus.data.configured, 'boolean');
+  assert.equal('clientSecret' in adminStatus.data, false);
+
+  const procurementStatus = await request('/email/google/status', { user: users.procurement });
+  assert.equal(procurementStatus.response.status, 200);
+
+  const invalidMessage = await request('/email/send', {
+    method: 'POST', user: admin, body: { to: 'not-an-email', subject: 'Test', text: 'Body' }
+  });
+  assert.equal(invalidMessage.response.status, 400);
+
+  const invalidCallback = await fetch(`${baseUrl}/email/google/callback`);
+  assert.equal(invalidCallback.status, 400);
 });
 
 test('requisition validation returns a client error for an empty request', async () => {
@@ -693,6 +886,26 @@ test('requester submits a request routed only to the assigned Department Supervi
   });
   assert.equal(download.status, 200);
   assert.equal(await download.text(), 'QA attachment contents');
+});
+
+test('requester can submit a request without a budget code', async () => {
+  const created = await submitRequest(users.requesterA, 'NO-BUDGET', {
+    budgetCode: '',
+    items: [
+      { itemName: 'QA item one', description: 'First item purpose.', quantity: 2, unit: 'box', estimatedUnitCost: 25 },
+      { itemName: 'QA item two', description: 'Second item purpose.', quantity: 3, unit: 'piece', estimatedUnitCost: 10 }
+    ]
+  });
+  assert.equal(created.response.status, 201, created.data.message);
+
+  const detail = await request(`/portal/requester/requisitions/${created.data.id}`, { user: users.requesterA });
+  assert.equal(detail.response.status, 200, detail.data.message);
+  assert.equal(detail.data.requisition.budgetCode, '');
+  assert.equal(detail.data.requisition.title, 'QA workflow request NO-BUDGET');
+  assert.equal(detail.data.requisition.items.length, 2);
+  assert.equal(detail.data.requisition.items[0].itemName, 'QA item one');
+  assert.equal(detail.data.requisition.items[1].itemName, 'QA item two');
+  assert.equal(detail.data.requisition.total, 80);
 });
 
 test('supervisor approval never forwards; explicit forward is the only route into Procurement', async () => {
@@ -804,6 +1017,77 @@ test('supervisor approval never forwards; explicit forward is the only route int
   createdRfqIds.push(rfq.data.id);
   const afterRfq = await request('/requisitions', { user: admin });
   assert.equal(afterRfq.data.requisitions.find((row) => row.id === id).status, 'Under Procurement Review');
+});
+
+test('a requisition response link lets an external recipient submit a comment directly', async () => {
+  const created = await submitRequest(users.requesterA, 'RESPONSE-LINK');
+  assert.equal(created.response.status, 201, created.data.message);
+  const requisitionId = created.data.id;
+  await request(`/portal/supervisor/requisitions/${requisitionId}/decision`, {
+    method: 'POST', user: users.supervisorA, body: { decision: 'Approve' }
+  });
+  const forwarded = await request(`/portal/supervisor/requisitions/${requisitionId}/forward`, {
+    method: 'POST', user: users.supervisorA, body: {}
+  });
+  assert.equal(forwarded.response.status, 200, forwarded.data.message);
+
+  const token = randomBytes(16).toString('hex');
+  const recipientEmail = 'external.recipient@example.test';
+  const procurementMessage = 'Please confirm the quantities and comment if anything needs changing.';
+  await pool.execute(
+    `INSERT INTO requisition_email_threads (requisition_id, token, recipient_email, message, created_by)
+     VALUES (?, ?, ?, ?, ?)`,
+    [requisitionId, token, recipientEmail, procurementMessage, admin.id]
+  );
+
+  const invalidLink = await request('/request-response/not-a-valid-token');
+  assert.equal(invalidLink.response.status, 404);
+
+  const opened = await request(`/request-response/${token}`);
+  assert.equal(opened.response.status, 200, opened.data.message);
+  assert.equal(opened.data.request.reference, created.data.reference);
+  assert.equal(opened.data.request.recipientEmail, recipientEmail);
+  assert.equal(opened.data.request.message, procurementMessage, 'the Procurement message must reach the response form');
+  assert.equal(opened.data.request.items.length, 1);
+  assert.equal(opened.data.request.items[0].quantity, 2);
+  assert.equal(opened.data.comments.length, 0);
+
+  const emptyComment = await request(`/request-response/${token}/comment`, {
+    method: 'POST', body: { comment: '   ' }
+  });
+  assert.equal(emptyComment.response.status, 400);
+
+  const submitted = await request(`/request-response/${token}/comment`, {
+    method: 'POST',
+    body: { responderName: 'Recipient One', comment: 'Please add two more units and deliver on Tuesday.' }
+  });
+  assert.equal(submitted.response.status, 201, submitted.data.message);
+  assert.equal(submitted.data.reference, created.data.reference);
+
+  const duplicateSubmission = await request(`/request-response/${token}/comment`, {
+    method: 'POST',
+    body: { responderName: 'Recipient One', comment: 'A second response must not be accepted.' }
+  });
+  assert.equal(duplicateSubmission.response.status, 409);
+  assert.match(duplicateSubmission.data.message, /already been submitted/i);
+
+  const afterComment = await request(`/request-response/${token}`);
+  assert.equal(afterComment.response.status, 200);
+  assert.equal(afterComment.data.request.responded, true);
+  assert.equal(afterComment.data.comments.length, 1);
+  assert.equal(afterComment.data.comments[0].comment, 'Please add two more units and deliver on Tuesday.');
+  assert.equal(afterComment.data.comments[0].sender, `Recipient One <${recipientEmail}>`);
+
+  const detail = await request(`/procurement/received-requests/${requisitionId}`, { user: users.procurement });
+  assert.equal(detail.response.status, 200, detail.data.message);
+  assert.equal(detail.data.requisition.emailComments.length, 1);
+  assert.equal(detail.data.requisition.emailComments[0].comment, 'Please add two more units and deliver on Tuesday.');
+  const activity = detail.data.requisition.activity.find((entry) => entry.action === 'email_comment_received');
+  assert.ok(activity, 'the response comment must appear in request history');
+  assert.equal(activity.details.source, 'response_form');
+
+  const notices = await request('/notifications', { user: users.procurement });
+  assert.ok(notices.data.notifications.some((notice) => notice.title === 'Response comment received'));
 });
 
 test('supervisor rejection records the reason and notifies the requester', async () => {
@@ -1126,6 +1410,150 @@ test('a department cannot have conflicting active supervisors without replacemen
   assert.equal(Boolean(oldSupervisor.active), false);
 });
 
+test('delete endpoints reject non-administrator direct API calls', async () => {
+  for (const user of [users.requesterA, users.requesterB, users.stockkeeper]) {
+    const userDelete = await request(`/admin/users/${users.requesterA.id}`, { method: 'DELETE', user });
+    assert.equal(userDelete.response.status, 403);
+    const departmentDelete = await request('/admin/departments/999999', { method: 'DELETE', user, body: {} });
+    assert.equal(departmentDelete.response.status, 403);
+  }
+});
+
+test('deleting an account soft-deletes it, preserves history, and records an audit event', async () => {
+  const stamp = Date.now();
+  const person = await createUser('QA Delete Account', `qa.delete.account.${stamp}@example.org`, 'requestor', departments.a.id);
+  const submitted = await submitRequest(person, `DEL${stamp}`);
+  assert.equal(submitted.response.status, 201, submitted.data.message);
+  const requisitionId = submitted.data.id;
+
+  const deleted = await request(`/admin/users/${person.id}`, { method: 'DELETE', user: admin });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  assert.equal(deleted.data.deleted, true);
+  assert.equal(deleted.data.softDeleted, true);
+
+  const [[storedUser]] = await pool.execute('SELECT active FROM users WHERE id = ?', [person.id]);
+  assert.equal(Boolean(storedUser.active), false);
+  const [[history]] = await pool.execute('SELECT requester_id FROM requisitions WHERE id = ?', [requisitionId]);
+  assert.equal(Number(history.requester_id), person.id);
+  const [[audit]] = await pool.execute(
+    "SELECT id FROM audit_logs WHERE user_id = ? AND action = 'user_deleted' AND entity_type = 'user' AND entity_id = ? LIMIT 1",
+    [admin.id, String(person.id)]
+  );
+  assert.ok(audit, 'A user deletion must be recorded in the audit log.');
+  const auth = await request('/auth/me', { user: person });
+  assert.equal(auth.response.status, 401);
+});
+
+test('self-delete and last active administrator delete are blocked', async () => {
+  const stamp = Date.now();
+  const created = await request('/admin/users', {
+    method: 'POST',
+    user: admin,
+    body: {
+      name: 'QA Second Admin', email: `qa.second.admin.${stamp}@example.org`,
+      password: PASSWORD, role: 'admin'
+    }
+  });
+  assert.equal(created.response.status, 201, created.data.message);
+  createdUserIds.push(created.data.id);
+
+  const selfDelete = await request(`/admin/users/${admin.id}`, { method: 'DELETE', user: admin });
+  assert.equal(selfDelete.response.status, 400);
+  assert.match(selfDelete.data.message, /own account/i);
+
+  const secondDelete = await request(`/admin/users/${created.data.id}`, { method: 'DELETE', user: admin });
+  assert.equal(secondDelete.response.status, 200, secondDelete.data.message);
+
+  const [[{ total }]] = await pool.execute("SELECT COUNT(*) AS total FROM users WHERE role = 'admin' AND active = TRUE");
+  if (Number(total) === 1) {
+    const lastAdmin = await request(`/admin/users/${admin.id}`, { method: 'DELETE', user: admin });
+    assert.equal(lastAdmin.response.status, 400);
+    assert.match(lastAdmin.data.message, /last active administrator/i);
+  }
+});
+
+test('department deletion checks every dependency and reassigns historical records', async () => {
+  const stamp = Date.now();
+  const source = await createDepartment(`QA Delete Source ${stamp}`);
+  const destination = await createDepartment(`QA Delete Destination ${stamp}`);
+  const supervisorDestination = await createDepartment(`QA Delete Supervisor Destination ${stamp}`);
+  const requester = await createUser('QA Delete Requester', `qa.delete.requester.${stamp}@example.org`, 'requestor', source.id);
+  const supervisor = await createUser('QA Delete Supervisor', `qa.delete.supervisor.${stamp}@example.org`, 'supervisor', source.id);
+  await createUser('QA Delete Destination Supervisor', `qa.delete.dest.supervisor.${stamp}@example.org`, 'supervisor', supervisorDestination.id);
+
+  const requisition = await createRequisitionInDepartment(source.id, requester.id, `DEPT${stamp}`);
+  const item = await createInventoryItem(`QA Delete Item ${stamp}`, 2, 1, source.id);
+  const storeRequest = await createApprovedStoreRequest(item.id, requester, 1, `DEPT${stamp}`);
+  const movement = await createMovementInDepartment(item.id, source.id, `DEPT${stamp}`);
+  const messageId = await createMessageInDepartment(source.id, requester.id, `DEPT${stamp}`);
+
+  const listed = await request('/admin/departments', { user: admin });
+  assert.equal(listed.response.status, 200);
+  const listedSource = listed.data.departments.find((department) => Number(department.id) === source.id);
+  assert.equal(Number(listedSource.userCount), 2);
+  assert.equal(Number(listedSource.requisitionCount), 1);
+  assert.equal(Number(listedSource.storeRequestCount), 1);
+  assert.equal(Number(listedSource.itemCount), 1);
+  assert.equal(Number(listedSource.stockMovementCount), 1);
+  assert.equal(Number(listedSource.messageCount), 1);
+
+  const blocked = await request(`/admin/departments/${source.id}`, { method: 'DELETE', user: admin, body: {} });
+  assert.equal(blocked.response.status, 400);
+  assert.match(blocked.data.message, /referenced by/i);
+  assert.match(blocked.data.message, /message\(s\)/i);
+
+  const sameDepartment = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: source.id }
+  });
+  assert.equal(sameDepartment.response.status, 400);
+
+  const missingDestination = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: 999999999 }
+  });
+  assert.equal(missingDestination.response.status, 400);
+  assert.match(missingDestination.data.message, /does not exist/i);
+
+  const conflictingSupervisor = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: supervisorDestination.id }
+  });
+  assert.equal(conflictingSupervisor.response.status, 400);
+  assert.match(conflictingSupervisor.data.message, /active Supervisor/i);
+
+  const deleted = await request(`/admin/departments/${source.id}`, {
+    method: 'DELETE', user: admin, body: { reassignTo: destination.id }
+  });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  assert.equal(deleted.data.deleted, true);
+  assert.equal(deleted.data.reassigned, destination.id);
+
+  const [[remainingDepartment]] = await pool.execute('SELECT id FROM departments WHERE id = ?', [source.id]);
+  assert.equal(remainingDepartment, undefined);
+  for (const [table, id] of [
+    ['users', requester.id], ['users', supervisor.id],
+    ['requisitions', requisition.id], ['store_requests', storeRequest.id],
+    ['items', item.id], ['inventory_movements', movement.id], ['messages', messageId]
+  ]) {
+    const [[row]] = await pool.execute(`SELECT department_id FROM ${table} WHERE id = ?`, [id]);
+    assert.ok(row, `${table} row ${id} must not be deleted.`);
+    assert.equal(Number(row.department_id), destination.id, `${table} row ${id} must be reassigned.`);
+  }
+  const [[audit]] = await pool.execute(
+    "SELECT id, details FROM audit_logs WHERE user_id = ? AND action = 'department_deleted' AND entity_type = 'department' AND entity_id = ? LIMIT 1",
+    [admin.id, String(source.id)]
+  );
+  assert.ok(audit, 'A department deletion must be recorded in the audit log.');
+  assert.equal(JSON.parse(audit.details).reassignedTo, destination.id);
+
+  const empty = await createDepartment(`QA Delete Empty ${stamp}`);
+  const emptyDelete = await request(`/admin/departments/${empty.id}`, { method: 'DELETE', user: admin, body: {} });
+  assert.equal(emptyDelete.response.status, 200, emptyDelete.data.message);
+  assert.equal(emptyDelete.data.reassigned, null);
+});
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function futureBusinessDate() {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + 7);
@@ -1249,9 +1677,16 @@ test('purchase orders stay linked to their original department request', async (
   const supplierId = supplierResponse.data.id;
   createdSupplierIds.push(supplierId);
 
+  const badDates = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: { requisitionId, supplierIds: [supplierId], startDate: futureBusinessDate(), dueDate: todayIsoDate() }
+  });
+  assert.equal(badDates.response.status, 400);
+  assert.match(badDates.data.message, /End date \(deadline\) must be on or after Send start date/);
+
   const rfq = await request('/rfqs', {
     method: 'POST', user: users.procurement,
-    body: { requisitionId, supplierIds: [supplierId], dueDate: futureBusinessDate() }
+    body: { requisitionId, supplierIds: [supplierId], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
   });
   assert.equal(rfq.response.status, 201, rfq.data.message);
   createdRfqIds.push(rfq.data.id);
@@ -1328,16 +1763,20 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
   }
 
   try {
-    const initialConfig = await request('/email/config', { user: users.procurement });
-    assert.equal(initialConfig.response.status, 200);
-    assert.equal(initialConfig.data.config.configured, false);
-    assert.ok(initialConfig.data.config.missing.includes('SMTP_HOST'));
-
     const unauthenticatedWebhook = await fetch(`${baseUrl}/email/webhooks/generic`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'delivered', providerMessageId: 'fake' })
     });
     assert.equal(unauthenticatedWebhook.status, 401);
+
+    for (const endpoint of [
+      { path: '/email/config', method: 'GET' },
+      { path: '/email/verify', method: 'POST' },
+      { path: '/email/test', method: 'POST' }
+    ]) {
+      const removed = await request(endpoint.path, { method: endpoint.method, user: users.procurement });
+      assert.equal(removed.response.status, 404, `${endpoint.path} must no longer be exposed`);
+    }
 
     relay = await startTestSmtp();
     process.env.SMTP_HOST = '127.0.0.1';
@@ -1351,24 +1790,14 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     process.env.APP_BASE_URL = 'http://localhost:5173';
     process.env.EMAIL_WEBHOOK_SECRET = `qa-webhook-secret-${stamp}`;
 
-    const configured = await request('/email/config', { user: users.procurement });
-    assert.equal(configured.data.config.configured, true);
-    assert.deepEqual(configured.data.config.missing, []);
-    assert.ok(!JSON.stringify(configured.data.config).includes(process.env.SMTP_PASS));
-
-    const verified = await request('/email/verify', { method: 'POST', user: users.procurement });
-    assert.equal(verified.response.status, 200, verified.data.message);
-
-    const testMail = await request('/email/test', { method: 'POST', user: users.procurement });
-    assert.equal(testMail.response.status, 200, testMail.data.message);
-    assert.equal(testMail.data.result.status, 'Accepted by Email Provider');
-    assert.ok(testMail.data.result.providerMessageId);
-    assert.equal(relay.messages.length, 1);
-
     const supplierA = await makeSupplier(`QA Email Supplier A ${stamp}`, `qa.supplier.a.${stamp}@example.test`);
     const supplierB = await makeSupplier(`QA Email Supplier B ${stamp}`, `qa.supplier.b.${stamp}@example.test`);
     const supplierC = await makeSupplier(`QA Email Supplier C ${stamp}`, `qa.supplier.c.${stamp}@example.test`);
     const requisition = await forwardedRequest('EMAIL3');
+    const supplierMessage = 'Please quote including delivery to the school.';
+    const rfqDay = futureBusinessDate();
+    const startAt = `${rfqDay}T09:15`;
+    const dueAt = `${rfqDay}T16:45`;
 
     const idempotencyKey = `qa-rfq-${stamp}`;
     const rfq = await request('/rfqs', {
@@ -1376,7 +1805,8 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       body: {
         requisitionId: requisition.id,
         supplierIds: [supplierA.id, supplierB.id, supplierC.id],
-        dueDate: futureBusinessDate(),
+        startDate: startAt, dueDate: dueAt,
+        message: supplierMessage,
         idempotencyKey
       }
     });
@@ -1384,21 +1814,21 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     createdRfqIds.push(rfq.data.id);
     assert.equal(rfq.data.emailDelivery.accepted, 3);
     assert.equal(rfq.data.emailDelivery.failed, 0);
-    assert.equal(relay.messages.length, 4);
+    assert.equal(relay.messages.length, 3);
 
     const duplicate = await request('/rfqs', {
       method: 'POST', user: users.procurement,
       body: {
         requisitionId: requisition.id,
         supplierIds: [supplierA.id, supplierB.id, supplierC.id],
-        dueDate: futureBusinessDate(),
+        startDate: startAt, dueDate: dueAt,
         idempotencyKey
       }
     });
     assert.equal(duplicate.response.status, 200);
     assert.equal(duplicate.data.duplicate, true);
     assert.equal(duplicate.data.id, rfq.data.id);
-    assert.equal(relay.messages.length, 4, 'a duplicate submission must not send another RFQ email');
+    assert.equal(relay.messages.length, 3, 'a duplicate submission must not send another RFQ email');
 
     const deliveryResponse = await request(`/rfqs/${rfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(deliveryResponse.response.status, 200);
@@ -1406,7 +1836,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.equal(deliveryResponse.data.summary['Accepted by Email Provider'], 3);
     assert.equal(deliveryResponse.data.summary.Delivered, 0, 'SMTP acceptance must never be reported as Delivered');
     const tokens = [];
-    relay.messages.slice(1).forEach((message, index) => {
+    relay.messages.forEach((message, index) => {
       const supplier = [supplierA, supplierB, supplierC][index];
       const links = linksIn(message);
       // Multipart HTML + plain text legitimately repeat the same URL.
@@ -1414,6 +1844,16 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       tokens.push(tokenFrom(links[0]));
       assert.ok(tokens[index], 'RFQ link must contain a token');
       assert.match(normalizedMessage(message), new RegExp(rfq.data.reference));
+      assert.match(normalizedMessage(message), /Send date: \d{4}-\d{2}-\d{2} \d{2}:15/);
+      assert.match(normalizedMessage(message), /End date \(deadline\): \d{4}-\d{2}-\d{2} \d{2}:45/);
+      assert.match(normalizedMessage(message), /Item \| Quantity \| Unit price \| Total/);
+      assert.doesNotMatch(normalizedMessage(message), /Description/);
+      assert.doesNotMatch(normalizedMessage(message), /Requester/);
+      assert.doesNotMatch(normalizedMessage(message), /GRAND TOTAL/);
+      assert.match(normalizedMessage(message), /VIEW REQUEST AND RESPOND/);
+      assert.match(normalizedMessage(message), new RegExp(supplierMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.doesNotMatch(normalizedMessage(message), /Request for Quotation/);
+      assert.doesNotMatch(normalizedMessage(message), /\[REQ:/);
       const others = [supplierA, supplierB, supplierC].filter((entry) => entry.id !== supplier.id);
       for (const other of others) assert.ok(!normalizedMessage(message).includes(other.email));
     });
@@ -1426,51 +1866,238 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       const document = await opened.json();
       assert.equal(document.rfq.supplier.name, supplier.name);
       assert.equal(document.rfq.reference, rfq.data.reference);
+      assert.equal(document.rfq.message, supplierMessage);
+      assert.equal(document.rfq.justification, undefined);
       assert.ok(Array.isArray(document.rfq.items));
 
+      const pricedItems = document.rfq.items.map((item, itemIndex) => ({
+        requisitionItemId: item.requisitionItemId,
+        unitPrice: 100 + index + itemIndex,
+        comment: `QA item comment ${index}-${itemIndex}`
+      }));
       const quote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}/quotation`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: 100 + index, deliveryDays: 5 + index, notes: `QA quote ${index}` })
+        body: JSON.stringify({ notes: `QA quote ${index}`, items: pricedItems })
       });
       assert.equal(quote.status, 200, await quote.text());
+
+      const duplicateQuote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}/quotation`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: `Duplicate quote ${index}`, items: pricedItems })
+      });
+      assert.equal(duplicateQuote.status, 409);
+      assert.match((await duplicateQuote.json()).message, /already been submitted/i);
+
+      const afterQuote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}`);
+      assert.equal(afterQuote.status, 200);
+      assert.equal((await afterQuote.json()).rfq.quotation.notes, `QA quote ${index}`);
     }
     const quotes = await request(`/rfqs/${rfq.data.id}/quotations`, { user: users.procurement });
     assert.equal(quotes.data.quotations.length, 3);
+    assert.equal(quotes.data.rfq.reference, rfq.data.reference);
+    assert.equal(quotes.data.rfq.message, supplierMessage);
+    assert.ok(quotes.data.rfq.requestedItems.length > 0);
+    assert.ok(quotes.data.quotations.every((quote) => quote.items.length >= 1));
+    assert.ok(quotes.data.quotations.every((quote) => quote.supplierEmail));
+    assert.match(JSON.stringify(quotes.data.quotations), /QA item comment/);
+    const rfqList = await request('/rfqs', { user: users.procurement });
+    const listedRfq = rfqList.data.rfqs.find((entry) => entry.id === rfq.data.id);
+    assert.equal(listedRfq.responses.length, 3);
+    assert.ok(listedRfq.responses.every((response) => response.items.length >= 1));
+    assert.match(JSON.stringify(listedRfq.responses), /QA item comment/);
+
+    const committeeMember = {
+      firstName: 'QA',
+      lastName: `RFQ Committee ${stamp}`,
+      email: `qa.rfq.committee.${stamp}@example.test`,
+      phone: '+250 700 000 000'
+    };
+    const createdCommitteeMember = await request('/procurement-committee', {
+      method: 'POST', user: admin, body: committeeMember
+    });
+    assert.equal(createdCommitteeMember.response.status, 201, createdCommitteeMember.data.message);
+    createdCommitteeMemberIds.push(createdCommitteeMember.data.id);
+    const deniedCommitteeSend = await request('/rfqs/send-to-committee', {
+      method: 'POST', user: users.requesterA, body: { rfqIds: [rfq.data.id] }
+    });
+    assert.equal(deniedCommitteeSend.response.status, 403);
+
     const openedStatus = await request(`/rfqs/${rfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(openedStatus.data.summary.Opened, 3);
 
     const noFailedRetry = await request(`/rfqs/${rfq.data.id}/emails/retry-failed`, { method: 'POST', user: users.procurement });
     assert.equal(noFailedRetry.data.result.accepted, 0, 'retry must not resend to Suppliers already accepted');
-    assert.equal(relay.messages.length, 4);
+    assert.equal(relay.messages.length, 3);
 
     const singleSupplier = await makeSupplier(`QA Email Single Supplier ${stamp}`, `qa.supplier.single.${stamp}@example.test`);
     const singleRequisition = await forwardedRequest('EMAIL1');
     const singleRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: singleRequisition.id, supplierIds: [singleSupplier.id], dueDate: futureBusinessDate() }
+      body: { requisitionId: singleRequisition.id, supplierIds: [singleSupplier.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
     });
     assert.equal(singleRfq.response.status, 201, singleRfq.data.message);
     createdRfqIds.push(singleRfq.data.id);
     assert.equal(singleRfq.data.emailDelivery.accepted, 1);
     assert.equal(singleRfq.data.emailDelivery.failed, 0);
-    assert.equal(relay.messages.length, 5);
+    assert.equal(relay.messages.length, 4);
+    const prematureCommitteeSend = await request('/rfqs/send-to-committee', {
+      method: 'POST', user: users.procurement, body: { rfqIds: [singleRfq.data.id] }
+    });
+    assert.equal(prematureCommitteeSend.response.status, 409);
+
+    const recordedQuote = await request(`/rfqs/${singleRfq.data.id}/quotations`, {
+      method: 'POST',
+      user: users.procurement,
+      body: {
+        supplierId: singleSupplier.id,
+        amount: 456,
+        deliveryDays: 3,
+        qualityScore: 4,
+        ratingScore: 4,
+        notes: 'QA batch response'
+      }
+    });
+    assert.equal(recordedQuote.response.status, 201, recordedQuote.data.message);
+
+    const committeeSend = await request('/rfqs/send-to-committee', {
+      method: 'POST', user: users.procurement,
+      body: { rfqIds: [rfq.data.id, singleRfq.data.id], memberIds: [createdCommitteeMember.data.id] }
+    });
+    assert.equal(committeeSend.response.status, 200, committeeSend.data.message);
+    assert.equal(committeeSend.data.failed, 0);
+    assert.equal(committeeSend.data.accepted, committeeSend.data.total);
+    assert.equal(committeeSend.data.rfqCount, 2);
+    assert.equal(committeeSend.data.responseCount, 4);
+    assert.ok(committeeSend.data.deliveries.some((delivery) => delivery.email === committeeMember.email));
+    const committeeMessages = relay.messages.slice(4);
+    assert.equal(committeeMessages.length, committeeSend.data.total);
+    assert.ok(committeeMessages.every((message) => normalizedMessage(message).includes(rfq.data.reference)));
+    assert.ok(committeeMessages.every((message) => normalizedMessage(message).includes(singleRfq.data.reference)));
+    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes(supplierA.name)));
+    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item EMAIL3')));
+    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item EMAIL1')));
+    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item comment 0-0')));
+    assert.equal(committeeSend.data.reviewsCreated, 2);
+    for (const message of committeeMessages) {
+      const text = normalizedMessage(message);
+      assert.match(text, /OPEN YOUR DECISION FORM\(S\)/);
+      assert.match(text, /Message from Procurement: Please quote including delivery to the school\./);
+      assert.match(text, /Send date and time:/);
+      assert.match(text, /Response deadline:/);
+      assert.match(text, /Supplier response total: RWF/);
+      assert.match(text, /Decision required: open the decision link, choose Accept or Deny/);
+      assert.match(text, /OPEN DECISION FORM/);
+      assert.match(text, /Accept/);
+      assert.match(text, /Deny/);
+      assert.doesNotMatch(text, /Procurement recommendation/);
+    }
+
+    const committeeLinks = [...new Set(committeeMessages.flatMap((message) =>
+      [...normalizedMessage(message).matchAll(/https?:\/\/[^\s"<>']+/g)]
+        .map((match) => match[0])
+        .filter((link) => link.includes('/committee-review?token='))
+    ))];
+    assert.equal(committeeLinks.length, 2, 'each selected RFQ must produce its own committee decision link');
+    const formsByReference = new Map();
+    for (const link of committeeLinks) {
+      const token = /token=([^&\s"']+)/.exec(link)?.[1] || '';
+      assert.match(token, /^[a-f0-9]{64}$/i);
+      const formResponse = await fetch(`${baseUrl}/committee-review/${token}`);
+      assert.equal(formResponse.status, 200);
+      const { review } = await formResponse.json();
+      assert.ok(review.responses.length >= 1);
+      assert.ok(review.requestedItems.length >= 1);
+      assert.ok(review.responses.every((response) => response.supplier && response.amount !== null));
+      formsByReference.set(review.reference, { token, review });
+    }
+    assert.ok(formsByReference.has(rfq.data.reference));
+    assert.ok(formsByReference.has(singleRfq.data.reference));
+    const mainCommitteeForm = formsByReference.get(rfq.data.reference);
+    assert.equal(mainCommitteeForm.review.message, supplierMessage);
+
+    const reviewList = await request(`/rfqs/${rfq.data.id}/committee-reviews`, {
+      method: 'GET', user: users.procurement
+    });
+    assert.equal(reviewList.response.status, 200);
+    const pendingReview = reviewList.data.reviews.find((review) => !review.submittedAt);
+    assert.ok(pendingReview);
+    const relayCountBeforeResend = relay.messages.length;
+    const resentReview = await request(`/rfqs/${rfq.data.id}/committee-reviews/${pendingReview.id}/resend`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(resentReview.response.status, 200, resentReview.data.message);
+    assert.equal(relay.messages.length, relayCountBeforeResend + 1);
+    assert.match(normalizedMessage(relay.messages.at(-1)), /\/committee-review\?token=/);
+
+    const invalidToken = await fetch(`${baseUrl}/committee-review/${'a'.repeat(64)}`);
+    assert.equal(invalidToken.status, 404);
+
+    const decisionUrl = `${baseUrl}/committee-review/${mainCommitteeForm.token}/decisions`;
+    const invalidDecision = await fetch(decisionUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        responderName: 'QA Committee Reviewer',
+        decisions: mainCommitteeForm.review.responses.map((response, index) => ({
+          supplierId: response.supplierId,
+          decision: index === 0 ? 'Deny' : 'Accept',
+          reason: ''
+        }))
+      })
+    });
+    assert.equal(invalidDecision.status, 400, 'a Deny decision must include a reason');
+    assert.match((await invalidDecision.json()).message, /reason for denying/i);
+
+    const validDecisionBody = JSON.stringify({
+      responderName: 'QA Committee Reviewer',
+      decisions: mainCommitteeForm.review.responses.map((response, index) => ({
+        supplierId: response.supplierId,
+        decision: index === 0 ? 'Deny' : 'Accept',
+        reason: index === 0 ? 'QA committee denial reason' : ''
+      }))
+    });
+    const submittedDecision = await fetch(decisionUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
+    });
+    assert.equal(submittedDecision.status, 201);
+    assert.equal((await submittedDecision.json()).decisionCount, mainCommitteeForm.review.responses.length);
+
+    const duplicateDecision = await fetch(decisionUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
+    });
+    assert.equal(duplicateDecision.status, 409, 'one emailed link must accept only one decision set');
+
+    const afterDecision = await fetch(`${baseUrl}/committee-review/${mainCommitteeForm.token}`);
+    const afterDecisionPayload = await afterDecision.json();
+    assert.equal(afterDecisionPayload.review.responded, true);
+    assert.ok(afterDecisionPayload.review.decisions.some((decision) =>
+      decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason' &&
+      decision.responderName === 'QA Committee Reviewer'));
+
+    const committeeReviewList = await request(`/rfqs/${rfq.data.id}/committee-reviews`, { user: users.procurement });
+    assert.equal(committeeReviewList.response.status, 200);
+    assert.equal(committeeReviewList.data.reviews.length, 1);
+    assert.ok(committeeReviewList.data.reviews[0].submittedAt);
+    assert.ok(committeeReviewList.data.reviews[0].decisions.some((decision) =>
+      decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason'));
+    const messagesAfterCommittee = relay.messages.length;
+
     const singleDeliveries = await request(`/rfqs/${singleRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(singleDeliveries.data.deliveries.length, 1);
     assert.equal(singleDeliveries.data.deliveries[0].recipientEmail, singleSupplier.email);
     assert.equal(singleDeliveries.data.deliveries[0].status, 'Accepted by Email Provider');
-    assert.equal(linksIn(relay.messages[4]).length > 0, true);
+    assert.equal(linksIn(relay.messages[3]).length > 0, true);
 
     const invalidSupplier = await makeSupplier(`QA Invalid Email ${stamp}`, 'not-an-email');
     const validSupplier = await makeSupplier(`QA Valid Email ${stamp}`, `qa.valid.${stamp}@example.test`);
     const secondRequisition = await forwardedRequest('EMAILINV');
     const invalidRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: secondRequisition.id, supplierIds: [invalidSupplier.id, validSupplier.id], dueDate: futureBusinessDate() }
+      body: { requisitionId: secondRequisition.id, supplierIds: [invalidSupplier.id, validSupplier.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
     });
     assert.equal(invalidRfq.response.status, 201, invalidRfq.data.message);
     createdRfqIds.push(invalidRfq.data.id);
     assert.equal(invalidRfq.data.emailDelivery.failed, 1);
-    assert.equal(relay.messages.length, 6);
+    assert.equal(relay.messages.length, messagesAfterCommittee + 1);
     const invalidDeliveries = await request(`/rfqs/${invalidRfq.data.id}/email-deliveries`, { user: users.procurement });
     const invalidRecord = invalidDeliveries.data.deliveries.find((row) => row.supplierId === invalidSupplier.id);
     assert.equal(invalidRecord.status, 'Failed');
@@ -1486,12 +2113,12 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const failedSupplierB = await makeSupplier(`QA Failure Supplier B ${stamp}`, `qa.failure.b.${stamp}@example.test`);
     const failedRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: failureRequisition.id, supplierIds: [failedSupplierA.id, failedSupplierB.id], dueDate: futureBusinessDate() }
+      body: { requisitionId: failureRequisition.id, supplierIds: [failedSupplierA.id, failedSupplierB.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
     });
     assert.equal(failedRfq.response.status, 201, failedRfq.data.message);
     createdRfqIds.push(failedRfq.data.id);
     assert.equal(failedRfq.data.emailDelivery.failed, 2);
-    assert.equal(relay.messages.length, 6, 'a provider failure must not produce a queued message');
+    assert.equal(relay.messages.length, messagesAfterCommittee + 1, 'a provider failure must not produce a queued message');
     const failedDeliveries = await request(`/rfqs/${failedRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(failedDeliveries.data.summary.Failed, 2);
     assert.ok(failedDeliveries.data.deliveries.every((row) => row.errorDetails?.message));
@@ -1515,6 +2142,79 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
   } finally {
     if (relay) await relay.close();
     if (retryRelay) await retryRelay.close();
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('a sent request form can be resent with the current public response link', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL', 'CLIENT_ORIGIN'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let relay = null;
+  try {
+    relay = await startTestSmtp();
+    const stamp = Date.now();
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(relay.port);
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.form.smtp.${stamp}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = `qa.form.sender.${stamp}@hopehaven.test`;
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'https://public.example.test';
+    process.env.CLIENT_ORIGIN = 'https://public.example.test';
+
+    const formDepartment = await createDepartment(`QA Form Dept ${stamp}`);
+    const formSupervisor = await createUser('QA Form Supervisor', `qa.form.supervisor.${stamp}@example.org`, 'supervisor', formDepartment.id);
+    const formRequester = await createUser('QA Form Requester', `qa.form.requester.${stamp}@example.org`, 'requestor', formDepartment.id);
+    const created = await submitRequest(formRequester, 'RESENDLINK');
+    assert.equal(created.response.status, 201, created.data.message);
+    const requisitionId = created.data.id;
+    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/decision`, {
+      method: 'POST', user: formSupervisor, body: { decision: 'Approve' }
+    })).response.status, 200);
+    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/forward`, {
+      method: 'POST', user: formSupervisor, body: {}
+    })).response.status, 200);
+
+    const token = randomBytes(16).toString('hex');
+    const [inserted] = await pool.execute(
+      `INSERT INTO requisition_email_threads
+         (requisition_id, token, recipient_email, recipient_phone, message, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [requisitionId, token, 'qa.form.recipient@example.test', '+250700000000', 'Please confirm the quantities.', admin.id]
+    );
+    const threadId = Number(inserted.insertId);
+
+    const forms = await request(`/email/requisitions/${requisitionId}/forms`, { user: users.procurement });
+    assert.equal(forms.response.status, 200, forms.data.message);
+    const form = forms.data.forms.find((row) => Number(row.id) === threadId);
+    assert.ok(form, 'the sent form must appear in the Procurement sent-forms list');
+    assert.equal(form.responded, false);
+    assert.equal(form.message, 'Please confirm the quantities.');
+
+    const denied = await request(`/email/requisitions/${requisitionId}/forms/${threadId}/resend`, {
+      method: 'POST', user: users.requesterA
+    });
+    assert.equal(denied.response.status, 403);
+
+    const resent = await request(`/email/requisitions/${requisitionId}/forms/${threadId}/resend`, {
+      method: 'POST', user: users.procurement
+    });
+    assert.equal(resent.response.status, 200, resent.data.message);
+    assert.equal(resent.data.threadId, threadId);
+    assert.equal(relay.messages.length, 1, 'resend must deliver exactly one message');
+    const message = normalizedMessage(relay.messages[0]);
+    assert.ok(message.includes('https://public.example.test/#/response?token=' + token), 'resend must use the current public link and the original token');
+    assert.match(message, /Please confirm the quantities\./);
+
+    const opened = await fetch(`${baseUrl}/request-response/${token}`);
+    assert.equal(opened.status, 200, 'the resent link must still open the response form');
+  } finally {
+    if (relay) await relay.close();
     for (const name of envNames) {
       if (savedEnv[name] === undefined) delete process.env[name];
       else process.env[name] = savedEnv[name];

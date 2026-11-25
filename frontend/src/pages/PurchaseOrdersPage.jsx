@@ -4,7 +4,7 @@ import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/u
 import Modal from '../components/ui/Modal.jsx';
 import { currency, dateLabel } from '../utils/format.js';
 
-function OrderForm({ rfqs, initialRfqId, onClose, onSubmit }) {
+export function OrderForm({ rfqs, initialRfqId, onClose, onSubmit }) {
   const [form, setForm] = useState({ rfqId: initialRfqId ? String(initialRfqId) : '', deliveryDate: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);

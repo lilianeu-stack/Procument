@@ -19,5 +19,58 @@ services:
       retries: 20
       start_period: 20s
 
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:?Set DB_USER in the project .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the project .env}
+      DB_NAME: ${DB_NAME:-Procument}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./backend/.env:/app/.env:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:4000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    init: true
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: /api
+      CHOKIDAR_USEPOLLING: "true"
+      # Inside this container, localhost is the frontend itself. Reach the
+      # backend through the compose service name instead of the host port.
+      API_PROXY_TARGET: http://backend:4000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5173',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
 volumes:
   procument_mysql_data:

@@ -87,13 +87,92 @@ async function indexExists(table, index) {
   return Boolean(rows[0]?.total);
 }
 
+// Departments form a two-level hierarchy: department -> subdepartment. Users
+// are assigned to subdepartments. Idempotent, so it is safe on every startup.
+export async function seedDepartmentHierarchy() {
+  const findId = async (name) => {
+    const [rows] = await pool.execute('SELECT id FROM departments WHERE name = ? LIMIT 1', [name]);
+    return rows[0]?.id || null;
+  };
+
+  const ensure = async (name, parentName = null) => {
+    const parentId = parentName ? await findId(parentName) : null;
+    const existingId = await findId(name);
+    if (!existingId) {
+      const [result] = await pool.execute(
+        'INSERT INTO departments (name, parent_id) VALUES (?, ?)', [name, parentId]
+      );
+      return result.insertId;
+    }
+    if (parentName && parentId) {
+      // Only adopt legacy flat departments; never move a subdepartment that
+      // an administrator has already placed.
+      await pool.execute(
+        'UPDATE departments SET parent_id = ? WHERE id = ? AND parent_id IS NULL', [parentId, existingId]
+      );
+    }
+    return existingId;
+  };
+
+  for (const name of ['Administration', 'Education', 'Facilities', 'Finance']) await ensure(name);
+
+  // Keep existing records by converting the old flat departments into
+  // subdepartments instead of deleting them.
+  await ensure('Administration Office', 'Administration');
+  await ensure('Procurement', 'Administration');
+  await ensure('Stores', 'Facilities');
+
+  // IT lives inside Facilities.
+  const itId = await findId('IT');
+  const legacyItId = await findId('IT Department');
+  if (!itId && legacyItId) {
+    const facilitiesId = await findId('Facilities');
+    await pool.execute('UPDATE departments SET name = ?, parent_id = ? WHERE id = ?', ['IT', facilitiesId, legacyItId]);
+  } else {
+    await ensure('IT', 'Facilities');
+  }
+}
+
 export async function applySchemaMigrations() {
   // Pool connections already set UTC; this also covers callers that use an
   // externally supplied connection during startup or tests.
   await pool.query("SET time_zone = '+00:00'");
 
+  const [quotationItemTables] = await pool.query(
+    "SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'quotation_items'"
+  );
+  if (!Number(quotationItemTables[0]?.total)) {
+    await pool.query(`
+      CREATE TABLE quotation_items (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        quotation_id INT UNSIGNED NOT NULL,
+        requisition_item_id INT UNSIGNED NULL,
+        item_name VARCHAR(180) NOT NULL,
+        description TEXT NULL,
+        quantity DECIMAL(12,2) NOT NULL DEFAULT 1,
+        unit VARCHAR(30) NOT NULL DEFAULT 'unit',
+        unit_price DECIMAL(12,2) NOT NULL,
+        line_total DECIMAL(12,2) NOT NULL,
+        comment TEXT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_quotation_item (quotation_id, requisition_item_id),
+        CONSTRAINT fk_quotation_item_quote FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE CASCADE
+      )
+    `);
+  }
+
+  // RFQ deadlines include an hour and minute, so the stored column must keep
+  // the time component instead of truncating it to a date.
+  const [rfqDueDateColumns] = await pool.query(
+    "SELECT DATA_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'rfqs' AND column_name = 'due_date'"
+  );
+  if (rfqDueDateColumns[0]?.DATA_TYPE === 'date') {
+    await pool.query('ALTER TABLE rfqs MODIFY due_date DATETIME NULL');
+  }
+
   const additions = [
     { table: 'departments', column: 'description', ddl: 'ALTER TABLE departments ADD COLUMN description VARCHAR(255) NULL AFTER name' },
+    { table: 'departments', column: 'parent_id', ddl: 'ALTER TABLE departments ADD COLUMN parent_id INT UNSIGNED NULL AFTER description' },
     { table: 'users', column: 'phone', ddl: 'ALTER TABLE users ADD COLUMN phone VARCHAR(50) NULL AFTER email' },
     { table: 'items', column: 'department_id', ddl: 'ALTER TABLE items ADD COLUMN department_id INT UNSIGNED NULL AFTER id' },
     { table: 'requisitions', column: 'title', ddl: 'ALTER TABLE requisitions ADD COLUMN title VARCHAR(180) NULL AFTER department_id' },
@@ -135,6 +214,7 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', column: 'store_request_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN store_request_id INT UNSIGNED NULL AFTER department_id' },
     { table: 'inventory_movements', column: 'idempotency_key', ddl: 'ALTER TABLE inventory_movements ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER store_request_id' },
     { table: 'rfqs', column: 'issued_at', ddl: 'ALTER TABLE rfqs ADD COLUMN issued_at DATETIME NULL AFTER selected_quotation_id' },
+    { table: 'rfqs', column: 'message', ddl: 'ALTER TABLE rfqs ADD COLUMN message TEXT NULL AFTER issued_at' },
     // Prevents duplicate RFQs when the administrator double-clicks Send RFQ or
     // retries a request whose first response was lost.
     { table: 'rfqs', column: 'idempotency_key', ddl: 'ALTER TABLE rfqs ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER reference' },
@@ -142,6 +222,11 @@ export async function applySchemaMigrations() {
     { table: 'rfqs', column: 'updated_at', ddl: 'ALTER TABLE rfqs ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'quotations', column: 'submitted_at', ddl: 'ALTER TABLE quotations ADD COLUMN submitted_at DATETIME NULL AFTER notes' },
     { table: 'quotations', column: 'updated_at', ddl: 'ALTER TABLE quotations ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
+    // Each outbound response form keeps its original email metadata so an old
+    // link can be resent safely with the current public application address.
+    { table: 'requisition_email_threads', column: 'recipient_phone', ddl: 'ALTER TABLE requisition_email_threads ADD COLUMN recipient_phone VARCHAR(50) NULL AFTER recipient_email' },
+    { table: 'requisition_email_threads', column: 'message', ddl: 'ALTER TABLE requisition_email_threads ADD COLUMN message TEXT NULL AFTER recipient_phone' },
+    { table: 'requisition_email_threads', column: 'response_submitted_at', ddl: 'ALTER TABLE requisition_email_threads ADD COLUMN response_submitted_at DATETIME NULL AFTER created_at' },
     { table: 'purchase_orders', column: 'approved_at', ddl: 'ALTER TABLE purchase_orders ADD COLUMN approved_at DATETIME NULL AFTER reviewed_by' },
     { table: 'purchase_orders', column: 'updated_at', ddl: 'ALTER TABLE purchase_orders ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'goods_receipts', column: 'expected_at', ddl: 'ALTER TABLE goods_receipts ADD COLUMN expected_at DATETIME NULL AFTER received_by' },
@@ -169,6 +254,7 @@ export async function applySchemaMigrations() {
   await pool.query("UPDATE inventory_movements SET reference_no = CONCAT('LEGACY-', id) WHERE reference_no IS NULL");
 
   const foreignKeys = [
+    { table: 'departments', name: 'fk_departments_parent', ddl: 'ALTER TABLE departments ADD CONSTRAINT fk_departments_parent FOREIGN KEY (parent_id) REFERENCES departments(id) ON DELETE RESTRICT' },
     { table: 'items', name: 'fk_items_department', ddl: 'ALTER TABLE items ADD CONSTRAINT fk_items_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
     { table: 'requisitions', name: 'fk_req_supervisor', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE SET NULL' },
     { table: 'requisitions', name: 'fk_req_forwarded_by', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_forwarded_by FOREIGN KEY (forwarded_by_supervisor) REFERENCES users(id) ON DELETE SET NULL' },
@@ -221,6 +307,15 @@ export async function applySchemaMigrations() {
       updated_by INT UNSIGNED NULL,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       CONSTRAINT fk_app_settings_user FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS procurement_committee_members (
+      id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      first_name VARCHAR(100) NOT NULL,
+      last_name VARCHAR(100) NOT NULL,
+      email VARCHAR(190) NOT NULL UNIQUE,
+      phone VARCHAR(50) NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS requisition_attachments (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -298,6 +393,104 @@ export async function applySchemaMigrations() {
       CONSTRAINT fk_rfq_email_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
       INDEX idx_rfq_email_status (rfq_id, status)
     )`,
+    `CREATE TABLE IF NOT EXISTS rfq_committee_reviews (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      rfq_id INT UNSIGNED NOT NULL,
+      token CHAR(64) NOT NULL UNIQUE,
+      committee_member_id INT UNSIGNED NULL,
+      created_by INT UNSIGNED NULL,
+      recipient_name VARCHAR(200) NOT NULL,
+      recipient_email VARCHAR(190) NOT NULL,
+      report_snapshot JSON NOT NULL,
+      status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+      sent_at DATETIME NULL,
+      opened_at DATETIME NULL,
+      submitted_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT uq_rfq_committee_review_token UNIQUE (token),
+      CONSTRAINT fk_rfq_committee_review_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
+      CONSTRAINT fk_rfq_committee_review_member FOREIGN KEY (committee_member_id) REFERENCES procurement_committee_members(id) ON DELETE SET NULL,
+      CONSTRAINT fk_rfq_committee_review_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_rfq_committee_review_rfq (rfq_id, status)
+    )`,
+    `CREATE TABLE IF NOT EXISTS rfq_committee_decisions (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      review_id BIGINT UNSIGNED NOT NULL,
+      supplier_id INT UNSIGNED NOT NULL,
+      decision ENUM('Accepted','Rejected') NOT NULL,
+      reason TEXT NULL,
+      responder_name VARCHAR(150) NULL,
+      decided_at DATETIME NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uq_rfq_committee_decision UNIQUE (review_id, supplier_id),
+      CONSTRAINT fk_rfq_committee_decision_review FOREIGN KEY (review_id) REFERENCES rfq_committee_reviews(id) ON DELETE CASCADE,
+      CONSTRAINT fk_rfq_committee_decision_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS google_email_connection (
+      id TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+      mailbox VARCHAR(190) NOT NULL,
+      refresh_token MEDIUMTEXT NOT NULL,
+      token_iv CHAR(24) NOT NULL,
+      token_tag CHAR(32) NOT NULL,
+      granted_scopes TEXT NOT NULL,
+      connected_by INT UNSIGNED NULL,
+      connected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_google_email_connected_by FOREIGN KEY (connected_by) REFERENCES users(id) ON DELETE SET NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS google_email_oauth_states (
+      state_hash CHAR(64) NOT NULL PRIMARY KEY,
+      created_by INT UNSIGNED NOT NULL,
+      expires_at DATETIME NOT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_google_email_state_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+      INDEX idx_google_email_state_expiry (expires_at)
+    )`,
+    `CREATE TABLE IF NOT EXISTS google_email_messages (
+      gmail_message_id VARCHAR(190) NOT NULL PRIMARY KEY,
+      thread_id VARCHAR(190) NOT NULL,
+      sender VARCHAR(500) NOT NULL DEFAULT '',
+      recipient VARCHAR(500) NOT NULL DEFAULT '',
+      subject VARCHAR(998) NOT NULL DEFAULT '',
+      snippet VARCHAR(1000) NOT NULL DEFAULT '',
+      body_text MEDIUMTEXT NOT NULL,
+      labels JSON NOT NULL,
+      unread BOOLEAN NOT NULL DEFAULT FALSE,
+      received_at DATETIME NULL,
+      synced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_google_email_received (received_at)
+    )`,
+    `CREATE TABLE IF NOT EXISTS requisition_email_threads (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      requisition_id INT UNSIGNED NOT NULL,
+      token CHAR(32) NOT NULL,
+      recipient_email VARCHAR(190) NOT NULL,
+      recipient_phone VARCHAR(50) NULL,
+      message TEXT NULL,
+      created_by INT UNSIGNED NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      response_submitted_at DATETIME NULL,
+      CONSTRAINT uq_requisition_email_thread_token UNIQUE (token),
+      CONSTRAINT fk_requisition_email_thread_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_requisition_email_thread_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS requisition_email_comments (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      requisition_id INT UNSIGNED NOT NULL,
+      thread_id BIGINT UNSIGNED NULL,
+      gmail_message_id VARCHAR(190) NOT NULL,
+      sender VARCHAR(500) NOT NULL DEFAULT '',
+      recipient VARCHAR(500) NOT NULL DEFAULT '',
+      subject VARCHAR(998) NOT NULL DEFAULT '',
+      comment TEXT NOT NULL,
+      body_text MEDIUMTEXT NULL,
+      received_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uq_requisition_email_comment_message UNIQUE (gmail_message_id),
+      CONSTRAINT fk_requisition_email_comment_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_requisition_email_comment_thread FOREIGN KEY (thread_id) REFERENCES requisition_email_threads(id) ON DELETE SET NULL,
+      INDEX idx_requisition_email_comment_req_date (requisition_id, received_at)
+    )`,
     `CREATE TABLE IF NOT EXISTS inventory_movement_attachments (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
       movement_id BIGINT UNSIGNED NOT NULL,
@@ -310,6 +503,7 @@ export async function applySchemaMigrations() {
     )`
   ];
   for (const ddl of tables) await pool.query(ddl);
+  await seedDepartmentHierarchy();
 }
 
 export default pool;

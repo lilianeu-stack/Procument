@@ -1,15 +1,18 @@
 import {
   Activity, ArrowDownToLine, Boxes, BriefcaseBusiness, ChevronLeft, ChevronRight,
-  FileText, Inbox, LayoutDashboard, LogOut, Settings, Truck, Users
+  FileText, Inbox, LayoutDashboard, LogOut, Mail, Settings, Truck, Users
 } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
-import { canAccessPage, RECEIVED_REQUESTS_PAGE, SETTINGS_PAGE } from '../../utils/access.js';
+import {
+  canAccessPage, PROCUREMENT_COMMITTEE_PAGE, RECEIVED_REQUESTS_PAGE, SETTINGS_PAGE
+} from '../../utils/access.js';
 
 const groups = [
   { section: 'WORKSPACE', links: [
     { name: 'Overview', icon: LayoutDashboard },
     { name: RECEIVED_REQUESTS_PAGE, icon: Inbox },
     { name: 'RFQs', icon: FileText },
+    { name: 'Email Inbox', icon: Mail },
     { name: 'Goods receipts', icon: ArrowDownToLine },
     { name: 'Invoices', icon: BriefcaseBusiness },
     { name: 'Suppliers', icon: Truck }
@@ -21,6 +24,7 @@ const groups = [
   ] },
   { section: 'ADMINISTRATION', links: [
     { name: 'Users', icon: Users },
+    { name: PROCUREMENT_COMMITTEE_PAGE, icon: Users },
     { name: SETTINGS_PAGE, icon: Settings }
   ] }
 ];

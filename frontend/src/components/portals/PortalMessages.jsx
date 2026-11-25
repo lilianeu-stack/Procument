@@ -3,6 +3,7 @@ import {
   ArrowLeft, Check, ChevronRight, Megaphone, Paperclip, Send
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import Modal from '../ui/Modal.jsx';
 import {
   AttachmentPicker, EmptyState, ErrorState, LoadingState, PageHeader,
   PortalBadge, primaryButtonClass, secondaryButtonClass
@@ -69,6 +70,7 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
   const [announcementBusy, setAnnouncementBusy] = useState(false);
   const [announcementError, setAnnouncementError] = useState('');
   const [showAnnouncementComposer, setShowAnnouncementComposer] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
 
   const loadInbox = useCallback(async () => {
     setLoading(true); setError('');
@@ -145,7 +147,7 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
         requisitionId: relatedRequest ? Number(relatedRequest) : undefined,
         attachments
       });
-      setBody(''); setFiles([]);
+      setBody(''); setFiles([]); setReplyOpen(false);
       await loadThread();
     } catch (exception) {
       setError(exception.message || 'Message could not be sent.');
@@ -186,15 +188,16 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
       description={isSupervisor
         ? 'Private conversations with Requesters in your Department, plus Department-wide announcements.'
         : 'Your direct line to the assigned Department Supervisor, plus Department announcements.'}
-      actions={isSupervisor && <button type="button" onClick={() => setShowAnnouncementComposer((open) => !open)} className={primaryButtonClass()}>
-        <Megaphone size={14} />{showAnnouncementComposer ? 'Hide composer' : 'New announcement'}
+      actions={isSupervisor && <button type="button" onClick={() => setShowAnnouncementComposer(true)} className={primaryButtonClass()}>
+        <Megaphone size={14} />New announcement
       </button>}
     />
 
     <ErrorState message={error} onRetry={loadInbox} />
 
-    {showAnnouncementComposer && isSupervisor && <PageCard title="Department announcement" description="Sent to every active Requester in your Department.">
-      <form onSubmit={sendAnnouncement} className="space-y-4 p-5">
+    {showAnnouncementComposer && isSupervisor && <Modal title="Department announcement" onClose={() => setShowAnnouncementComposer(false)}>
+      <p className="mb-4 text-xs text-muted">Sent to every active Requester in your Department.</p>
+      <form onSubmit={sendAnnouncement} className="space-y-4">
         <label className="block text-xs font-bold">
           Announcement
           <textarea rows="3" value={announcementBody} onChange={(event) => setAnnouncementBody(event.target.value)}
@@ -202,11 +205,11 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
         </label>
         <AttachmentPicker files={announcementFiles} onChange={setAnnouncementFiles} />
         <ErrorState message={announcementError} />
-        <button type="submit" disabled={announcementBusy || (!announcementBody.trim() && !announcementFiles.length)} className={primaryButtonClass()}>
+        <div className="flex justify-end"><button type="submit" disabled={announcementBusy || (!announcementBody.trim() && !announcementFiles.length)} className={primaryButtonClass()}>
           <Send size={14} />{announcementBusy ? 'Sending…' : 'Send announcement'}
-        </button>
+        </button></div>
       </form>
-    </PageCard>}
+    </Modal>}
 
     <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
       <PageCard title="Conversations" description={`${conversations.length} ${isSupervisor ? 'Requester' : 'Supervisor'} contact${conversations.length === 1 ? '' : 's'}`}>
@@ -230,26 +233,11 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
                 {thread?.messages?.length ? thread.messages.map((message) => <MessageBubble key={message.id} message={message} userId={userId} />)
                   : <EmptyState title="No messages yet" description="Start the conversation with a message below." />}
               </div>
-              <form onSubmit={send} className="space-y-3 border-t border-slate-100 p-4">
-                <label className="block text-xs font-bold">
-                  Reply to {activeConversation?.name || 'contact'}
-                  <textarea rows="3" value={body} onChange={(event) => setBody(event.target.value)}
-                    placeholder="Write your message…" className="field h-auto py-2" />
-                </label>
-                <label className="block text-xs font-bold">
-                  Related request (optional)
-                  <select value={relatedRequest} onChange={(event) => setRelatedRequest(event.target.value)} className="field">
-                    <option value="">No related request</option>
-                    {requestOptions.map((request) => <option key={request.id} value={request.id}>{request.reference} · {request.title}</option>)}
-                    {relatedRequest && !requestOptions.some((request) => String(request.id) === String(relatedRequest)) &&
-                      <option value={relatedRequest}>Request #{relatedRequest}</option>}
-                  </select>
-                </label>
-                <AttachmentPicker files={files} onChange={setFiles} />
-                <button type="submit" disabled={sending || (!body.trim() && !files.length)} className={primaryButtonClass()}>
-                  <Send size={14} />{sending ? 'Sending…' : 'Send message'}
+              <div className="flex justify-end border-t border-slate-100 p-4">
+                <button type="button" onClick={() => setReplyOpen(true)} disabled={!activeConversation} className={primaryButtonClass()}>
+                  <Send size={14} />Reply
                 </button>
-              </form>
+              </div>
             </>}
       </PageCard>
     </div>
@@ -277,5 +265,29 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
       className="mt-4 inline-flex items-center gap-1.5 text-xs font-bold text-brand hover:underline">
       <ArrowLeft size={14} />Back to dashboard <ChevronRight size={12} className="hidden" />
     </button>
+
+    {replyOpen && activeConversation && <Modal title={`Reply · ${activeConversation.name}`} onClose={() => setReplyOpen(false)}>
+      <form onSubmit={send} className="space-y-4">
+        <label className="block text-xs font-bold">
+          Message
+          <textarea rows="4" value={body} onChange={(event) => setBody(event.target.value)}
+            placeholder="Write your message…" className="field h-auto py-2" />
+        </label>
+        <label className="block text-xs font-bold">
+          Related request (optional)
+          <select value={relatedRequest} onChange={(event) => setRelatedRequest(event.target.value)} className="field">
+            <option value="">No related request</option>
+            {requestOptions.map((request) => <option key={request.id} value={request.id}>{request.reference} · {request.title}</option>)}
+            {relatedRequest && !requestOptions.some((request) => String(request.id) === String(relatedRequest)) &&
+              <option value={relatedRequest}>Request #{relatedRequest}</option>}
+          </select>
+        </label>
+        <AttachmentPicker files={files} onChange={setFiles} />
+        <ErrorState message={error} />
+        <div className="flex justify-end"><button type="submit" disabled={sending || (!body.trim() && !files.length)} className={primaryButtonClass()}>
+          <Send size={14} />{sending ? 'Sending…' : 'Send message'}
+        </button></div>
+      </form>
+    </Modal>}
   </>;
 }

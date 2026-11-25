@@ -1,28 +1,11 @@
-import { useEffect, useState } from 'react';
 import {
   ArrowRight, Bell, Boxes, CheckCircle2, ClipboardCheck, ClipboardList,
   Clock3, FilePlus2, History, Inbox, MessageSquare, ShieldCheck, UsersRound, XCircle
 } from 'lucide-react';
-import StatusBadge from '../ui/StatusBadge.jsx';
 import {
-  EmptyState, ErrorState, LoadingState, StatCard, TableScroll, TextLink, primaryButtonClass
+  StatCard, primaryButtonClass
 } from './PortalUi.jsx';
-import { currency, dateLabel } from '../../utils/format.js';
 import { roleLabel } from '../../utils/access.js';
-
-function useRecentRequests(portalApi, portal) {
-  const [state, setState] = useState({ requests: [], loading: true, error: '' });
-  const [token, setToken] = useState(0);
-  useEffect(() => {
-    let active = true;
-    const getter = portal === 'supervisor' ? portalApi.getSupervisorRequests : portalApi.getRequesterRequests;
-    getter({ page: 1, limit: 6, status: '' })
-      .then((response) => { if (active) setState({ requests: response.requisitions || [], loading: false, error: '' }); })
-      .catch((exception) => { if (active) setState({ requests: [], loading: false, error: exception.message || 'Recent requests could not be loaded.' }); });
-    return () => { active = false; };
-  }, [portalApi, portal, token]);
-  return { ...state, reload: () => setToken((value) => value + 1) };
-}
 
 function Hero({ portal, user, departmentName }) {
   const isSupervisor = portal === 'supervisor';
@@ -67,7 +50,6 @@ export default function RoleBasedDashboard({
   const department = summary?.department || {};
   const stats = summary?.stats || {};
   const departmentName = department.name || user?.department || 'No Department assigned';
-  const recent = useRecentRequests(portalApi, portal);
   const unreadNotifications = stats.unreadNotifications ?? notifications.filter((item) => !item.isRead).length ?? 0;
   const unreadMessages = stats.unreadMessages ?? 0;
   const requestsPage = isSupervisor ? 'Procurement Requests' : 'My Procurement Requests';
@@ -117,53 +99,6 @@ export default function RoleBasedDashboard({
         <MessageSquare size={14} />Open messages{unreadMessages > 0 ? ` (${unreadMessages})` : ''}
       </button>
     </section>}
-
-    <div className="grid gap-5 lg:grid-cols-[1.4fr_1fr]">
-      <section className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card">
-        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div>
-            <h3 className="text-sm font-bold">{isSupervisor ? 'Recent Department requests' : 'My recent requests'}</h3>
-            <p className="mt-1 text-xs text-muted">Latest activity across your workspace.</p>
-          </div>
-          <TextLink onClick={() => onNavigate(requestsPage)}>View all <ArrowRight size={13} className="inline" /></TextLink>
-        </header>
-        {recent.loading ? <LoadingState label="Loading recent requests…" /> : recent.error ? <ErrorState message={recent.error} onRetry={recent.reload} /> :
-          !recent.requests.length ? <EmptyState title="No requests yet" description="Requests will appear here as soon as they are created." /> :
-            <TableScroll minWidth={720}>
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] uppercase text-muted">
-                  <tr>{['Reference', isSupervisor ? 'Requester' : 'Title', 'Submitted', 'Cost', 'Status'].map((heading) =>
-                    <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recent.requests.slice(0, 6).map((request) => <tr key={request.id} className="hover:bg-slate-50/60">
-                    <td className="whitespace-nowrap px-4 py-3 font-bold text-brand">
-                      <TextLink onClick={() => onNavigate(requestsPage, { request: request.id })}>{request.reference}</TextLink>
-                    </td>
-                    <td className="max-w-[230px] truncate px-4 py-3">{isSupervisor ? request.requester : request.title}</td>
-                    <td className="whitespace-nowrap px-4 py-3">{dateLabel(request.submittedAt || request.createdAt)}</td>
-                    <td className="whitespace-nowrap px-4 py-3 font-bold">{currency(request.total)}</td>
-                    <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={request.status} /></td>
-                  </tr>)}
-                </tbody>
-              </table>
-            </TableScroll>}
-      </section>
-
-      <section className="overflow-hidden rounded-xl border border-slate-100 bg-white shadow-card">
-        <header className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <h3 className="text-sm font-bold">Unread notifications</h3>
-          <TextLink onClick={() => onNavigate('Notifications')}>View all</TextLink>
-        </header>
-        {unreadNotifications ? <div className="divide-y">
-          {notifications.filter((item) => !item.isRead).slice(0, 4).map((notice) => <button key={notice.id} type="button"
-            onClick={() => onOpenNotification(notice)} className="block w-full px-5 py-3 text-left hover:bg-slate-50">
-            <div className="text-xs font-bold">{notice.title}</div>
-            <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted">{notice.body}</div>
-          </button>)}
-        </div> : <EmptyState title="All caught up" description="No unread notifications right now." />}
-      </section>
-    </div>
 
     <p className="text-[11px] text-muted">
       Need help? {isSupervisor ? 'Approval decisions and stock views are restricted to your Department.' : 'Your requests are visible only to you and your Department Supervisor.'}

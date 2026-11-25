@@ -33,13 +33,15 @@ const CANONICAL_HEADERS = {
   email: 'email', 'email address': 'email',
   role: 'role',
   department: 'department', 'department name': 'department',
+  subdepartment: 'department', 'sub department': 'department', 'subdepartment name': 'department',
   phone: 'phone', 'phone number': 'phone', phonenumber: 'phone'
 };
 
 export function csvRowsToUsers(rows) {
   if (!rows.length) return [];
   const headers = rows[0].map((header) => String(header).trim().toLowerCase().replace(/\s+/g, ' '));
-  const missing = ['email', 'role', 'department'].filter((header) => !headers.includes(header));
+  const missing = ['email', 'role'].filter((header) => !headers.includes(header));
+  if (!headers.includes('department') && !headers.includes('subdepartment')) missing.push('Subdepartment');
   if (missing.length) throw new Error(`The template must include ${missing.map((header) => header[0].toUpperCase() + header.slice(1)).join(', ')} column(s).`);
   return rows.slice(1).map((cells) => Object.fromEntries(
     headers.map((header, index) => [CANONICAL_HEADERS[header] || header, cells[index] ?? ''])

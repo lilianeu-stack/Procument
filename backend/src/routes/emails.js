@@ -1,55 +1,344 @@
+import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
-import { writeAudit } from '../lib/events.js';
 import { allowRoles } from '../middleware/auth.js';
-import { buildTestEmail, sendEmail, verifyEmailConnection } from '../services/email.js';
+import { writeAudit } from '../lib/events.js';
+import { committeeReviewLink, sendEmail } from '../services/email.js';
+import {
+  buildCommitteeReport, committeeReportText, committeeReviewEmailHtml, parseRfqIds
+} from '../services/committee-review.js';
+import { getSettings } from '../services/settings.js';
 import {
   createResendDelivery, listRfqDeliveries, retryFailedDeliveries, sendRfqDeliveries
 } from '../services/rfq-email.js';
-import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
 
 const router = Router();
 const managers = ['admin', 'procurement'];
-
-router.get('/email/config', allowRoles(...managers), (_req, res) => {
-  return res.json({ config: emailConfigStatus() });
-});
-
-router.post('/email/verify', allowRoles(...managers), async (req, res, next) => {
-  try {
-    const result = await verifyEmailConnection();
-    if (!result.ok) return res.status(503).json(result);
-    await writeAudit(pool, req.user.id, 'verified', 'email_config', 'smtp', { ok: true });
-    return res.json(result);
-  } catch (error) { return next(error); }
-});
-
-router.post('/email/test', allowRoles(...managers), async (req, res, next) => {
-  try {
-    const recipient = normalizeEmail(req.user.email);
-    if (!validEmail(recipient)) {
-      return res.status(400).json({ message: 'Your account has no valid email address. Update it before sending a test.' });
-    }
-    const result = await sendEmail({ ...buildTestEmail(), to: recipient });
-    await writeAudit(pool, req.user.id, 'tested', 'email_config', recipient, {
-      status: result.status,
-      reason: result.reason || null,
-      providerMessageId: result.providerMessageId || null
-    });
-    if (!result.ok) return res.status(503).json({ message: result.error?.message || 'Email provider rejected the test message.', result });
-    return res.json({
-      message: 'Test message accepted by the email provider. Provider acceptance is not proof of inbox delivery.',
-      result
-    });
-  } catch (error) { return next(error); }
-});
 
 router.get('/rfqs/:id/email-deliveries', allowRoles(...managers), async (req, res, next) => {
   try {
     const [[rfq]] = await pool.execute('SELECT id, reference FROM rfqs WHERE id = ?', [req.params.id]);
     if (!rfq) return res.status(404).json({ message: 'RFQ not found.' });
     const result = await listRfqDeliveries(req.params.id);
-    return res.json({ rfq, ...result, config: emailConfigStatus() });
+    return res.json({ rfq, ...result });
+  } catch (error) { return next(error); }
+});
+
+// What Procurement sees in the preview is built by the same service used for
+// the email, so invitation times and response times cannot drift apart.
+router.get('/rfqs/committee-preview', allowRoles(...managers), async (req, res, next) => {
+  try {
+    const report = await buildCommitteeReport(req.query.rfqIds);
+    const [members] = await pool.execute(
+      `SELECT id, first_name AS firstName, last_name AS lastName, email
+       FROM procurement_committee_members
+       ORDER BY last_name, first_name, id`
+    );
+    return res.json({ report, members });
+  } catch (error) { return next(error); }
+});
+
+function readableGeneratedAt(value, settings) {
+  const raw = String(value || '');
+  const instant = new Date(raw);
+  if (Number.isNaN(instant.getTime())) return raw || 'Not recorded';
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone: settings.timezone || 'UTC',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short'
+    }).format(instant);
+  } catch {
+    return `${raw.slice(0, 16).replace('T', ' ')} UTC`;
+  }
+}
+
+router.post('/rfqs/send-to-committee', allowRoles(...managers), async (req, res, next) => {
+  const rfqIds = parseRfqIds(req.body?.rfqIds);
+  const selectedMemberIds = req.body?.memberIds;
+  const recommendationsInput = req.body?.recommendations;
+
+  try {
+    let members;
+    if (selectedMemberIds !== undefined && selectedMemberIds !== null) {
+      if (!Array.isArray(selectedMemberIds) || !selectedMemberIds.length) {
+        return res.status(400).json({ message: 'Select at least one committee member to receive this review.' });
+      }
+      const memberIds = [...new Set(selectedMemberIds.map(Number))];
+      if (memberIds.some((id) => !Number.isSafeInteger(id) || id < 1)) {
+        return res.status(400).json({ message: 'One or more selected committee members are invalid.' });
+      }
+      [members] = await pool.execute(
+        `SELECT id, first_name AS firstName, last_name AS lastName, email
+         FROM procurement_committee_members
+         WHERE id IN (${memberIds.map(() => '?').join(',')})
+         ORDER BY last_name, first_name, id`,
+        memberIds
+      );
+      if (members.length !== memberIds.length) {
+        return res.status(404).json({ message: 'One or more selected committee members could not be found.' });
+      }
+    } else {
+      [members] = await pool.query(
+        `SELECT id, first_name AS firstName, last_name AS lastName, email
+         FROM procurement_committee_members
+         ORDER BY last_name, first_name, id`
+      );
+    }
+    if (!members.length) {
+      return res.status(409).json({ message: 'Add Procurement Committee members before sending an RFQ.' });
+    }
+
+    const report = await buildCommitteeReport(rfqIds);
+
+    // Procurement enters one recommendation per RFQ before sending. Legacy
+    // callers that omit recommendations keep the previous behaviour.
+    const recommendations = {};
+    if (recommendationsInput !== undefined && recommendationsInput !== null) {
+      for (const section of report) {
+        const entry = recommendationsInput[section.id] || recommendationsInput[String(section.id)];
+        const supplier = (section.suppliers || []).find((item) =>
+          Number(item.supplierId) === Number(entry?.supplierId) && (item.responseAt || item.amount !== null));
+        const reason = String(entry?.reason || '').trim().slice(0, 5000);
+        if (!supplier || !reason) {
+          return res.status(400).json({
+            message: `Choose a recommended supplier and give a reason for ${section.reference}.`
+          });
+        }
+        recommendations[String(section.id)] = {
+          supplierId: Number(supplier.supplierId),
+          supplierName: supplier.name,
+          reason
+        };
+      }
+    }
+
+    const settings = await getSettings();
+    const generatedAt = new Date().toISOString();
+    const responseCount = report.reduce(
+      (total, section) => total + section.suppliers.filter((supplier) =>
+        supplier.responseAt || supplier.amount !== null || (supplier.items || []).length).length,
+      0
+    );
+    const subject = report.length === 1
+      ? `Supplier responses and decision form for ${report[0].reference} - Procurement Committee`
+      : `Supplier responses and decision forms for ${report.length} RFQs - Procurement Committee`;
+
+    const deliveries = [];
+    let reviewsCreated = 0;
+    for (const member of members) {
+      const recipientName = `${member.firstName} ${member.lastName}`.trim();
+      const links = [];
+      const reviewIds = [];
+
+      for (const section of report) {
+        // One token per RFQ and recipient is stored before the email is sent,
+        // so the link remains valid even if the provider is slow. The snapshot
+        // is what was actually emailed and cannot change if a quote is edited.
+        const token = randomBytes(32).toString('hex');
+        const recommendation = recommendations[String(section.id)] || null;
+        const snapshot = {
+          ...section,
+          recommendations,
+          recommendation,
+          generatedAt,
+          recipient: { name: recipientName, email: member.email }
+        };
+        const [result] = await pool.execute(
+          `INSERT INTO rfq_committee_reviews
+             (rfq_id, token, committee_member_id, created_by, recipient_name, recipient_email,
+              recommended_supplier_id, reason, report_snapshot, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+          [section.id, token, member.id || null, req.user.id, recipientName, member.email,
+            recommendation?.supplierId || null, recommendation?.reason || null,
+            JSON.stringify(snapshot)]
+        );
+        reviewIds.push(Number(result.insertId));
+        links.push({ reference: section.reference, url: committeeReviewLink(token) });
+      }
+
+      const text = [
+        `Hello ${recipientName},`,
+        '',
+        `Procurement has sent ${responseCount} supplier response(s) for your decision. Prepared ${readableGeneratedAt(generatedAt, settings)}.`,
+        '',
+        'OPEN YOUR DECISION FORM(S) BELOW. For every supplier response, choose Accept or Deny. Give a reason for each Deny. Only one decision set is accepted per link.',
+        '',
+        ...links.map((link) => `- ${link.reference}: ${link.url}`),
+        '',
+        ...report.map((section) => {
+          const base = committeeReportText(section, settings);
+          const recommendation = recommendations[String(section.id)];
+          return recommendation
+            ? `${base}\n\nProcurement recommendation: ${recommendation.supplierName}\nReason: ${recommendation.reason}`
+            : base;
+        }),
+        '',
+        'All amounts are in RWF.'
+      ].join('\n');
+
+      const emailResult = await sendEmail({
+        to: member.email,
+        subject,
+        text,
+        html: committeeReviewEmailHtml({
+          recipientName, sections: report, links, recommendations, generatedAt, settings
+        })
+      });
+      if (reviewIds.length) {
+        await pool.execute(
+          `UPDATE rfq_committee_reviews
+              SET sent_at = UTC_TIMESTAMP(), status = ?
+            WHERE id IN (${reviewIds.map(() => '?').join(',')})`,
+          [emailResult.ok ? 'Sent' : 'Failed', ...reviewIds]
+        );
+        reviewsCreated += reviewIds.length;
+      }
+      deliveries.push({
+        name: recipientName,
+        email: member.email,
+        status: emailResult.status,
+        error: emailResult.ok ? null : emailResult.error?.message || 'Email could not be accepted by the provider.',
+        reviewCount: reviewIds.length
+      });
+    }
+
+    await Promise.all(report.map((section) => writeAudit(pool, req.user.id, 'rfq_committee_email_requested', 'rfq', section.id, {
+      batchReferences: report.map((entry) => entry.reference),
+      recipientCount: members.length,
+      selectedRecipients: members.map((member) => member.email),
+      recommendations,
+      responseCount: section.suppliers.filter((supplier) =>
+        supplier.responseAt || supplier.amount !== null || (supplier.items || []).length).length
+    })));
+
+    const accepted = deliveries.filter((delivery) => delivery.status === 'Accepted by Email Provider').length;
+    return res.json({
+      message: 'RFQ and supplier responses sent to Procurement Committee.',
+      total: deliveries.length,
+      accepted,
+      failed: deliveries.length - accepted,
+      rfqCount: report.length,
+      responseCount,
+      reviewsCreated,
+      deliveries
+    });
+  } catch (error) { return next(error); }
+});
+
+// Procurement reads the outcome of every review it sent, including the
+// Accept/Deny decision and reason recorded by each Committee member.
+router.get('/rfqs/:id/committee-reviews', allowRoles(...managers), async (req, res, next) => {
+  try {
+    const [[rfq]] = await pool.execute('SELECT id, reference FROM rfqs WHERE id = ?', [req.params.id]);
+    if (!rfq) return res.status(404).json({ message: 'RFQ not found.' });
+    const [reviews] = await pool.execute(
+      `SELECT id, recipient_name AS recipientName, recipient_email AS recipientEmail,
+          status, sent_at AS sentAt, opened_at AS openedAt, submitted_at AS submittedAt
+         FROM rfq_committee_reviews
+        WHERE rfq_id = ?
+        ORDER BY id DESC`,
+      [req.params.id]
+    );
+    const [decisions] = await pool.execute(
+      `SELECT d.review_id AS reviewId, d.supplier_id AS supplierId, s.name AS supplier,
+          d.decision, d.reason, d.responder_name AS responderName, d.decided_at AS decidedAt
+         FROM rfq_committee_decisions d
+         JOIN rfq_committee_reviews r ON r.id = d.review_id
+         JOIN suppliers s ON s.id = d.supplier_id
+        WHERE r.rfq_id = ?
+        ORDER BY d.review_id, s.name`,
+      [req.params.id]
+    );
+    const decisionsByReview = new Map();
+    for (const decision of decisions) {
+      if (!decisionsByReview.has(decision.reviewId)) decisionsByReview.set(decision.reviewId, []);
+      decisionsByReview.get(decision.reviewId).push(decision);
+    }
+    return res.json({
+      rfq,
+      reviews: reviews.map((review) => ({
+        ...review,
+        decisions: decisionsByReview.get(review.id) || []
+      }))
+    });
+  } catch (error) { return next(error); }
+});
+
+// A recipient who cannot open the original email can be sent the same private
+// token again. Reusing the token preserves the one-decision-set-per-link rule.
+router.post('/rfqs/:id/committee-reviews/:reviewId/resend', allowRoles(...managers), async (req, res, next) => {
+  try {
+    const [[row]] = await pool.execute(
+      `SELECT r.id, r.token, r.recipient_name AS recipientName, r.recipient_email AS recipientEmail,
+              r.report_snapshot AS snapshot, r.submitted_at AS submittedAt, f.reference
+         FROM rfq_committee_reviews r
+         JOIN rfqs f ON f.id = r.rfq_id
+        WHERE r.id = ? AND r.rfq_id = ?`,
+      [req.params.reviewId, req.params.id]
+    );
+    if (!row) return res.status(404).json({ message: 'Committee review link not found.' });
+    if (row.submittedAt) {
+      return res.status(409).json({ message: 'This recipient has already submitted decisions from the link.' });
+    }
+
+    const snapshot = typeof row.snapshot === 'string' ? JSON.parse(row.snapshot) : (row.snapshot || {});
+    const settings = await getSettings();
+    const generatedAt = readableGeneratedAt(new Date(), settings);
+    const link = committeeReviewLink(row.token);
+    const responseCount = (snapshot.suppliers || []).filter((supplier) =>
+      supplier.responseAt || supplier.amount !== null || (supplier.items || []).length).length;
+    const recommendation = snapshot.recommendation || null;
+    const base = committeeReportText(snapshot, settings);
+
+    const text = [
+      `Hello ${row.recipientName || 'Committee member'},`,
+      '',
+      'The decision link for this RFQ has been resent. Use the link below to open your form; no staff login is needed.',
+      '',
+      `- ${snapshot.reference || row.reference}: ${link}`,
+      '',
+      `Procurement has sent ${responseCount} supplier response(s) for your decision. Prepared ${generatedAt}.`,
+      '',
+      'For every supplier response, choose Accept or Deny. Give a reason for each Deny. Only one decision set is accepted per link.',
+      '',
+      recommendation ? `${base}\n\nProcurement recommendation: ${recommendation.supplierName}\nReason: ${recommendation.reason}` : base,
+      '',
+      'All amounts are in RWF.'
+    ].join('\n');
+
+    const emailResult = await sendEmail({
+      to: row.recipientEmail,
+      subject: `Decision link resent for ${snapshot.reference || row.reference} - Procurement Committee`,
+      text,
+      html: committeeReviewEmailHtml({
+        recipientName: row.recipientName || 'Committee member',
+        sections: [snapshot],
+        links: [{ reference: snapshot.reference || row.reference, url: link }],
+        recommendations: recommendation ? { [String(snapshot.id || row.id)]: recommendation } : {},
+        generatedAt,
+        settings
+      })
+    });
+
+    await pool.execute(
+      `UPDATE rfq_committee_reviews
+          SET sent_at = UTC_TIMESTAMP(), status = ?
+        WHERE id = ?`,
+      [emailResult.ok ? 'Sent' : 'Failed', row.id]
+    );
+    await writeAudit(pool, req.user.id, 'rfq_committee_link_resent', 'rfq', req.params.id, {
+      reviewId: row.id,
+      recipientEmail: row.recipientEmail,
+      status: emailResult.status
+    });
+
+    return res.json({
+      message: emailResult.ok
+        ? `Decision link resent to ${row.recipientEmail}.`
+        : 'The email provider did not accept the resent decision link.',
+      result: emailResult
+    });
   } catch (error) { return next(error); }
 });
 

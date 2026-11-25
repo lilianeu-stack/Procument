@@ -77,6 +77,49 @@ export function toDateInputValue(value) {
   return `${year}-${month}-${day}`;
 }
 
+export function toDateTimeInputValue(value = new Date()) {
+  const date = parseInstant(value) || new Date();
+  const { year, month, day, hour, minute } = partsInTimezone(date);
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+const WALL_DATETIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+// datetime-local values are wall-clock times in the configured display zone.
+// Convert them to a UTC instant before sending them to the API.
+export function toUtcDateTimeInputValue(value) {
+  const match = String(value || '').trim().match(WALL_DATETIME);
+  if (!match) return '';
+  const [, year, month, day, hour, minute] = match;
+  const target = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute));
+  if (!Number.isFinite(target)) return '';
+  const timeZone = storedSetting('pims-timezone', env.VITE_DISPLAY_TIMEZONE || 'Africa/Kigali');
+  const wallParts = (instant) => {
+    const values = {};
+    for (const part of new Intl.DateTimeFormat('en-US', {
+      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+    }).formatToParts(instant)) values[part.type] = part.value;
+    return values;
+  };
+  try {
+    let guess = target;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const parts = wallParts(new Date(guess));
+      const asUtc = Date.UTC(
+        Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+        Number(parts.hour), Number(parts.minute), Number(parts.second)
+      );
+      const difference = target - asUtc;
+      if (!difference) break;
+      guess += difference;
+    }
+    return new Date(guess).toISOString();
+  } catch {
+    return new Date(target).toISOString();
+  }
+}
+
 function isoFromParts(year, month, day, offsetDays = 0) {
   return new Date(Date.UTC(year, month - 1, day + offsetDays)).toISOString().slice(0, 10);
 }

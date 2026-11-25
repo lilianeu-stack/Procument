@@ -92,6 +92,37 @@ export function businessDate(value, label, options) {
   return result.value;
 }
 
+export function validateBusinessDateTime(value, label, { required = false, allowPast = true } = {}) {
+  const raw = value == null ? '' : String(value).trim();
+  if (!raw) {
+    return required ? { error: `${label} is required.` } : { value: null };
+  }
+  // Date-only payloads remain valid for older clients and tests. They keep the
+  // existing whole-day treatment instead of being rejected as past midnight.
+  if (isIsoDate(raw)) {
+    const dateResult = validateBusinessDate(raw, label, { required, allowPast });
+    if (dateResult.error) return dateResult;
+    return { value: `${raw} 00:00:00` };
+  }
+  if (!isIsoDateTime(raw)) {
+    return { error: `${label} must be a valid date and time.` };
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    return { error: `${label} must be a valid date and time.` };
+  }
+  if (!allowPast && parsed.getTime() < Date.now()) {
+    return { error: `${label} cannot be in the past.` };
+  }
+  return { value: parsed.toISOString().slice(0, 19).replace('T', ' ') };
+}
+
+export function businessDateTime(value, label, options) {
+  const result = validateBusinessDateTime(value, label, options);
+  if (result.error) throw Object.assign(new Error(result.error), { status: 400 });
+  return result.value;
+}
+
 export function validateDateOrder(values, pairs) {
   for (const [startLabel, endLabel] of pairs) {
     const start = values[startLabel];

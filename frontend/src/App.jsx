@@ -25,13 +25,15 @@ import StockKeeperBinCards from './components/portals/StockKeeperBinCards.jsx';
 import ReceivedRequests from './components/portals/ReceivedRequests.jsx';
 import ProcurementDocumentView from './components/portals/ProcurementDocumentView.jsx';
 import SupplierRfqPage from './components/portals/SupplierRfqPage.jsx';
+import RequestResponsePage from './components/portals/RequestResponsePage.jsx';
+import CommitteeReviewPage from './components/portals/CommitteeReviewPage.jsx';
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { api } from './services/api.js';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, roleLabel,
-  PORTALS, PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE
+  PORTALS, PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE
 } from './utils/access.js';
-import { buildRoute, parseRoute } from './utils/routes.js';
+import { buildRoute, parseRoute, readRouteFromLocation } from './utils/routes.js';
 import { dateQueryForFilter } from './utils/reportFields.js';
 
 const StockKeeperRequesters = lazy(() => import('./components/portals/StockKeeperRequesters.jsx'));
@@ -51,6 +53,7 @@ const initialData = {
   storeRequests: [],
   users: [],
   departments: [],
+  committeeMembers: [],
   notifications: [],
   portalSummary: null,
   portalExtras: null
@@ -61,7 +64,7 @@ function request(path, body, method = 'POST') {
 }
 
 function readRoute() {
-  return parseRoute(window.location.hash);
+  return readRouteFromLocation(window.location);
 }
 
 function toQuery(params = {}) {
@@ -206,7 +209,7 @@ export default function App() {
       if (portal === 'admin') {
         const [
           dashboard, requisitions, receivedRequests, inventory, suppliers, rfqs, purchaseOrders,
-          goodsReceipts, invoices, storeRequests, notifications
+          goodsReceipts, invoices, storeRequests, notifications, committee
         ] = await Promise.all([
           api('/dashboard'), api(filtered('/requisitions')),
           canAccessPage(user.role, RECEIVED_REQUESTS_PAGE)
@@ -214,7 +217,10 @@ export default function App() {
             : Promise.resolve({ requisitions: [] }),
           api('/inventory'), api(filtered('/suppliers')),
           api(filtered('/rfqs')), api(filtered('/purchase-orders')), api(filtered('/goods-receipts')),
-          api(filtered('/invoices')), api(filtered('/store-requests')), api('/notifications')
+          api(filtered('/invoices')), api(filtered('/store-requests')), api('/notifications'),
+          canAccessPage(user.role, PROCUREMENT_COMMITTEE_PAGE)
+            ? api('/procurement-committee')
+            : Promise.resolve({ members: [] })
         ]);
         // Account and Department administration is Administrator-only.
         // Audit history remains in the backend; the Administrator UI no longer
@@ -239,6 +245,7 @@ export default function App() {
           purchaseOrders: purchaseOrders.purchaseOrders || [],
           goodsReceipts: goodsReceipts.goodsReceipts || [], invoices: invoices.invoices || [],
           storeRequests: storeRequests.storeRequests || [], notifications: notifications.notifications || [],
+          committeeMembers: committee.members || [],
           users: users.users || [], departments: departments.departments || [],
           quotations: current.quotations || [],
           movements, portalSummary: null, portalExtras: null
@@ -268,7 +275,7 @@ export default function App() {
     api('/admin/settings')
       .then((result) => {
         const settings = result.settings || {};
-        localStorage.setItem('pims-currency', settings.default_currency || 'USD');
+        localStorage.setItem('pims-currency', 'RWF');
         localStorage.setItem('pims-currency-precision', String(settings.decimal_precision ?? 2));
         localStorage.setItem('pims-date-format', settings.date_format || 'DD/MM/YYYY');
         localStorage.setItem('pims-time-format', settings.time_format || '24');
@@ -334,10 +341,16 @@ export default function App() {
       decideRequest: (id, payload) => post(`/portal/supervisor/requisitions/${id}/decision`, payload),
       forwardRequest: (id) => post(`/portal/supervisor/requisitions/${id}/forward`),
       getRequesters: async () => api('/portal/supervisor/requesters'),
+      getDepartmentUsers: async () => api('/portal/supervisor/department-users'),
       getDepartments: async () => api('/procurement/departments'),
       getReceivedRequests: (params = {}) => api(`/procurement/received-requests${toQuery(params)}`),
       getReceivedRequest: (id) => api(`/procurement/received-requests/${id}`),
       reviewReceivedRequest: (id) => post(`/procurement/received-requests/${id}/review`),
+      sendEmail: (payload) => api('/email/send', { method: 'POST', body: JSON.stringify(payload) }),
+      sendRequisitionEmail: (id, payload) => api(`/email/requisitions/${id}/send`, { method: 'POST', body: JSON.stringify(payload) }),
+      getRequisitionForms: (id) => api(`/email/requisitions/${id}/forms`),
+      resendRequisitionForm: (id, threadId) => mutate(`/email/requisitions/${id}/forms/${threadId}/resend`, {}),
+      syncEmailInbox: () => api('/email/inbox/sync', { method: 'POST', body: '{}' }),
       getStock: (params = {}) => api(`/portal/supervisor/stock${toQuery(params)}`),
       getStockItem: (id) => api(`/portal/supervisor/stock/${id}`),
       getConversations: () => api('/portal/messages/conversations'),
@@ -362,6 +375,7 @@ export default function App() {
   async function loadQuotations(rfqId) {
     const result = await api(`/rfqs/${rfqId}/quotations`);
     setData((current) => ({ ...current, quotations: result.quotations }));
+    return result;
   }
 
   async function openNotification(notification) {
@@ -402,14 +416,16 @@ export default function App() {
           return;
         }
       }
-      const destination = link.includes('rfq') ? 'RFQs'
-        : link.includes('purchase') ? RECEIVED_REQUESTS_PAGE
-          : link.includes('invoice') ? 'Invoices'
-            : link.includes('store') ? 'Store requests'
-              : link.includes('inventory') ? 'Stock movements' : RECEIVED_REQUESTS_PAGE;
+      const parsedDestination = parsed.page ? canonicalPage(parsed.page) : null;
+      const destination = parsedDestination && canAccessPage(user.role, parsedDestination) ? parsedDestination
+        : link.includes('rfq') ? 'RFQs'
+          : link.includes('purchase') ? RECEIVED_REQUESTS_PAGE
+            : link.includes('invoice') ? 'Invoices'
+              : link.includes('store') ? 'Store requests'
+                : link.includes('inventory') ? 'Stock movements' : RECEIVED_REQUESTS_PAGE;
       const safeDestination = canAccessPage(user.role, destination) ? destination
         : canAccessPage(user.role, RECEIVED_REQUESTS_PAGE) ? RECEIVED_REQUESTS_PAGE : 'Overview';
-      go('admin', safeDestination);
+      go('admin', safeDestination, parsed.query);
     } catch (exception) {
       setError(exception.message);
     }
@@ -422,10 +438,17 @@ export default function App() {
     roleLabel: user.roleLabel || roleLabel(user.role)
   } : null;
 
-  // Signed Supplier links are public and must not be blocked by the staff
-  // session checks below. The token itself authorizes exactly one Supplier RFQ.
+  // Signed Supplier links and requisition response links are public and must
+  // not be blocked by the staff session checks below. Each token authorizes
+  // exactly one Supplier RFQ or one requisition response form.
   if (activePortal === PORTALS.SUPPLIER) {
     return <ErrorBoundary key="supplier-rfq"><SupplierRfqPage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+  if (activePortal === PORTALS.RESPONSE) {
+    return <ErrorBoundary key="request-response"><RequestResponsePage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+  if (activePortal === PORTALS.COMMITTEE_REVIEW) {
+    return <ErrorBoundary key="committee-review"><CommitteeReviewPage token={route.query?.token || ''} /></ErrorBoundary>;
   }
 
   if (authLoading) return <main className="grid min-h-screen place-items-center bg-canvas">
@@ -455,13 +478,26 @@ export default function App() {
     onAddItem: (form) => mutate('/inventory/items', form),
     onReceive: (form) => mutate('/goods-receipts', form),
     onCreateSupplier: (form) => mutate('/suppliers', form),
+    onUpdateSupplier: (id, form) => mutate(`/suppliers/${id}`, form, 'PATCH'),
+    onDeleteSupplier: (id) => mutate(`/suppliers/${id}`, {}, 'DELETE'),
+    onCreateCommitteeMember: (form) => mutate('/procurement-committee', form),
+    onUpdateCommitteeMember: (id, form) => mutate(`/procurement-committee/${id}`, form, 'PATCH'),
+    onDeleteCommitteeMember: (id) => mutate(`/procurement-committee/${id}`, {}, 'DELETE'),
     onCreateRFQ: (form) => mutate('/rfqs', form),
+    onSendRfqToCommittee: (payload) => mutate('/rfqs/send-to-committee', payload),
+    onPreviewCommittee: (rfqIds) => api(`/rfqs/committee-preview?rfqIds=${rfqIds.map(encodeURIComponent).join(',')}`),
+    onLoadCommitteeReviews: (rfqId) => api(`/rfqs/${rfqId}/committee-reviews`),
+    onResendCommitteeReview: (rfqId, reviewId) => mutate(`/rfqs/${rfqId}/committee-reviews/${reviewId}/resend`, {}),
     onLoadEmailDeliveries: (rfqId) => api(`/rfqs/${rfqId}/email-deliveries`),
     onRetryFailedEmails: (rfqId) => mutate(`/rfqs/${rfqId}/emails/retry-failed`, {}),
     onResendRfqEmail: (rfqId, deliveryId) => mutate(`/rfqs/${rfqId}/email-deliveries/${deliveryId}/resend`, {}),
-    onEmailConfig: () => api('/email/config'),
-    onVerifyEmail: () => request('/email/verify', {}, 'POST'),
-    onTestEmail: () => request('/email/test', {}, 'POST'),
+    getEmailStatus: () => api('/email/google/status'),
+    getEmailConnectUrl: () => api('/email/google/connect'),
+    disconnectGoogleEmail: () => mutate('/email/google/disconnect', {}),
+    getInboxMessages: () => api('/email/inbox/messages'),
+    getInboxMessage: (id) => api(`/email/inbox/messages/${encodeURIComponent(id)}`),
+    syncInbox: () => mutate('/email/inbox/sync', {}),
+    sendEmail: (message) => mutate('/email/send', message),
     onLoadQuotes: loadQuotations,
     onQuote: (id, form) => mutate(`/rfqs/${id}/quotations`, form),
     onAward: (id, quotationId) => mutate(`/rfqs/${id}/award`, { quotationId }),

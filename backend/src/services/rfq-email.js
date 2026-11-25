@@ -2,7 +2,9 @@ import pool from '../config/db.js';
 import { log } from '../lib/logger.js';
 import { normalizeEmail, validEmail } from '../utils/email-config.js';
 import { createRfqToken } from '../utils/rfq-link.js';
-import { buildRfqEmail, sendEmail } from './email.js';
+import { buildRequestedItemsEmail } from '../utils/email-reply.js';
+import { supplierLink, sendEmail } from './email.js';
+import { getSettings } from './settings.js';
 
 const OPEN_RFQ_STATUSES = ['Sent', 'Evaluating'];
 
@@ -13,6 +15,34 @@ function placeholders(values) {
 function errorText(result) {
   if (!result.error) return null;
   return JSON.stringify({ code: result.error.code, message: result.error.message, reason: result.reason || null });
+}
+
+function parseStoredDateTime(value) {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  const text = String(value).trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return new Date(`${text}T00:00:00Z`);
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$/.test(text)) {
+    return new Date(`${text.replace(' ', 'T')}Z`);
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function dateTimeLabel(value, timeZone = 'UTC') {
+  const date = parseStoredDateTime(value);
+  if (!date) return '—';
+  const format = (zone) => {
+    const values = {};
+    for (const part of new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(date)) values[part.type] = part.value;
+    return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}`;
+  };
+  try { return format(timeZone); }
+  catch { return format('UTC'); }
 }
 
 // Called inside the RFQ creation transaction. One row per selected Supplier is
@@ -58,13 +88,14 @@ async function loadDeliveries({ rfqId, onlyFailed = false, deliveryIds = null })
   const [rows] = await pool.execute(
     `SELECT d.id, d.supplier_id AS supplierId, d.recipient_email AS recipientEmail,
        d.rfq_reference AS rfqReference, d.attempts,
-       f.due_date AS dueDate, f.status AS rfqStatus, f.id AS rfqId,
-       r.reference AS requisitionReference, r.title,
-       s.name AS supplierName
+       f.due_date AS dueDate, f.issued_at AS issuedDate, f.message, f.status AS rfqStatus, f.id AS rfqId,
+       r.id AS requisitionId, r.reference AS requisitionReference, r.title,
+       dept.name AS department, s.name AS supplierName
      FROM rfq_email_deliveries d
      JOIN rfqs f ON f.id = d.rfq_id
      JOIN requisitions r ON r.id = f.requisition_id
-     JOIN suppliers s ON s.id = d.supplier_id
+     LEFT JOIN departments dept ON dept.id = r.department_id
+          JOIN suppliers s ON s.id = d.supplier_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY d.id`,
     params
@@ -72,11 +103,24 @@ async function loadDeliveries({ rfqId, onlyFailed = false, deliveryIds = null })
   return rows;
 }
 
+async function loadRequisitionItems(requisitionId) {
+  const [items] = await pool.execute(
+    `SELECT item_name AS itemName, description, quantity, unit,
+       estimated_unit_cost AS estimatedUnitCost,
+       (quantity * estimated_unit_cost) AS lineTotal
+     FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+    [requisitionId]
+  );
+  return items;
+}
+
 // SMTP acceptance is the highest status this generic provider can truthfully
 // claim. Delivered/Bounced only arrive through a provider webhook.
 export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds = null, transport = null } = {}) {
   const deliveries = await loadDeliveries({ rfqId, onlyFailed, deliveryIds });
+  const { timezone } = await getSettings();
   const summary = { total: deliveries.length, accepted: 0, failed: 0, skipped: 0, messages: [] };
+  const requisitionForms = new Map();
 
   for (const delivery of deliveries) {
     if (!OPEN_RFQ_STATUSES.includes(delivery.rfqStatus)) {
@@ -96,14 +140,43 @@ export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds
       [delivery.id]
     );
 
+    let form = requisitionForms.get(delivery.requisitionId);
+    if (!form) {
+      form = {
+        department: delivery.department,
+        items: await loadRequisitionItems(delivery.requisitionId)
+      };
+      requisitionForms.set(delivery.requisitionId, form);
+    }
+
     const token = createRfqToken(delivery.rfqId, delivery.supplierId);
-    const message = buildRfqEmail({
-      supplierName: delivery.supplierName,
+    const message = buildRequestedItemsEmail({
+      requisitionId: delivery.requisitionId,
       reference: delivery.rfqReference,
-      requisitionReference: delivery.requisitionReference,
       title: delivery.title,
-      dueDate: delivery.dueDate,
-      rawToken: token
+      items: form.items,
+      token,
+      message: delivery.message || '',
+      noteLabel: 'Message from Procurement:',
+      subject: `Requested items - ${delivery.rfqReference}`,
+      greeting: `Dear ${delivery.supplierName || 'Supplier'},`,
+      details: [
+        ['RFQ', delivery.rfqReference],
+        ['Requisition', delivery.requisitionReference],
+        ['Send date', dateTimeLabel(delivery.issuedDate, timezone)],
+        ['End date (deadline)', dateTimeLabel(delivery.dueDate, timezone)],
+        ['Supplier', delivery.supplierName || '—'],
+        ['Department', form.department || '—']
+      ],
+      responseUrl: supplierLink(token),
+      responseLabel: 'View request and respond',
+      responseIntro: 'Open this secure link to review the request and submit your response',
+      responseHelp: 'Your response is visible to Procurement only.',
+      instructionsTitle: 'To respond',
+      instructionsText: 'Open the secure link above, review the requested items and submit your quotation. Each invited Supplier receives a unique link.',
+      includeReplyTag: false,
+      includeDescription: false,
+      includeGrandTotal: false
     });
     const result = await sendEmail({ ...message, to: delivery.recipientEmail }, transport);
 

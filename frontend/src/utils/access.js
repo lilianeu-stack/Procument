@@ -4,10 +4,16 @@ export const PORTALS = {
   REQUESTER: 'requester',
   STOCKKEEPER: 'stockkeeper',
   // Public, signed-link portal used by Suppliers. It has no staff login.
-  SUPPLIER: 'supplier'
+  SUPPLIER: 'supplier',
+  // Public token-link page used by recipients of a requisition form email.
+  RESPONSE: 'response',
+  // Public token-link page where a Committee member accepts/denies quotations.
+  COMMITTEE_REVIEW: 'committee-review'
 };
 
 export const SUPPLIER_PAGES = ['RFQ'];
+export const RESPONSE_PAGES = ['Response'];
+export const COMMITTEE_REVIEW_PAGES = ['Review'];
 export const STOCKKEEPER_PAGES = [
   'Dashboard',
   'List of Requesters',
@@ -45,6 +51,7 @@ export const RECEIVED_REQUESTS_PAGE = 'Requests Received from Departments';
 // Internal continuation of a forwarded department request. It is opened from
 // the document page, not from the Administrator sidebar.
 export const PROCUREMENT_PROCESSING_PAGE = 'Procurement Processing';
+export const PROCUREMENT_COMMITTEE_PAGE = 'Procurement Committee';
 export const SETTINGS_PAGE = 'Settings';
 
 // These pages remain in the code for their own portals/history, but are no
@@ -64,7 +71,9 @@ export const PROCUREMENT_PAGES = [
   'Overview',
   RECEIVED_REQUESTS_PAGE,
   PROCUREMENT_PROCESSING_PAGE,
+  PROCUREMENT_COMMITTEE_PAGE,
   'RFQs',
+  'Email Inbox',
   'Goods receipts',
   'Invoices',
   'Suppliers',
@@ -90,6 +99,8 @@ const restrictedPages = {
   'Stock movements': ['admin', 'procurement', 'storekeeper'],
   [RECEIVED_REQUESTS_PAGE]: ['admin', 'procurement'],
   [PROCUREMENT_PROCESSING_PAGE]: ['admin', 'procurement'],
+  'Email Inbox': ['admin', 'procurement'],
+  [PROCUREMENT_COMMITTEE_PAGE]: ['admin', 'procurement'],
   Users: ['admin'],
   'Audit logs': ['admin'],
   [SETTINGS_PAGE]: ['admin']
@@ -127,6 +138,8 @@ export function defaultPageForPortal(portal) {
   if (portal === PORTALS.REQUESTER) return 'Requester Dashboard';
   if (portal === PORTALS.STOCKKEEPER) return 'Dashboard';
   if (portal === PORTALS.SUPPLIER) return 'RFQ';
+  if (portal === PORTALS.RESPONSE) return 'Response';
+  if (portal === PORTALS.COMMITTEE_REVIEW) return 'Review';
   return null;
 }
 
@@ -136,6 +149,9 @@ export function defaultPageForRole(role) {
 
 export function canAccessPage(role, page) {
   const target = canonicalPage(page);
+  // The response form is public and token-gated; it has no staff role.
+  if (role === PORTALS.RESPONSE) return RESPONSE_PAGES.includes(target);
+  if (role === PORTALS.COMMITTEE_REVIEW) return COMMITTEE_REVIEW_PAGES.includes(target);
   const portal = portalForRole(role);
   // Department portals use their own page lists; the admin-side restricted
   // pages only apply to Administrator-side roles.
@@ -143,6 +159,7 @@ export function canAccessPage(role, page) {
   if (portal === PORTALS.REQUESTER) return REQUESTER_PAGES.includes(target);
   if (portal === PORTALS.STOCKKEEPER) return STOCKKEEPER_PAGES.includes(target);
   if (portal === PORTALS.SUPPLIER) return SUPPLIER_PAGES.includes(target);
+  if (portal === PORTALS.RESPONSE) return RESPONSE_PAGES.includes(target);
 
   const allowedRoles = restrictedPages[target];
   if (allowedRoles && !allowedRoles.includes(role)) return false;

@@ -35,6 +35,24 @@ export function parseRoute(hash) {
   return { portal, page, query };
 }
 
+// Committee decision emails use a real path instead of a hash fragment so
+// mail clients and link scanners do not strip the token. Older emailed links
+// still use the hash form and remain supported.
+export function readRouteFromLocation(location) {
+  const hash = String(location?.hash || '');
+  if (hash && hash.length > 1) return parseRoute(hash);
+
+  const path = String(location?.pathname || '').replace(/\/+$/, '');
+  if (path === '/committee-review') {
+    const query = {};
+    for (const [key, value] of new URLSearchParams(location?.search || '')) {
+      if (key) query[key] = value;
+    }
+    return { portal: PORTALS.COMMITTEE_REVIEW, page: 'Review', query };
+  }
+  return parseRoute(hash);
+}
+
 export function buildRoute(portal, page, query = null) {
   const base = `#/${portal}/${encodeURIComponent(page || '')}`;
   if (!query || typeof query !== 'object') return base;

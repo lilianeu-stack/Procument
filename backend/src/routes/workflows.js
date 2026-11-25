@@ -4,7 +4,7 @@ import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { allowRoles } from '../middleware/auth.js';
 import {
-  businessDate, dateFilterClause, enforceDateOrder, parseDateFilter, toUtcDateTime
+  businessDate, businessDateTime, dateFilterClause, enforceDateOrder, parseDateFilter, toUtcDateTime
 } from '../utils/dates.js';
 import { PROCUREMENT_READY_STATUSES, REQUISITION_STATUS } from '../utils/requisition-status.js';
 import { createRfqEmailDeliveries, listRfqDeliveries, sendRfqDeliveries } from '../services/rfq-email.js';
@@ -83,7 +83,51 @@ router.get('/rfqs', async (req, res, next) => {
        GROUP BY f.id ORDER BY COALESCE(f.issued_at, f.created_at) DESC`,
       params
     );
-    return res.json({ rfqs });
+    const [responseRows] = await pool.query(
+      `SELECT q.id, q.rfq_id AS rfqId, q.amount, q.delivery_days AS deliveryDays,
+         q.notes, q.submitted_at AS submittedAt, s.name AS supplier
+       FROM quotations q JOIN suppliers s ON s.id = q.supplier_id
+       ORDER BY q.rfq_id, q.amount, q.delivery_days`
+    );
+    const [responseItemRows] = await pool.query(
+      `SELECT qi.quotation_id AS quotationId, qi.item_name AS itemName, qi.description,
+         qi.quantity, qi.unit, qi.unit_price AS unitPrice, qi.line_total AS lineTotal, qi.comment
+       FROM quotation_items qi ORDER BY qi.quotation_id, qi.id`
+    );
+    const responsesByRfq = new Map();
+    for (const row of responseRows) {
+      const rfqId = Number(row.rfqId);
+      if (!responsesByRfq.has(rfqId)) responsesByRfq.set(rfqId, []);
+      responsesByRfq.get(rfqId).push({
+        id: row.id,
+        supplier: row.supplier,
+        amount: Number(row.amount) || 0,
+        deliveryDays: Number(row.deliveryDays) || 0,
+        notes: row.notes || '',
+        submittedAt: row.submittedAt,
+        items: []
+      });
+    }
+    for (const item of responseItemRows) {
+      for (const response of responsesByRfq.values()) {
+        const quote = response.find((entry) => entry.id === item.quotationId);
+        if (quote) {
+          quote.items.push({
+            itemName: item.itemName,
+            description: item.description || '',
+            quantity: Number(item.quantity) || 0,
+            unit: item.unit || 'unit',
+            unitPrice: Number(item.unitPrice) || 0,
+            lineTotal: Number(item.lineTotal) || 0,
+            comment: item.comment || ''
+          });
+          break;
+        }
+      }
+    }
+    return res.json({
+      rfqs: rfqs.map((rfq) => ({ ...rfq, responses: responsesByRfq.get(Number(rfq.id)) || [] }))
+    });
   } catch (error) { return next(error); }
 });
 
@@ -94,13 +138,20 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
       supplierIds.some((id) => !Number.isInteger(id) || id < 1)) {
     return res.status(400).json({ message: 'Select an approved requisition and at least one valid supplier.' });
   }
+  let startDate;
   let dueDate;
   try {
-    dueDate = businessDate(req.body.dueDate, 'Quotation due date', { allowPast: false });
+    startDate = businessDateTime(req.body.startDate, 'Send start date', { allowPast: false });
+    dueDate = businessDateTime(req.body.dueDate, 'End date (deadline)', { allowPast: false });
+    enforceDateOrder(
+      { 'Send start date': startDate, 'End date (deadline)': dueDate },
+      [['Send start date', 'End date (deadline)']]
+    );
   } catch (error) {
     return res.status(error.status || 400).json({ message: error.message });
   }
   const idempotencyKey = String(req.body.idempotencyKey || '').trim().slice(0, 80);
+  const message = String(req.body.message || '').trim().slice(0, 2000);
   if (idempotencyKey) {
     const [existingRows] = await pool.execute('SELECT id, reference FROM rfqs WHERE idempotency_key = ?', [idempotencyKey]);
     if (existingRows[0]) {
@@ -149,8 +200,8 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
     let result;
     try {
       [result] = await connection.execute(
-        'INSERT INTO rfqs (reference, idempotency_key, requisition_id, due_date, issued_at, created_by) VALUES (?, ?, ?, ?, UTC_TIMESTAMP(), ?)',
-        [rfqReference, idempotencyKey || null, requisitionId, dueDate, req.user.id]
+        'INSERT INTO rfqs (reference, idempotency_key, requisition_id, due_date, issued_at, message, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [rfqReference, idempotencyKey || null, requisitionId, dueDate, startDate, message || null, req.user.id]
       );
     } catch (error) {
       // A concurrent double-click can race the pre-check. The unique key makes
@@ -212,16 +263,66 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
 
 router.get('/rfqs/:id/quotations', async (req, res, next) => {
   try {
+    const [[rfq]] = await pool.execute(
+      `SELECT f.id, f.reference, f.status, f.message, f.issued_at AS issuedAt,
+        f.due_date AS dueDate, r.id AS requisitionId,
+        r.reference AS requisitionReference, r.title,
+        d.name AS department
+       FROM rfqs f
+       JOIN requisitions r ON r.id = f.requisition_id
+       LEFT JOIN departments d ON d.id = r.department_id
+       WHERE f.id = ?`,
+      [req.params.id]
+    );
+    if (!rfq) return res.status(404).json({ message: 'RFQ not found.' });
+
+    const [requestedItems] = await pool.execute(
+      `SELECT item_name AS itemName, quantity, unit,
+        estimated_unit_cost AS estimatedUnitCost,
+        (quantity * estimated_unit_cost) AS lineTotal
+       FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+      [rfq.requisitionId]
+    );
     const [quotations] = await pool.execute(
       `SELECT q.id, q.rfq_id AS rfqId, q.supplier_id AS supplierId, s.name AS supplier,
+        s.contact_name AS supplierContact, s.email AS supplierEmail, s.phone AS supplierPhone,
         q.amount, q.delivery_days AS deliveryDays, q.quality_score AS qualityScore,
-        q.rating_score AS ratingScore, q.notes, q.created_at AS submittedAt,
+        q.rating_score AS ratingScore, q.notes, q.submitted_at AS submittedAt,
         (rf.selected_quotation_id = q.id) AS selected
        FROM quotations q JOIN suppliers s ON s.id = q.supplier_id
        JOIN rfqs rf ON rf.id = q.rfq_id WHERE q.rfq_id = ? ORDER BY q.amount, q.delivery_days`,
       [req.params.id]
     );
-    return res.json({ quotations });
+    let items = [];
+    if (quotations.length) {
+      const [rows] = await pool.execute(
+        `SELECT qi.quotation_id AS quotationId, qi.item_name AS itemName, qi.description,
+           qi.quantity, qi.unit, qi.unit_price AS unitPrice, qi.line_total AS lineTotal, qi.comment
+         FROM quotation_items qi JOIN quotations q ON q.id = qi.quotation_id
+         WHERE q.rfq_id = ? ORDER BY qi.quotation_id, qi.id`,
+        [req.params.id]
+      );
+      items = rows.map((item) => ({
+        ...item,
+        unitPrice: Number(item.unitPrice) || 0,
+        lineTotal: Number(item.lineTotal) || 0
+      }));
+    }
+    return res.json({
+      rfq: {
+        ...rfq,
+        requestedItems: requestedItems.map((item) => ({
+          ...item,
+          quantity: Number(item.quantity) || 0,
+          estimatedUnitCost: Number(item.estimatedUnitCost) || 0,
+          lineTotal: Number(item.lineTotal) || 0
+        }))
+      },
+      quotations: quotations.map((quote) => ({
+        ...quote,
+        items: items.filter((item) => item.quotationId === quote.id)
+      }))
+    });
   } catch (error) { return next(error); }
 });
 

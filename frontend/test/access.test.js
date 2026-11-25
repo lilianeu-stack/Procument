@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, PROCUREMENT_PROCESSING_PAGE,
-  RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, SETTINGS_PAGE,
-  STOCKKEEPER_PAGES, SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
+  canAccessPage, canonicalPage, COMMITTEE_REVIEW_PAGES, defaultPageForPortal, portalForRole, PORTALS,
+  PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, RESPONSE_PAGES,
+  SETTINGS_PAGE, STOCKKEEPER_PAGES, SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
 } from '../src/utils/access.js';
+import { parseRoute, readRouteFromLocation } from '../src/utils/routes.js';
 
 const adminSideRoles = ['admin', 'approver', 'procurement', 'finance', 'committee'];
 const sharedPages = ['Overview', 'RFQs', 'Goods receipts', 'Invoices', 'Suppliers', 'Stock overview', 'Store requests'];
@@ -49,6 +50,14 @@ test('procurement processing is an internal workflow page opened by the admin sh
   assert.equal(canAccessPage('requestor', PROCUREMENT_PROCESSING_PAGE), false);
 });
 
+test('Procurement Committee is restricted to administrators and procurement staff', () => {
+  assert.equal(canAccessPage('admin', PROCUREMENT_COMMITTEE_PAGE), true);
+  assert.equal(canAccessPage('procurement', PROCUREMENT_COMMITTEE_PAGE), true);
+  assert.equal(canAccessPage('committee', PROCUREMENT_COMMITTEE_PAGE), false);
+  assert.equal(canAccessPage('finance', PROCUREMENT_COMMITTEE_PAGE), false);
+  assert.equal(canAccessPage('requestor', PROCUREMENT_COMMITTEE_PAGE), false);
+});
+
 test('portal roles can only open pages in their own portal', () => {
   for (const page of REQUESTER_PAGES) assert.equal(canAccessPage('requestor', page), true, `requestor should see ${page}`);
   for (const page of SUPERVISOR_PAGES) assert.equal(canAccessPage('supervisor', page), true, `supervisor should see ${page}`);
@@ -59,6 +68,39 @@ test('portal roles can only open pages in their own portal', () => {
   assert.equal(canAccessPage('supervisor', 'Users'), false);
   assert.equal(canAccessPage('supervisor', 'My Procurement Requests'), false);
   assert.equal(canAccessPage('supervisor', 'Department Stock Overview'), true);
+});
+
+test('public requisition response links remain outside the staff portals', () => {
+  const token = 'a'.repeat(32);
+  const route = parseRoute(`#/response?token=${token}`);
+  assert.equal(route.portal, PORTALS.RESPONSE);
+  assert.equal(route.query.token, token);
+  assert.equal(defaultPageForPortal(PORTALS.RESPONSE), 'Response');
+  for (const page of RESPONSE_PAGES) assert.equal(canAccessPage('response', page), true);
+  assert.equal(canAccessPage('response', 'Overview'), false);
+  assert.equal(portalForRole('response'), null);
+});
+
+test('public committee decision links remain outside the staff portals', () => {
+  const token = 'b'.repeat(64);
+  const route = parseRoute(`#/committee-review/Review?token=${token}`);
+  assert.equal(route.portal, PORTALS.COMMITTEE_REVIEW);
+  assert.equal(route.query.token, token);
+  assert.equal(defaultPageForPortal(PORTALS.COMMITTEE_REVIEW), 'Review');
+  for (const page of COMMITTEE_REVIEW_PAGES) {
+    assert.equal(canAccessPage(PORTALS.COMMITTEE_REVIEW, page), true);
+  }
+  assert.equal(canAccessPage(PORTALS.COMMITTEE_REVIEW, 'Overview'), false);
+  assert.equal(portalForRole(PORTALS.COMMITTEE_REVIEW), null);
+
+  const pathRoute = readRouteFromLocation({
+    hash: '',
+    pathname: '/committee-review',
+    search: `?token=${token}`
+  });
+  assert.equal(pathRoute.portal, PORTALS.COMMITTEE_REVIEW);
+  assert.equal(pathRoute.page, 'Review');
+  assert.equal(pathRoute.query.token, token);
 });
 
 test('Stock Keepers have a dedicated portal with only its five pages', () => {

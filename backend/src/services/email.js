@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { log } from '../lib/logger.js';
+import { sendGoogleEmail } from './google-email.js';
 import {
   emailConfigStatus, normalizeEmail, sanitizeEmailError,
   smtpTransportOptions, validEmail
@@ -23,61 +24,20 @@ export function getTransporter(override = null) {
   return cachedTransport;
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[character]);
-}
-
-function htmlParagraphs(lines) {
-  return lines.map((line) => `<p style="margin:0 0 12px;line-height:1.55">${escapeHtml(line)}</p>`).join('');
-}
-
 export function supplierLink(token) {
   const config = emailConfigStatus();
   const base = config.appBaseUrl.replace(/\/+$/, '');
   return `${base}/#/supplier/RFQ?token=${encodeURIComponent(token)}`;
 }
 
-function wrapHtml(title, lines, action = null) {
-  return `<!doctype html><html><body style="margin:0;background:#f4f7f6;padding:24px;font-family:Arial,sans-serif;color:#172a39">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;margin:auto;background:#fff;border-radius:12px;overflow:hidden">
-      <tr><td style="background:#123d3a;padding:20px 28px;color:#fff;font-size:16px;font-weight:bold">Hope Haven · Procurement &amp; Stores</td></tr>
-      <tr><td style="padding:28px"><h1 style="font-size:20px;margin:0 0 18px">${escapeHtml(title)}</h1>
-        ${htmlParagraphs(lines)}
-        ${action ? `<p style="margin:24px 0"><a href="${escapeHtml(action.url)}" style="background:#123d3a;color:#fff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">${escapeHtml(action.label)}</a></p><p style="font-size:12px;color:#5b6b73;word-break:break-all">${escapeHtml(action.url)}</p>` : ''}
-        <p style="margin-top:24px;font-size:12px;color:#5b6b73">This message was sent only to the Supplier named above. Do not forward the link; it is unique to your organization.</p>
-      </td></tr>
-    </table></body></html>`;
-}
-
-export function buildRfqEmail({ supplierName, reference, requisitionReference, title, dueDate, rawToken, notes = '' }) {
-  const link = supplierLink(rawToken);
-  const lines = [
-    `Dear ${supplierName || 'Supplier'},`,
-    `Hope Haven invites you to submit a quotation for ${reference}${requisitionReference ? ` (requisition ${requisitionReference})` : ''}.`,
-    title ? `Request: ${title}` : '',
-    dueDate ? `Quotation deadline: ${dueDate}.` : 'Quotation deadline: as stated in the quotation document.',
-    notes ? `Additional information: ${notes}` : '',
-    'Use the secure link below to view the full request and submit your quotation.'
-  ].filter(Boolean);
-  return {
-    subject: `Request for Quotation ${reference} · Hope Haven`,
-    text: `${lines.join('\n\n')}\n\nView RFQ & Submit Quotation:\n${link}\n`,
-    html: wrapHtml(`Request for Quotation ${reference}`, lines, { label: 'View RFQ & Submit Quotation', url: link })
-  };
-}
-
-export function buildTestEmail() {
-  const lines = [
-    'This is a delivery verification message from the Hope Haven Procurement Management System.',
-    'If you received this email, SMTP authentication and message acceptance are working. Acceptance by the provider is not the same as confirmed inbox delivery.'
-  ];
-  return {
-    subject: 'Procurement Management System · Email delivery test',
-    text: `${lines.join('\n\n')}\n`,
-    html: wrapHtml('Email delivery test', lines)
-  };
+// Each Committee member receives their own token, so a decision submitted from
+// one link cannot be attributed to or used to change another member's review.
+// A real path (rather than a hash fragment) survives email link scanners that
+// strip or rewrite fragments. The old hash links are still supported by the app.
+export function committeeReviewLink(token) {
+  const config = emailConfigStatus();
+  const base = config.appBaseUrl.replace(/\/+$/, '');
+  return `${base}/committee-review?token=${encodeURIComponent(token)}`;
 }
 
 // Always awaited by callers. Never claims inbox delivery: SMTP only proves the
@@ -89,15 +49,27 @@ export async function sendEmail(message, override = null) {
   }
   const config = emailConfigStatus();
   if (!config.configured && !override) {
-    return {
-      ok: false,
-      status: 'Failed',
-      reason: 'not_configured',
-      error: {
-        code: 'EMAIL_NOT_CONFIGURED',
-        message: `Email delivery is not configured. Missing environment variable(s): ${config.missing.join(', ')}.`
+    try {
+      return await sendGoogleEmail(message);
+    } catch (error) {
+      if (error.code === 'INVALID_EMAIL_MESSAGE') {
+        return { ok: false, status: 'Failed', reason: 'invalid_message', error: { code: 'INVALID_EMAIL_MESSAGE', message: error.message } };
       }
-    };
+      if (error.status === 409 || error.status === 503) {
+        return {
+          ok: false,
+          status: 'Failed',
+          reason: 'not_configured',
+          error: {
+            code: error.status === 409 ? 'GOOGLE_EMAIL_NOT_CONNECTED' : 'EMAIL_NOT_CONFIGURED',
+            message: error.message
+          }
+        };
+      }
+      const sanitized = sanitizeEmailError(error);
+      log('ERROR', `Google email failed (${sanitized.code}): ${sanitized.message}`);
+      return { ok: false, status: 'Failed', reason: 'provider_error', error: sanitized };
+    }
   }
 
   try {
@@ -132,23 +104,5 @@ export async function sendEmail(message, override = null) {
     const sanitized = sanitizeEmailError(error);
     log('ERROR', `Supplier email failed for ${recipient} (${sanitized.code}): ${sanitized.message}`);
     return { ok: false, status: 'Failed', reason: 'provider_error', error: sanitized };
-  }
-}
-
-export async function verifyEmailConnection(override = null) {
-  const config = emailConfigStatus();
-  if (!config.configured && !override) {
-    return {
-      ok: false,
-      message: `Email delivery is not configured. Missing environment variable(s): ${config.missing.join(', ')}.`
-    };
-  }
-  try {
-    await getTransporter(override).verify();
-    return { ok: true, message: 'SMTP connection and authentication verified.' };
-  } catch (error) {
-    const sanitized = sanitizeEmailError(error);
-    log('ERROR', `SMTP verification failed (${sanitized.code}): ${sanitized.message}`);
-    return { ok: false, message: sanitized.message, code: sanitized.code };
   }
 }

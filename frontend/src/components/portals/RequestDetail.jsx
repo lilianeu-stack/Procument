@@ -6,11 +6,11 @@ import DownloadButton from '../ui/DownloadButton.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
 import PrintHeader from '../ui/PrintHeader.jsx';
 import {
-  ActivityTimeline, AttachmentList, AttachmentPicker, KeyValue, LoadingState,
+  AttachmentPicker, KeyValue,
   PageHeader, PortalBadge, TableScroll, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
-import { downloadBinary, filesToAttachments } from '../../utils/attachments.js';
+import { filesToAttachments } from '../../utils/attachments.js';
 import {
   decisionLabel, decisionTone, isDraft, isInformationRequired, isPendingApproval
 } from '../../utils/status.js';
@@ -72,7 +72,7 @@ export default function RequestDetail({
     <PrintHeader
       title={requisition.title || requisition.reference}
       reference={requisition.reference}
-      dates={`Submitted ${dateTimeLabel(requisition.submittedAt || requisition.createdAt)} · Required by ${dateLabel(requisition.requiredBy)}`}
+      dates={`Submitted ${dateTimeLabel(requisition.submittedAt || requisition.createdAt)}`}
     />
     <PageHeader
       eyebrow={requisition.department || 'Department'}
@@ -99,15 +99,11 @@ export default function RequestDetail({
       <DetailSection title="Request details">
         <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
           <KeyValue label="Reference">{requisition.reference}</KeyValue>
-          <KeyValue label="Priority">{requisition.priority || 'Medium'}</KeyValue>
           <KeyValue label="Requester">{requisition.requester || '—'}</KeyValue>
           <KeyValue label="Department">{requisition.department || '—'}</KeyValue>
           <KeyValue label="Submitted">{dateTimeLabel(requisition.submittedAt || requisition.createdAt)}</KeyValue>
-          <KeyValue label="Required by">{dateLabel(requisition.requiredBy)}</KeyValue>
-          <KeyValue label="Budget code">{requisition.budgetCode || '—'}</KeyValue>
           <KeyValue label="Estimated total"><span className="text-brand">{currency(total)}</span></KeyValue>
           <KeyValue label="Supervisor">{requisition.supervisorName || '—'}</KeyValue>
-          <KeyValue label="Decision at">{dateTimeLabel(requisition.supervisorDecisionAt)}</KeyValue>
         </dl>
         {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
           <strong>Supervisor note:</strong> {requisition.supervisorNotes}
@@ -140,18 +136,6 @@ export default function RequestDetail({
         <div className="mt-3 flex justify-end border-t border-slate-100 pt-3 text-xs font-bold">
           Total <span className="ml-3 text-brand">{currency(total)}</span>
         </div>
-      </DetailSection>
-    </div>
-
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <DetailSection title={`Attachments (${(requisition.attachments || []).length})`}>
-        {requisition.loadingAttachments ? <LoadingState label="Loading attachments…" /> :
-          <AttachmentList attachments={requisition.attachments || []}
-            downloadPath={(id, name) => downloadBinary(`/portal/requisitions/${requisition.id}/attachments/${id}`, name)}
-            onError={setError} />}
-      </DetailSection>
-      <DetailSection title="Approval & activity history">
-        <ActivityTimeline activity={requisition.activity || []} />
       </DetailSection>
     </div>
 
