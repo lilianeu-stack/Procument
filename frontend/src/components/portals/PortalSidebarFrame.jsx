@@ -1,11 +1,9 @@
-import { ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
-import UserAvatar from '../ui/UserAvatar.jsx';
-import { PROFILE_PAGE, roleLabel } from '../../utils/access.js';
 
 export default function PortalSidebarFrame({
-  accent, portalLabel, groups, user, page, open, collapsed,
-  onNavigate, onClose, onToggleCollapse, onLogout
+  accent, groups, page, open, collapsed,
+  onNavigate, onClose, onToggleCollapse
 }) {
   return <>
     <aside className={`fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col border-r border-brand pb-4 pt-5 shadow-dashboard transition-transform ${accent.aside} ${collapsed ? 'px-4 lg:w-20 lg:px-2' : 'px-4'} lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -18,14 +16,7 @@ export default function PortalSidebarFrame({
         <button type="button" className={`grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:hidden ${accent.mutedText}`} onClick={onClose} aria-label="Close navigation">×</button>
       </div>
 
-      <div className={`mb-4 px-3 ${collapsed ? 'lg:hidden' : ''}`}>
-        <div className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[9px] font-extrabold uppercase tracking-[.12em] ${accent.badge}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${accent.dot}`} />
-          {portalLabel}
-        </div>
-      </div>
-
-      <nav aria-label="Main navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto px-1">
+      <nav aria-label="Main navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto px-1 pb-2">
         {groups.map((group) => {
           const links = group.links;
           if (!links.length) return null;
@@ -43,26 +34,6 @@ export default function PortalSidebarFrame({
           </div>;
         })}
       </nav>
-
-      <div className={`rounded-xl border border-brand bg-hover p-3 ${collapsed ? 'lg:hidden' : ''}`}>
-        <div className={`mb-2 flex items-center gap-2 text-[10px] font-bold ${accent.statusText}`}>
-          <span className="h-1.5 w-1.5 rounded-full bg-success" />DEPARTMENT VIEW
-        </div>
-        <div className={`text-[10px] ${accent.mutedText}`}>Scoped to your assigned Department.</div>
-      </div>
-
-      <div className={`mt-4 flex items-center gap-3 border-t border-subtle px-2 pt-4 ${collapsed ? 'lg:flex-col lg:gap-2 lg:px-0' : ''}`}>
-        <button type="button" onClick={() => { onNavigate(PROFILE_PAGE); onClose(); }}
-          aria-label="Open profile" title="Open profile"
-          className={`flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${collapsed ? 'lg:flex-none lg:justify-center' : ''}`}>
-          <UserAvatar user={user} size="h-10 w-10" textSize="text-xs" className="border border-brand" fallbackClassName={accent.profile} />
-          <div className={`min-w-0 flex-1 ${collapsed ? 'lg:hidden' : ''}`}>
-            <div className="truncate text-xs font-bold text-black">{user?.name || 'User'}</div>
-            <div className={`mt-0.5 truncate text-[10px] ${accent.mutedText}`}>{roleLabel(user?.role)} · {user?.department || 'No Department'}</div>
-          </div>
-        </button>
-        <button type="button" onClick={onLogout} className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${accent.mutedText || 'text-black'}`} title="Sign out" aria-label="Sign out"><LogOut size={15} /></button>
-      </div>
     </aside>
     {open && <button aria-label="Close navigation" onClick={onClose} className="fixed inset-0 z-30 bg-black/20 lg:hidden" />}
   </>;

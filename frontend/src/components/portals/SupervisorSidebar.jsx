@@ -29,13 +29,9 @@ const accent = {
   active: 'bg-reference text-black shadow-sm',
   hover: 'hover:bg-hover hover:text-black',
   mutedText: 'text-muted',
-  sectionText: 'text-muted',
-  statusText: 'text-muted',
-  profile: 'bg-reference text-black',
-  badge: 'bg-hover text-black border border-brand',
-  dot: 'bg-success'
+  sectionText: 'text-muted'
 };
 
 export default function SupervisorSidebar(props) {
-  return <PortalSidebarFrame {...props} accent={accent} portalLabel="Supervisor Portal" groups={groups} />;
+  return <PortalSidebarFrame {...props} accent={accent} groups={groups} />;
 }
