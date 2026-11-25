@@ -1990,7 +1990,8 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       assert.match(text, /Send date and time:/);
       assert.match(text, /Response deadline:/);
       assert.match(text, /Supplier response total: RWF/);
-      assert.match(text, /Decision required: open the decision link, choose Accept or Deny/);
+      assert.match(text, /Decision required: open the decision link, choose one Accept or Deny for Procurement/);
+      assert.match(text, /give a reason for that decision\./);
       assert.match(text, /OPEN DECISION FORM/);
       assert.match(text, /Accept/);
       assert.match(text, /Deny/);
@@ -2000,20 +2001,21 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const committeeLinks = [...new Set(committeeMessages.flatMap((message) =>
       [...normalizedMessage(message).matchAll(/https?:\/\/[^\s"<>']+/g)]
         .map((match) => match[0])
-        .filter((link) => link.includes('/committee-review?token='))
+        .filter((link) => /\/committee-review(?:\?token=|\/)/.test(link))
     ))];
     assert.equal(committeeLinks.length, 2, 'each selected RFQ must produce its own committee decision link');
     assert.ok(committeeMessages.every((message) => {
       const hrefs = [...normalizedMessage(message).matchAll(/href="([^"]*)"/g)]
         .map((match) => match[1])
-        .filter((href) => href.includes('/committee-review?token='));
+        .filter((href) => /\/committee-review(?:\?token=|\/)/.test(href));
       return hrefs.length > 0 && hrefs.every((href) => committeeLinks.includes(href));
     }), 'the HTML buttons must contain the full decision links');
     assert.ok(committeeMessages.every((message) =>
       !normalizedMessage(message).includes('href=""')), 'the HTML button must never have an empty href');
     const formsByReference = new Map();
     for (const link of committeeLinks) {
-      const token = /token=([^&\s"']+)/.exec(link)?.[1] || '';
+      const token = (/token=([^&\s"']+)/.exec(link)
+        || /\/committee-review\/([a-f0-9]{64})/i.exec(link))?.[1] || '';
       assert.match(token, /^[a-f0-9]{64}$/i);
       const formResponse = await fetch(`${baseUrl}/committee-review/${token}`);
       assert.equal(formResponse.status, 200);
@@ -2040,7 +2042,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     });
     assert.equal(resentReview.response.status, 200, resentReview.data.message);
     assert.equal(relay.messages.length, relayCountBeforeResend + 1);
-    assert.match(normalizedMessage(relay.messages.at(-1)), /\/committee-review\?token=/);
+    assert.match(normalizedMessage(relay.messages.at(-1)), /\/committee-review(?:\?token=|\/)/);
 
     const invalidToken = await fetch(`${baseUrl}/committee-review/${'a'.repeat(64)}`);
     assert.equal(invalidToken.status, 404);
@@ -2050,38 +2052,54 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         responderName: 'QA Committee Reviewer',
-        decisions: mainCommitteeForm.review.responses.map((response, index) => ({
-          supplierId: response.supplierId,
-          decision: index === 0 ? 'Deny' : 'Accept',
-          reason: ''
-        }))
+        decision: 'Deny',
+        reason: ''
       })
     });
     assert.equal(invalidDecision.status, 400, 'a Deny decision must include a reason');
     assert.match((await invalidDecision.json()).message, /reason for denying/i);
 
+    const invalidAccept = await fetch(decisionUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        responderName: 'QA Committee Reviewer',
+        decision: 'Accept',
+        reason: ''
+      })
+    });
+    assert.equal(invalidAccept.status, 400, 'an Accept decision must include a reason');
+    assert.match((await invalidAccept.json()).message, /reason for accepting/i);
+
+    const missingDecision = await fetch(decisionUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        responderName: 'QA Committee Reviewer',
+        decision: '',
+        reason: 'QA committee reason'
+      })
+    });
+    assert.equal(missingDecision.status, 400, 'one Accept or Deny choice is required');
+
     const validDecisionBody = JSON.stringify({
       responderName: 'QA Committee Reviewer',
-      decisions: mainCommitteeForm.review.responses.map((response, index) => ({
-        supplierId: response.supplierId,
-        decision: index === 0 ? 'Deny' : 'Accept',
-        reason: index === 0 ? 'QA committee denial reason' : ''
-      }))
+      decision: 'Deny',
+      reason: 'QA committee denial reason'
     });
     const submittedDecision = await fetch(decisionUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
     });
     assert.equal(submittedDecision.status, 201);
-    assert.equal((await submittedDecision.json()).decisionCount, mainCommitteeForm.review.responses.length);
+    assert.equal((await submittedDecision.json()).decisionCount, 1);
 
     const duplicateDecision = await fetch(decisionUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
     });
-    assert.equal(duplicateDecision.status, 409, 'one emailed link must accept only one decision set');
+    assert.equal(duplicateDecision.status, 409, 'one emailed link must accept only one decision');
 
     const afterDecision = await fetch(`${baseUrl}/committee-review/${mainCommitteeForm.token}`);
     const afterDecisionPayload = await afterDecision.json();
     assert.equal(afterDecisionPayload.review.responded, true);
+    assert.equal(afterDecisionPayload.review.overallDecision.decision, 'Rejected');
     assert.ok(afterDecisionPayload.review.decisions.some((decision) =>
       decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason' &&
       decision.responderName === 'QA Committee Reviewer'));

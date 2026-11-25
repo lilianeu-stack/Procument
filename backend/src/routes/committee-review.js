@@ -118,6 +118,7 @@ function reviewPayload(review) {
       ...response,
       decision: decisionsBySupplier.get(response.supplierId) || null
     })),
+    overallDecision: review.decisions[0] || null,
     decisions: review.decisions
   };
 }
@@ -171,12 +172,13 @@ async function persistDecisions(connection, res, review, decisions, responderNam
     const [managers] = await connection.execute(
       "SELECT id FROM users WHERE active = TRUE AND role IN ('admin', 'procurement')"
     );
+    const outcome = decisions[0]?.decision === 'Rejected' ? 'denied' : 'accepted';
     for (const manager of managers) {
       await createNotification(
         connection,
         manager.id,
         'Committee decision received',
-        `${review.recipientName} submitted ${decisions.length} decision(s) for ${review.reference}.`,
+        `${review.recipientName} ${outcome} the recommendation for ${review.reference}.`,
         `#/admin/RFQs?rfq=${review.rfqId}`,
         'email'
       );
@@ -217,49 +219,35 @@ router.post('/committee-review/:token/decisions', async (req, res, next) => {
       supplierId: Number(supplier.supplierId),
       supplier: supplier.name || 'Supplier'
     }));
-    const supplied = Array.isArray(req.body?.decisions) ? req.body.decisions : [];
-    const responderName = String(req.body?.responderName || '').trim().slice(0, 150);
-    const errors = [];
-
     if (!expected.length) {
       return res.status(409).json({ message: 'This RFQ has no supplier responses to decide.' });
     }
-    if (supplied.length !== expected.length) {
-      errors.push('Decide every supplier response in this form.');
-    }
 
-    const seen = new Set();
-    const decisions = [];
-    supplied.forEach((entry, index) => {
-      const supplierId = Number(entry?.supplierId);
-      const decision = storedDecision(entry?.decision);
-      const reason = String(entry?.reason || '').trim().slice(0, MAX_REASON_LENGTH);
-      const target = expected.find((item) => item.supplierId === supplierId);
-      if (!target) {
-        errors.push(`Decision ${index + 1} does not match a supplier response in this RFQ.`);
-        return;
-      }
-      if (seen.has(supplierId)) {
-        errors.push(`${target.supplier}: only one decision can be submitted per supplier response.`);
-        return;
-      }
-      seen.add(supplierId);
-      if (!decision) {
-        errors.push(`${target.supplier}: choose Accept or Deny.`);
-        return;
-      }
-      if (decision === 'Rejected' && !reason) {
-        errors.push(`${target.supplier}: give a reason for denying this response.`);
-        return;
-      }
-      decisions.push({ ...target, decision, reason: reason || null });
-    });
-    for (const item of expected) {
-      if (!seen.has(item.supplierId)) errors.push(`${item.supplier}: a decision is required.`);
+    // One committee member makes one decision on Procurement's recommendation,
+    // not a separate decision for every supplier response. Older cached pages
+    // may still post a decisions array, so its first entry is accepted too.
+    const legacy = Array.isArray(req.body?.decisions) ? req.body.decisions[0] : null;
+    const decision = storedDecision(req.body?.decision ?? legacy?.decision);
+    const reason = String(req.body?.reason ?? legacy?.reason ?? '').trim().slice(0, MAX_REASON_LENGTH);
+    const responderName = String(req.body?.responderName || '').trim().slice(0, 150);
+    const errors = [];
+
+    if (!decision) errors.push('Choose Accept or Deny for Procurement’s recommendation.');
+    if (!reason) {
+      errors.push(decision === 'Rejected'
+        ? 'Give a reason for denying this recommendation.'
+        : 'Give a reason for accepting this recommendation.');
     }
     if (errors.length) return res.status(400).json({ message: errors[0], errors });
 
-    return await persistDecisions(connection, res, review, decisions, responderName);
+    const recommendation = review.snapshot.recommendation
+      || (review.snapshot.recommendations || {})[String(review.rfqId)]
+      || null;
+    const recommendedSupplierId = Number(recommendation?.supplierId);
+    const target = expected.find((item) => item.supplierId === recommendedSupplierId)
+      || expected[0];
+
+    return await persistDecisions(connection, res, review, [{ ...target, decision, reason }], responderName);
   } catch (error) {
     try { await connection.rollback(); } catch { /* ignore rollback errors */ }
     return next(error);

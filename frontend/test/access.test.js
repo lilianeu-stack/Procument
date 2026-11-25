@@ -127,6 +127,15 @@ test('public committee decision links remain outside the staff portals', () => {
   assert.equal(pathRoute.portal, PORTALS.COMMITTEE_REVIEW);
   assert.equal(pathRoute.page, 'Review');
   assert.equal(pathRoute.query.token, token);
+
+  const tokenPathRoute = readRouteFromLocation({
+    hash: '',
+    pathname: `/committee-review/${token}`,
+    search: ''
+  });
+  assert.equal(tokenPathRoute.portal, PORTALS.COMMITTEE_REVIEW);
+  assert.equal(tokenPathRoute.page, 'Review');
+  assert.equal(tokenPathRoute.query.token, token);
 });
 
 test('Stock Keepers have a dedicated portal with only its five pages', () => {

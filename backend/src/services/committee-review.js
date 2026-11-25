@@ -236,7 +236,7 @@ export function committeeReportText(section, settings = {}) {
     }
   }
 
-  lines.push('', 'Decision required: open the decision link, choose Accept or Deny for every supplier response, and give a reason for each Deny. Only one decision set is accepted per link.');
+  lines.push('', 'Decision required: open the decision link, choose one Accept or Deny for Procurement’s recommendation, and give a reason for that decision. Only one decision is accepted per link.');
   return lines.join('\n');
 }
 
@@ -268,9 +268,11 @@ export function committeeReviewEmailHtml({ recipientName, sections, links, recom
   }
   const responseCount = sections.reduce((total, section) => total + section.suppliers.filter((supplier) => supplier.responseAt || supplier.amount !== null || (supplier.items || []).length).length, 0);
   const references = sections.map((section) => section.reference).join(', ');
-  const linkHtml = linkList.map((link) =>
-    `<p style="margin:10px 0"><a href="${escapeHtml(link.url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(link.reference || link.id || 'RFQ')}</a></p>`
-  ).join('');
+  const linkHtml = linkList.map((link) => {
+    const url = escapeHtml(link.url);
+    return `<p style="margin:10px 0"><a href="${url}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(link.reference || link.id || 'RFQ')}</a></p>
+      <p style="margin:4px 0 14px;font-size:11px;color:#475569;word-break:break-all">If the button does not open, copy or click this direct link: <a href="${url}" style="color:#123d3a;text-decoration:underline">${url}</a></p>`;
+  }).join('');
 
   const sectionHtml = sections.map((section) => {
     // Never emit an empty href: a button that looks clickable but has no target
@@ -303,7 +305,7 @@ export function committeeReviewEmailHtml({ recipientName, sections, links, recom
         ${supplier.notes ? `<p style="margin:10px 0;padding:10px;background:#f8fafc;font-size:12px"><strong>Overall supplier comment:</strong> ${escapeHtml(supplier.notes)}</p>` : ''}
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">${tableHead()}<tbody>${itemRows(supplier.items)}</tbody></table>
       </div>`).join('')}
-      ${url ? `<p style="margin:18px 0 0"><a href="${escapeHtml(url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(section.reference)}</a></p><p style="font-size:11px;color:#475569;word-break:break-all">${escapeHtml(url)}</p>` : ''}
+      ${url ? `<p style="margin:18px 0 0"><a href="${escapeHtml(url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(section.reference)}</a></p><p style="font-size:11px;color:#475569;word-break:break-all">If the button does not open, copy or click this direct link: <a href="${escapeHtml(url)}" style="color:#123d3a;text-decoration:underline">${escapeHtml(url)}</a></p>` : ''}
     </section>`;
   }).join('');
 
@@ -313,7 +315,7 @@ export function committeeReviewEmailHtml({ recipientName, sections, links, recom
       <tr><td style="padding:26px">
         <h1 style="margin:0 0 6px;font-size:20px">Supplier responses for review</h1>
         <p style="margin:0;color:#475569;font-size:13px">Hello ${escapeHtml(recipientName)}, Procurement has sent ${escapeHtml(responseCount)} supplier response(s) across ${escapeHtml(sections.length)} RFQ(s). Prepared ${escapeHtml(generatedAt)}.</p>
-        <p style="margin:16px 0;padding:12px;background:#eff6ff;border-left:4px solid #2563eb;font-size:12px">Open each decision link below, choose <strong>Accept</strong> or <strong>Deny</strong> for every supplier response, and give a reason for each Deny. No staff login is needed. Only one decision set is accepted per link.</p>
+        <p style="margin:16px 0;padding:12px;background:#eff6ff;border-left:4px solid #2563eb;font-size:12px">Open your decision link below, choose one <strong>Accept</strong> or <strong>Deny</strong> for Procurement’s recommendation, and give a reason for that decision. No staff login is needed. Only one decision is accepted per link.</p>
         ${linkHtml}
         ${sectionHtml}
       </td></tr>

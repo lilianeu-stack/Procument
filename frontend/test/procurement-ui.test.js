@@ -67,7 +67,7 @@ test('RFQ form has only start/deadline dates and a searchable multi-supplier dro
   assert.doesNotMatch(rfqs, /Approved requisition/);
 });
 
-test('Send to Committee previews recipient content and stores one decision set per link', () => {
+test('Send to Committee previews recipient content and stores one decision per link', () => {
   const rfqs = source('../src/pages/RfqsPage.jsx');
   const modal = source('../src/pages/CommitteeReviewModal.jsx');
   const form = source('../src/components/portals/CommitteeReviewPage.jsx');
@@ -88,9 +88,10 @@ test('Send to Committee previews recipient content and stores one decision set p
   assert.match(form, /\/committee-review\/\$\{encodeURIComponent\(token\)\}\/decisions/);
   assert.match(form, /Message from Procurement/);
   assert.match(form, /Supplier response total/);
-  assert.match(form, /Reason for denying this response/);
-  assert.match(form, /Your submitted decisions/);
-  assert.match(form, /one response per link/);
+  assert.match(form, /name="committee-decision"/);
+  assert.match(form, /Reason for this decision/);
+  assert.match(form, /Your submitted decision/);
+  assert.match(form, /one decision per link/);
   assert.match(rfqs, /Resend link/);
   assert.match(app, /onResendCommitteeReview/);
   assert.match(app, /CommitteeReviewPage/);

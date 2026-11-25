@@ -47,10 +47,11 @@ export function supplierLink(token) {
 
 // Each Committee member receives their own token, so a decision submitted from
 // one link cannot be attributed to or used to change another member's review.
-// A real path (rather than a hash fragment) survives email link scanners that
-// strip or rewrite fragments. The old hash links are still supported by the app.
+// The token is a real path segment rather than a hash fragment or query string:
+// mail clients and link scanners are far less likely to strip it. The older
+// hash and query links are still supported by the app.
 export function committeeReviewLink(token) {
-  return appUrl(`/committee-review?token=${encodeURIComponent(token)}`);
+  return appUrl(`/committee-review/${encodeURIComponent(token)}`);
 }
 
 export function purchaseOrderReviewLink(token) {

@@ -35,14 +35,25 @@ export function parseRoute(hash) {
   return { portal, page, query };
 }
 
-// Committee decision emails use a real path instead of a hash fragment so
-// mail clients and link scanners do not strip the token. Older emailed links
-// still use the hash form and remain supported.
+// Committee decision emails use a real token path instead of a hash fragment
+// or query string so mail clients and link scanners cannot strip the token.
+// Older emailed links used the hash form and the query form; both remain
+// supported so committee members can still use the original email.
 export function readRouteFromLocation(location) {
-  const hash = String(location?.hash || '');
-  if (hash && hash.length > 1) return parseRoute(hash);
-
   const path = String(location?.pathname || '').replace(/\/+$/, '');
+
+  const committeePath = /^\/committee-review\/([^/]+)$/.exec(path);
+  if (committeePath) {
+    let token = '';
+    try { token = decodeURIComponent(committeePath[1]); }
+    catch { token = committeePath[1]; }
+    return {
+      portal: PORTALS.COMMITTEE_REVIEW,
+      page: 'Review',
+      query: token ? { token } : {}
+    };
+  }
+
   if (path === '/committee-review') {
     const query = {};
     for (const [key, value] of new URLSearchParams(location?.search || '')) {
@@ -50,6 +61,9 @@ export function readRouteFromLocation(location) {
     }
     return { portal: PORTALS.COMMITTEE_REVIEW, page: 'Review', query };
   }
+
+  const hash = String(location?.hash || '');
+  if (hash && hash.length > 1) return parseRoute(hash);
   return parseRoute(hash);
 }
 

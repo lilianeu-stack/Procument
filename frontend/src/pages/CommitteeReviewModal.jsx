@@ -86,8 +86,8 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
       <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
         Check exactly what each selected committee member will receive: your recommendation, the requested
         items, when each RFQ was sent and is due, and every supplier response with each item’s price and
-        comment. Each recipient gets Accept/Deny controls with a reason field for every Deny. Nothing is
-        sent until you click “Send to Committee”.
+        comment. Each recipient gets one Accept/Deny choice with a required reason. Nothing is sent until
+        you click “Send to Committee”.
       </p>
       {loading && <div role="status" className="p-5 text-center text-sm text-muted">Preparing the review form…</div>}
       {!loading && error && <ErrorMessage>{error}</ErrorMessage>}
@@ -180,7 +180,7 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
             </div>
 
             <div className="mt-4 rounded-lg bg-brand-light/40 p-3 text-[11px] text-muted">
-              Each recipient receives this content, an <strong>Accept</strong> or <strong>Deny</strong> control for every supplier response, and a reason field for each Deny. Only one decision set is accepted per link.
+              Each recipient receives this content and one <strong>Accept</strong> or <strong>Deny</strong> choice on your recommendation, with a required reason. Only one decision is accepted per link.
             </div>
           </section>;
         })}
