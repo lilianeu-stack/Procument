@@ -19,7 +19,7 @@ export default function AppLayout({ user, page, notifications, mobileNav, notifi
 
   return <div className="min-h-screen bg-canvas">
     <Sidebar user={user} page={page} open={mobileNav} collapsed={sidebarCollapsed}
-      onNavigate={onNavigate} onClose={onCloseMenu} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} onLogout={onLogout} />
+      onNavigate={onNavigate} onClose={onCloseMenu} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} />
     <main className={`min-h-screen ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-[248px]'}`}>
       <Topbar page={page} user={user} notifications={notifications} open={notificationsOpen} onToggle={onToggleNotifications} onMenu={onOpenMenu} onNotification={onNotification} onLogout={onLogout} onProfile={() => onNavigate(PROFILE_PAGE)} />
       <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">

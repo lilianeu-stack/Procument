@@ -1,27 +1,24 @@
 import { useState } from 'react';
 import SharedHeader from './SharedHeader.jsx';
-import { PROFILE_PAGE, roleLabel } from '../../utils/access.js';
+import { PROFILE_PAGE } from '../../utils/access.js';
 import { formatDate } from '../../utils/format.js';
 
 export default function PortalLayout({
-  sidebar: Sidebar, portal, user, page, summary, notifications,
+  sidebar: Sidebar, portal, user, page, notifications,
   mobileNav, notificationsOpen, refreshing, hidePageHeading = false,
   onNavigate, onNotification, onToggleNotifications,
   onOpenMenu, onCloseMenu, onLogout, children
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const departmentName = summary?.department?.name || user?.department || 'No Department assigned';
 
   return <div className="min-h-screen bg-canvas">
     <Sidebar
-      user={user}
       page={page}
       open={mobileNav}
       collapsed={collapsed}
       onNavigate={onNavigate}
       onClose={onCloseMenu}
       onToggleCollapse={() => setCollapsed((value) => !value)}
-      onLogout={onLogout}
     />
     <main className={`min-h-screen ${collapsed ? 'lg:pl-20' : 'lg:pl-[248px]'}`}>
       <SharedHeader
@@ -43,9 +40,6 @@ export default function PortalLayout({
             {formatDate(new Date())}
           </div>
           <h1 className="display-font text-[25px] font-extrabold tracking-tight">{page}</h1>
-          <p className="mt-1 text-xs text-muted">
-            {roleLabel(user?.role)} · {departmentName}
-          </p>
         </div>}
         {children}
       </div>
