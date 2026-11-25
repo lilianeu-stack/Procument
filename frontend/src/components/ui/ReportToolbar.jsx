@@ -11,7 +11,8 @@ export default function ReportToolbar({
   dateFilter = {},
   onDateFilterChange,
   params = {},
-  reference = ''
+  reference = '',
+  professionalActions = false
 }) {
   const value = {
     ...dateFilter,
@@ -28,10 +29,10 @@ export default function ReportToolbar({
           <p className="text-[11px] text-muted">Filter the report, then print or download the current result set.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <PrintButton label={`Print ${report.title}`} />
-          <DownloadButton exportKey={report.exportKey} format="pdf" params={query} reference={reference} label="Download PDF" />
-          <DownloadButton exportKey={report.exportKey} format="xlsx" params={query} reference={reference} label="Download Excel" />
-          <DownloadButton exportKey={report.exportKey} format="csv" params={query} reference={reference} label="Download CSV" />
+          <PrintButton label={`Print ${report.title}`} tone={professionalActions ? 'primary' : 'default'} />
+          <DownloadButton exportKey={report.exportKey} format="pdf" params={query} reference={reference} label="Download PDF" tone={professionalActions ? 'toolbar' : 'default'} />
+          <DownloadButton exportKey={report.exportKey} format="xlsx" params={query} reference={reference} label="Download Excel" tone={professionalActions ? 'toolbar' : 'default'} />
+          <DownloadButton exportKey={report.exportKey} format="csv" params={query} reference={reference} label="Download CSV" tone={professionalActions ? 'toolbar' : 'default'} />
         </div>
       </div>
       <DateRangeFilter

@@ -9,9 +9,6 @@ import { RFQForm, emailResultNotice } from '../../pages/RfqsPage.jsx';
 import { currency, dateTimeLabel } from '../../utils/format.js';
 import { RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 
-// Continuation of one forwarded department request. The requisition document
-// is the form sent to Suppliers; this page only opens that workflow and starts
-// an RFQ. No RFQ/quotation tables are shown here.
 export default function ProcurementProcessingPage({ data, query = {}, actions, portalApi, navigate }) {
   const requestId = Number(query.request || query.view);
   const validRequestId = Number.isInteger(requestId) && requestId > 0;
@@ -67,7 +64,6 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
     </div>
 
     {notice && <div className="no-print rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">{notice}</div>}
-
     {loading && !request ? <LoadingState label="Opening procurement workflow…" /> : null}
     {!loading && (error || !request) ? <>
       <ErrorState message={error} onRetry={load} />
@@ -81,7 +77,7 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
         <KeyValue label="Forwarded to procurement">{dateTimeLabel(request.forwardedAt)}</KeyValue>
         <KeyValue label="Estimated total">{currency(request.financials?.grandTotal ?? request.total)}</KeyValue>
       </div>
-      <div className="border-t border-slate-100 px-5 py-4">
+      <div className="border-t border-slate-100 px-5 py-3">
         <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-muted">
           Requested items ({(request.items || []).length})
         </h3>

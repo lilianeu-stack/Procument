@@ -164,7 +164,7 @@ export async function buildCommitteeReport(rfqIds) {
         responseAt: quote ? (quote.submittedAt || quote.createdAt) : null,
         quotationId: quote?.quotationId || null,
         amount: quote ? Number(quote.amount) : null,
-        deliveryDays: quote ? Number(quote.deliveryDays) : null,
+        deliveryDays: quote && Number(quote.deliveryDays) > 0 ? Number(quote.deliveryDays) : null,
         qualityScore: quote ? Number(quote.qualityScore) : null,
         ratingScore: quote ? Number(quote.ratingScore) : null,
         notes: quote?.notes || '',
@@ -259,12 +259,26 @@ function tableHead() {
 }
 
 export function committeeReviewEmailHtml({ recipientName, sections, links, recommendations = {}, generatedAt, settings = {} }) {
-  const linkByReference = new Map((links || []).map((link) => [String(link.reference), link.url]));
+  const linkList = (links || []).filter((link) => link && String(link.url || '').trim());
+  const linkByReference = new Map();
+  for (const link of linkList) {
+    for (const key of [link.reference, link.id, link.rfqId]) {
+      if (key !== undefined && key !== null) linkByReference.set(String(key), link.url);
+    }
+  }
   const responseCount = sections.reduce((total, section) => total + section.suppliers.filter((supplier) => supplier.responseAt || supplier.amount !== null || (supplier.items || []).length).length, 0);
   const references = sections.map((section) => section.reference).join(', ');
+  const linkHtml = linkList.map((link) =>
+    `<p style="margin:10px 0"><a href="${escapeHtml(link.url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(link.reference || link.id || 'RFQ')}</a></p>`
+  ).join('');
 
   const sectionHtml = sections.map((section) => {
-    const link = linkByReference.get(String(section.reference));
+    // Never emit an empty href: a button that looks clickable but has no target
+    // is exactly how a recipient ends up unable to open the decision form.
+    const link = linkByReference.get(String(section.reference))
+      || linkByReference.get(String(section.id))
+      || (linkList.length === 1 ? linkList[0] : null);
+    const url = String(link?.url || '').trim();
     const responses = section.suppliers.filter((supplier) => supplier.responseAt || supplier.amount !== null || (supplier.items || []).length);
     return `<section style="margin-top:26px;border:1px solid #e2e8f0;border-radius:10px;padding:18px">
       <h2 style="margin:0 0 12px;font-size:16px;color:#123d3a">RFQ ${escapeHtml(section.reference)}</h2>
@@ -289,7 +303,7 @@ export function committeeReviewEmailHtml({ recipientName, sections, links, recom
         ${supplier.notes ? `<p style="margin:10px 0;padding:10px;background:#f8fafc;font-size:12px"><strong>Overall supplier comment:</strong> ${escapeHtml(supplier.notes)}</p>` : ''}
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">${tableHead()}<tbody>${itemRows(supplier.items)}</tbody></table>
       </div>`).join('')}
-      ${link ? `<p style="margin:18px 0 0"><a href="${escapeHtml(link.url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(section.reference)}</a></p><p style="font-size:11px;color:#475569;word-break:break-all">${escapeHtml(link.url)}</p>` : ''}
+      ${url ? `<p style="margin:18px 0 0"><a href="${escapeHtml(url)}" style="background:#123d3a;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block">OPEN DECISION FORM · ${escapeHtml(section.reference)}</a></p><p style="font-size:11px;color:#475569;word-break:break-all">${escapeHtml(url)}</p>` : ''}
     </section>`;
   }).join('');
 
@@ -300,6 +314,7 @@ export function committeeReviewEmailHtml({ recipientName, sections, links, recom
         <h1 style="margin:0 0 6px;font-size:20px">Supplier responses for review</h1>
         <p style="margin:0;color:#475569;font-size:13px">Hello ${escapeHtml(recipientName)}, Procurement has sent ${escapeHtml(responseCount)} supplier response(s) across ${escapeHtml(sections.length)} RFQ(s). Prepared ${escapeHtml(generatedAt)}.</p>
         <p style="margin:16px 0;padding:12px;background:#eff6ff;border-left:4px solid #2563eb;font-size:12px">Open each decision link below, choose <strong>Accept</strong> or <strong>Deny</strong> for every supplier response, and give a reason for each Deny. No staff login is needed. Only one decision set is accepted per link.</p>
+        ${linkHtml}
         ${sectionHtml}
       </td></tr>
       <tr><td style="padding:16px 26px;background:#f8fafc;color:#64748b;font-size:11px">RFQs: ${escapeHtml(references)} · All amounts in RWF.</td></tr>

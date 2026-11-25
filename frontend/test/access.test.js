@@ -3,14 +3,15 @@ import assert from 'node:assert/strict';
 import {
   canAccessPage, canonicalPage, COMMITTEE_REVIEW_PAGES, defaultPageForPortal, portalForRole, PORTALS,
   PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE, REQUESTER_PAGES, RESPONSE_PAGES,
-  SETTINGS_PAGE, STOCKKEEPER_PAGES, SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
+  PURCHASE_ORDERS_PAGE, SETTINGS_PAGE, STOCKKEEPER_PAGES, SUPPLIER_PRICING_PAGES,
+  SUPERVISOR_INCOMING_PAGE, SUPERVISOR_PAGES
 } from '../src/utils/access.js';
 import { parseRoute, readRouteFromLocation } from '../src/utils/routes.js';
 
 const adminSideRoles = ['admin', 'approver', 'procurement', 'finance', 'committee'];
 const sharedPages = ['Overview', 'RFQs', 'Goods receipts', 'Invoices', 'Suppliers', 'Stock overview', 'Store requests'];
 const adminPortalRoles = ['admin', 'procurement'];
-const hiddenAdminPages = ['Requisitions', 'Approvals', 'Purchase orders', 'Audit logs'];
+const hiddenAdminPages = ['Requisitions', 'Approvals', 'Audit logs'];
 
 test('administrator-side roles can access shared procurement pages', () => {
   for (const role of adminSideRoles) {
@@ -40,6 +41,24 @@ test('removed administrator pages cannot be reached through direct routes', () =
   }
   // Department portals still own their own approval queue.
   assert.equal(canAccessPage('supervisor', 'Approvals'), true);
+});
+
+test('Overview can open the existing global purchase orders workspace', () => {
+  assert.equal(canAccessPage('admin', PURCHASE_ORDERS_PAGE), true);
+  assert.equal(canAccessPage('procurement', PURCHASE_ORDERS_PAGE), true);
+  assert.equal(canAccessPage('approver', PURCHASE_ORDERS_PAGE), false);
+  assert.equal(canAccessPage('finance', PURCHASE_ORDERS_PAGE), false);
+});
+
+test('public supplier pricing and purchase-order approval portals stay token-gated', () => {
+  assert.equal(defaultPageForPortal(PORTALS.SUPPLIER_PRICING), 'Quote');
+  for (const page of SUPPLIER_PRICING_PAGES) {
+    assert.equal(canAccessPage(PORTALS.SUPPLIER_PRICING, page), true);
+    assert.equal(canAccessPage('admin', page), false);
+  }
+  assert.equal(defaultPageForPortal(PORTALS.PURCHASE_ORDER_APPROVAL), 'Approval');
+  assert.equal(canAccessPage(PORTALS.PURCHASE_ORDER_APPROVAL, 'Approval'), true);
+  assert.equal(canAccessPage(PORTALS.PURCHASE_ORDER_APPROVAL, 'Overview'), false);
 });
 
 test('procurement processing is an internal workflow page opened by the admin shell', () => {

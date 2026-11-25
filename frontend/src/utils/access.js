@@ -8,12 +8,19 @@ export const PORTALS = {
   // Public token-link page used by recipients of a requisition form email.
   RESPONSE: 'response',
   // Public token-link page where a Committee member accepts/denies quotations.
-  COMMITTEE_REVIEW: 'committee-review'
+  COMMITTEE_REVIEW: 'committee-review',
+  // Public, token-gated portal where a Supplier supplies prices for a purchase
+  // order. The token itself authorizes exactly one pricing response.
+  SUPPLIER_PRICING: 'supplier-pricing',
+  // Token-gated Purchase Order review page. A decision requires the intended
+  // registered account to sign in.
+  PURCHASE_ORDER_APPROVAL: 'po-approval'
 };
 
 export const SUPPLIER_PAGES = ['RFQ'];
 export const RESPONSE_PAGES = ['Response'];
 export const COMMITTEE_REVIEW_PAGES = ['Review'];
+export const SUPPLIER_PRICING_PAGES = ['Quote'];
 export const STOCKKEEPER_PAGES = [
   'Dashboard',
   'List of Requesters',
@@ -52,6 +59,9 @@ export const RECEIVED_REQUESTS_PAGE = 'Requests Received from Departments';
 // the document page, not from the Administrator sidebar.
 export const PROCUREMENT_PROCESSING_PAGE = 'Procurement Processing';
 export const PROCUREMENT_COMMITTEE_PAGE = 'Procurement Committee';
+// Existing global purchase-order workspace. It is reachable from Overview so the
+// dashboard's View All action has a real destination without inventing a route.
+export const PURCHASE_ORDERS_PAGE = 'Purchase orders';
 export const SETTINGS_PAGE = 'Settings';
 
 // These pages remain in the code for their own portals/history, but are no
@@ -59,7 +69,6 @@ export const SETTINGS_PAGE = 'Settings';
 const ADMIN_HIDDEN_PAGES = new Set([
   'Requisitions',
   'Approvals',
-  'Purchase orders',
   'Audit logs'
 ]);
 
@@ -74,6 +83,7 @@ export const PROCUREMENT_PAGES = [
   PROCUREMENT_COMMITTEE_PAGE,
   'RFQs',
   'Email Inbox',
+  PURCHASE_ORDERS_PAGE,
   'Goods receipts',
   'Invoices',
   'Suppliers',
@@ -101,6 +111,7 @@ const restrictedPages = {
   [PROCUREMENT_PROCESSING_PAGE]: ['admin', 'procurement'],
   'Email Inbox': ['admin', 'procurement'],
   [PROCUREMENT_COMMITTEE_PAGE]: ['admin', 'procurement'],
+  [PURCHASE_ORDERS_PAGE]: ['admin', 'procurement'],
   Users: ['admin'],
   'Audit logs': ['admin'],
   [SETTINGS_PAGE]: ['admin']
@@ -140,6 +151,8 @@ export function defaultPageForPortal(portal) {
   if (portal === PORTALS.SUPPLIER) return 'RFQ';
   if (portal === PORTALS.RESPONSE) return 'Response';
   if (portal === PORTALS.COMMITTEE_REVIEW) return 'Review';
+  if (portal === PORTALS.SUPPLIER_PRICING) return 'Quote';
+  if (portal === PORTALS.PURCHASE_ORDER_APPROVAL) return 'Approval';
   return null;
 }
 
@@ -147,11 +160,19 @@ export function defaultPageForRole(role) {
   return defaultPageForPortal(portalForRole(role));
 }
 
+// The public pricing link is authorized by its token, never by a staff role.
+const SUPPLIER_PRICING_PAGE_NAMES = new Set(SUPPLIER_PRICING_PAGES.flatMap((page) => [page, page.toLowerCase()]));
+
 export function canAccessPage(role, page) {
   const target = canonicalPage(page);
   // The response form is public and token-gated; it has no staff role.
   if (role === PORTALS.RESPONSE) return RESPONSE_PAGES.includes(target);
   if (role === PORTALS.COMMITTEE_REVIEW) return COMMITTEE_REVIEW_PAGES.includes(target);
+  if (role === PORTALS.SUPPLIER_PRICING) return SUPPLIER_PRICING_PAGE_NAMES.has(target);
+  // No back-office role may open the public supplier pricing page through the
+  // staff shell; the signed token is the only credential for that portal.
+  if (SUPPLIER_PRICING_PAGE_NAMES.has(target)) return false;
+  if (role === PORTALS.PURCHASE_ORDER_APPROVAL) return ['Approval'].includes(target);
   const portal = portalForRole(role);
   // Department portals use their own page lists; the admin-side restricted
   // pages only apply to Administrator-side roles.

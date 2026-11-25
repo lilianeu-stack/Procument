@@ -1,29 +1,30 @@
 import { useState } from 'react';
-import { CheckCircle2, Info, MessageSquare, Send, XCircle } from 'lucide-react';
+import { CheckCircle2, FileText, Info, MessageSquare, Pencil, Send, XCircle } from 'lucide-react';
 import Modal from '../ui/Modal.jsx';
+import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import DownloadButton from '../ui/DownloadButton.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
 import PrintHeader from '../ui/PrintHeader.jsx';
 import {
-  AttachmentPicker, KeyValue,
+  ActivityTimeline, AttachmentList, AttachmentPicker, KeyValue, LoadingState,
   PageHeader, PortalBadge, TableScroll, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
-import { filesToAttachments } from '../../utils/attachments.js';
+import { downloadBinary, filesToAttachments } from '../../utils/attachments.js';
 import {
   decisionLabel, decisionTone, isDraft, isInformationRequired, isPendingApproval
 } from '../../utils/status.js';
 
 function DetailSection({ title, children }) {
-  return <section className="rounded-xl border border-slate-100 bg-white">
-    <header className="border-b border-slate-100 px-4 py-3 text-xs font-bold">{title}</header>
+  return <section className="rounded-xl border border-brand bg-white">
+    <header className="border-b border-subtle px-4 py-3 text-xs font-bold">{title}</header>
     <div className="p-4">{children}</div>
   </section>;
 }
 
 export default function RequestDetail({
-  requisition, portal = 'requester', onClose, portalApi, onMessage, onChanged
+  requisition, portal = 'requester', onClose, portalApi, onMessage, onChanged, onEdit
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -32,6 +33,7 @@ export default function RequestDetail({
   const [response, setResponse] = useState('');
   const [files, setFiles] = useState([]);
   const [pendingDecision, setPendingDecision] = useState('');
+  const [showOfficial, setShowOfficial] = useState(false);
 
   if (!requisition) return null;
   const isSupervisor = portal === 'supervisor';
@@ -72,7 +74,7 @@ export default function RequestDetail({
     <PrintHeader
       title={requisition.title || requisition.reference}
       reference={requisition.reference}
-      dates={`Submitted ${dateTimeLabel(requisition.submittedAt || requisition.createdAt)}`}
+      dates={`Submitted ${dateTimeLabel(requisition.submittedAt || requisition.createdAt)} · Required by ${dateLabel(requisition.requiredBy)}`}
     />
     <PageHeader
       eyebrow={requisition.department || 'Department'}
@@ -83,6 +85,12 @@ export default function RequestDetail({
         <PortalBadge tone={decisionTone(requisition.supervisorDecision)}>
           Supervisor: {decisionLabel(requisition.supervisorDecision)}
         </PortalBadge>
+        <button type="button" onClick={() => setShowOfficial(true)} className={secondaryButtonClass()}>
+          <FileText size={14} />Official form
+        </button>
+        {!isSupervisor && isDraft(status) && onEdit && <button type="button" onClick={onEdit} className={secondaryButtonClass()}>
+          <Pencil size={14} />Edit official form
+        </button>}
         <PrintButton label="Print Request" />
         <DownloadButton type="requisition" id={requisition.id} format="pdf" label="PDF" />
         <DownloadButton type="requisition" id={requisition.id} format="xlsx" label="Excel" />
@@ -91,24 +99,29 @@ export default function RequestDetail({
     />
 
     {(error || notice) && <div className="mb-4 space-y-2">
-      {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
-      {notice && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{notice}</p>}
+      {error && <p role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-black">{error}</p>}
+      {notice && <p className="rounded-lg bg-white px-3 py-2 text-xs text-black">{notice}</p>}
     </div>}
 
     <div className="grid gap-4 lg:grid-cols-2">
       <DetailSection title="Request details">
         <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
           <KeyValue label="Reference">{requisition.reference}</KeyValue>
+          <KeyValue label="Priority">{requisition.priority || 'Medium'}</KeyValue>
           <KeyValue label="Requester">{requisition.requester || '—'}</KeyValue>
           <KeyValue label="Department">{requisition.department || '—'}</KeyValue>
+          <KeyValue label="Location">{requisition.location || '—'}</KeyValue>
           <KeyValue label="Submitted">{dateTimeLabel(requisition.submittedAt || requisition.createdAt)}</KeyValue>
-          <KeyValue label="Estimated total"><span className="text-brand">{currency(total)}</span></KeyValue>
+          <KeyValue label="Required by">{dateLabel(requisition.requiredBy)}</KeyValue>
+          <KeyValue label="Budget code">{requisition.budgetCode || '—'}</KeyValue>
+          <KeyValue label="Estimated total"><span className="text-black">{currency(total)}</span></KeyValue>
           <KeyValue label="Supervisor">{requisition.supervisorName || '—'}</KeyValue>
+          <KeyValue label="Decision at">{dateTimeLabel(requisition.supervisorDecisionAt)}</KeyValue>
         </dl>
-        {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-amber-50 p-3 text-xs leading-5 text-amber-800">
+        {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-white p-3 text-xs leading-5 text-black">
           <strong>Supervisor note:</strong> {requisition.supervisorNotes}
         </p>}
-        {requisition.informationResponse && <p className="mt-2 rounded-lg bg-blue-50 p-3 text-xs leading-5 text-blue-800">
+        {requisition.informationResponse && <p className="mt-2 rounded-lg bg-white p-3 text-xs leading-5 text-black">
           <strong>Your response:</strong> {requisition.informationResponse}
         </p>}
         {otherUserId && onMessage && <button type="button" onClick={() => onMessage(otherUserId, requisition.id)}
@@ -120,22 +133,35 @@ export default function RequestDetail({
       <DetailSection title={`Items (${items.length})`}>
         {items.length ? <TableScroll minWidth={460}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
-              <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2 text-right">Total</th></tr>
+            <thead className="bg-white text-[10px] uppercase text-muted">
+              <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2">Remarks</th><th className="px-2 py-2 text-right">Total</th></tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item) => <tr key={item.id}>
                 <td className="px-2 py-2 font-bold">{item.itemName}{item.description && <div className="text-[10px] font-normal text-muted">{item.description}</div>}</td>
                 <td className="px-2 py-2">{item.quantity} {item.unit}</td>
                 <td className="px-2 py-2">{currency(item.estimatedUnitCost)}</td>
+                <td className="px-2 py-2 text-muted">{item.remarks || '—'}</td>
                 <td className="px-2 py-2 text-right font-bold">{currency(item.lineTotal ?? item.quantity * item.estimatedUnitCost)}</td>
               </tr>)}
             </tbody>
           </table>
         </TableScroll> : <p className="text-xs text-muted">No items recorded.</p>}
-        <div className="mt-3 flex justify-end border-t border-slate-100 pt-3 text-xs font-bold">
-          Total <span className="ml-3 text-brand">{currency(total)}</span>
+        <div className="mt-3 flex justify-end border-t border-subtle pt-3 text-xs font-bold">
+          Total <span className="ml-3 text-black">{currency(total)}</span>
         </div>
+      </DetailSection>
+    </div>
+
+    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <DetailSection title={`Attachments (${(requisition.attachments || []).length})`}>
+        {requisition.loadingAttachments ? <LoadingState label="Loading attachments…" /> :
+          <AttachmentList attachments={requisition.attachments || []}
+            downloadPath={(id, name) => downloadBinary(`/portal/requisitions/${requisition.id}/attachments/${id}`, name)}
+            onError={setError} />}
+      </DetailSection>
+      <DetailSection title="Approval & activity history">
+        <ActivityTimeline activity={requisition.activity || []} />
       </DetailSection>
     </div>
 
@@ -177,12 +203,12 @@ export default function RequestDetail({
       <div className="space-y-4">
         <div className="flex flex-wrap gap-2">
           {[
-            { value: 'Approve', icon: CheckCircle2, className: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-            { value: 'Reject', icon: XCircle, className: 'border-red-200 bg-red-50 text-red-700' },
-            { value: 'Request Information', icon: Info, className: 'border-amber-200 bg-amber-50 text-amber-700' }
+            { value: 'Approve', icon: CheckCircle2, className: 'border-brand bg-white text-black' },
+            { value: 'Reject', icon: XCircle, className: 'border-brand bg-white text-black' },
+            { value: 'Request Information', icon: Info, className: 'border-brand bg-white text-black' }
           ].map(({ value, icon: Icon, className }) => <button key={value} type="button" disabled={busy}
             onClick={() => { setPendingDecision(value); setError(''); }}
-            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${pendingDecision === value ? 'ring-2 ring-brand/40' : ''} ${className}`}>
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${pendingDecision === value ? 'ring-2 ring-brand' : ''} ${className}`}>
             <Icon size={14} />{value}
           </button>)}
         </div>
@@ -198,5 +224,15 @@ export default function RequestDetail({
         <p className="text-[10px] text-muted">A decision can only be recorded once. Already-decided requests cannot be actioned again.</p>
       </div>
     </DetailSection>}
+
+    {showOfficial && <Modal title="Official material request form" size="xl" onClose={() => setShowOfficial(false)}>
+      <div className="no-print mb-4 flex flex-wrap justify-end gap-2">
+        <PrintButton label="Print official form" />
+        <DownloadButton type="requisition" id={requisition.id} format="pdf" label="Download official PDF" />
+      </div>
+      <div className="max-h-[65vh] overflow-auto rounded-lg border border-brand bg-white p-3">
+        <MaterialRequestDocument requisition={requisition} />
+      </div>
+    </Modal>}
   </Modal>;
 }

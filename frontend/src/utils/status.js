@@ -64,14 +64,14 @@ export const STATUS_TONES = {
 };
 
 export const BADGE_TONES = {
-  slate: 'bg-slate-100 text-slate-700',
-  blue: 'bg-blue-50 text-blue-700',
-  indigo: 'bg-indigo-50 text-indigo-700',
-  amber: 'bg-amber-50 text-amber-700',
-  orange: 'bg-orange-50 text-orange-700',
-  emerald: 'bg-emerald-50 text-emerald-700',
-  red: 'bg-red-50 text-red-700',
-  rose: 'bg-rose-50 text-rose-700'
+  slate: 'border border-brand bg-white text-black',
+  blue: 'border border-brand bg-white text-black',
+  indigo: 'border border-brand bg-white text-black',
+  amber: 'border border-brand bg-white text-black',
+  orange: 'border border-brand bg-white text-black',
+  emerald: 'border border-brand bg-white text-black',
+  red: 'border border-brand bg-white text-black',
+  rose: 'border border-brand bg-white text-black'
 };
 
 export function statusLabel(value) {

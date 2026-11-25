@@ -1,5 +1,4 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import BrandLogo from './components/ui/BrandLogo.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import PageContent from './pages/PageContent.jsx';
 import AdminLayout from './components/portals/AdminLayout.jsx';
@@ -27,6 +26,8 @@ import ProcurementDocumentView from './components/portals/ProcurementDocumentVie
 import SupplierRfqPage from './components/portals/SupplierRfqPage.jsx';
 import RequestResponsePage from './components/portals/RequestResponsePage.jsx';
 import CommitteeReviewPage from './components/portals/CommitteeReviewPage.jsx';
+import SupplierPricingPage from './components/portals/SupplierPricingPage.jsx';
+import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprovalPage.jsx';
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { api } from './services/api.js';
 import {
@@ -211,7 +212,8 @@ export default function App() {
           dashboard, requisitions, receivedRequests, inventory, suppliers, rfqs, purchaseOrders,
           goodsReceipts, invoices, storeRequests, notifications, committee
         ] = await Promise.all([
-          api('/dashboard'), api(filtered('/requisitions')),
+          activePage === 'Overview' ? api('/dashboard') : Promise.resolve(null),
+          api(filtered('/requisitions')),
           canAccessPage(user.role, RECEIVED_REQUESTS_PAGE)
             ? api(filtered('/procurement/received-requests?page=1&limit=10'))
             : Promise.resolve({ requisitions: [] }),
@@ -238,7 +240,8 @@ export default function App() {
         // leave RfqsPage with quotations === undefined after creating an RFQ.
         setData((current) => ({
           ...current,
-          dashboard, requisitions: requisitions.requisitions || [],
+          dashboard: dashboard || current.dashboard,
+          requisitions: requisitions.requisitions || [],
           receivedRequests: receivedRequests.requisitions || [],
           items: inventory.items || [],
           suppliers: suppliers.suppliers || [], rfqs: rfqs.rfqs || [],
@@ -277,14 +280,10 @@ export default function App() {
         const settings = result.settings || {};
         localStorage.setItem('pims-currency', 'RWF');
         localStorage.setItem('pims-currency-precision', String(settings.decimal_precision ?? 2));
+        localStorage.setItem('pims-tax-rate', String(settings.tax_rate ?? 0));
         localStorage.setItem('pims-date-format', settings.date_format || 'DD/MM/YYYY');
         localStorage.setItem('pims-time-format', settings.time_format || '24');
         localStorage.setItem('pims-timezone', settings.timezone || 'Africa/Kigali');
-        localStorage.setItem('pims-theme', settings.theme || 'light');
-        if (settings.theme === 'dark') document.documentElement.dataset.theme = 'dark';
-        else if (settings.theme === 'system') {
-          document.documentElement.dataset.theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        } else document.documentElement.dataset.theme = 'light';
         document.title = `${settings.system_name || 'Procurement Management System'} | ${settings.organization_name || 'Hope Haven'}`;
       })
       .catch(() => {});
@@ -328,12 +327,18 @@ export default function App() {
       await loadData();
       return result;
     };
+    const patch = async (path, body) => {
+      const result = await api(path, { method: 'PATCH', body: JSON.stringify(body || {}) });
+      await loadData();
+      return result;
+    };
     return {
       reload: () => loadData(),
       navigate: (page, query) => go(portal, page, query),
       getRequesterRequests: (params = {}) => api(`/portal/requester/requisitions${toQuery(params)}`),
       getRequesterRequest: (id) => api(`/portal/requester/requisitions/${id}`),
       createRequesterRequest: (payload) => post('/portal/requester/requisitions', payload),
+      updateRequesterRequest: (id, payload) => patch(`/portal/requester/requisitions/${id}`, payload),
       submitRequesterRequest: (id, payload = {}) => post(`/portal/requester/requisitions/${id}/submit`, payload),
       resubmitRequesterRequest: (id, payload = {}) => post(`/portal/requester/requisitions/${id}/resubmit`, payload),
       getSupervisorRequests: (params = {}) => api(`/portal/supervisor/requisitions${toQuery(params)}`),
@@ -344,6 +349,7 @@ export default function App() {
       getDepartmentUsers: async () => api('/portal/supervisor/department-users'),
       getDepartments: async () => api('/procurement/departments'),
       getReceivedRequests: (params = {}) => api(`/procurement/received-requests${toQuery(params)}`),
+      getReceivedRequestStats: () => api('/procurement/received-requests/stats'),
       getReceivedRequest: (id) => api(`/procurement/received-requests/${id}`),
       reviewReceivedRequest: (id) => post(`/procurement/received-requests/${id}/review`),
       sendEmail: (payload) => api('/email/send', { method: 'POST', body: JSON.stringify(payload) }),
@@ -451,9 +457,22 @@ export default function App() {
     return <ErrorBoundary key="committee-review"><CommitteeReviewPage token={route.query?.token || ''} /></ErrorBoundary>;
   }
 
+  // Supplier pricing links are public. The signed token authorizes exactly one
+  // purchase order pricing response, so no staff session or portal page check
+  // may stand in front of this page.
+  if (activePortal === PORTALS.SUPPLIER_PRICING) {
+    return <ErrorBoundary key="supplier-pricing"><SupplierPricingPage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+
+  // The Purchase Order approval link is also reachable without dashboard
+  // navigation. The backend still requires the intended signed-in recipient
+  // before the document is revealed or a decision is accepted.
+  if (activePortal === PORTALS.PURCHASE_ORDER_APPROVAL) {
+    return <ErrorBoundary key="purchase-order-approval"><PurchaseOrderApprovalPage token={route.query?.token || ''} /></ErrorBoundary>;
+  }
+
   if (authLoading) return <main className="grid min-h-screen place-items-center bg-canvas">
     <div role="status" className="flex flex-col items-center gap-4">
-      <BrandLogo variant="loading" />
       <span className="text-sm text-muted">Loading your workspace…</span>
     </div>
   </main>;
@@ -472,7 +491,8 @@ export default function App() {
   }
 
   const actions = {
-    onNavigate: (nextPage) => go('admin', nextPage),
+    onNavigate: (nextPage, nextQuery) => go('admin', nextPage, nextQuery),
+    onRefresh: loadData,
     onCreateRequisition: (form) => mutate('/requisitions', form),
     onRequisitionDecision: (id, decision) => mutate(`/requisitions/${id}/decision`, { decision }, 'PATCH'),
     onAddItem: (form) => mutate('/inventory/items', form),
@@ -498,10 +518,29 @@ export default function App() {
     getInboxMessage: (id) => api(`/email/inbox/messages/${encodeURIComponent(id)}`),
     syncInbox: () => mutate('/email/inbox/sync', {}),
     sendEmail: (message) => mutate('/email/send', message),
+    listRfqs: (params = {}) => api(`/rfqs${toQuery(params)}`),
+    getRfqStats: () => api('/rfqs/stats'),
+    getRfqDetail: (rfqId) => api(`/rfqs/${rfqId}`),
+    onUpdateRFQ: (rfqId, form) => mutate(`/rfqs/${rfqId}`, form, 'PATCH'),
+    onDeleteRFQ: (rfqId) => mutate(`/rfqs/${rfqId}`, {}, 'DELETE'),
+    onSendRFQ: (rfqId) => mutate(`/rfqs/${rfqId}/send`, {}),
+    onCloseRFQ: (rfqId) => mutate(`/rfqs/${rfqId}/close`, {}),
     onLoadQuotes: loadQuotations,
     onQuote: (id, form) => mutate(`/rfqs/${id}/quotations`, form),
     onAward: (id, quotationId) => mutate(`/rfqs/${id}/award`, { quotationId }),
     onCreatePO: (form) => mutate('/purchase-orders', form),
+    getPurchaseOrder: (id) => api(`/purchase-orders/${id}`),
+    updatePurchaseOrder: (id, form) => mutate(`/purchase-orders/${id}`, form, 'PATCH'),
+    getPurchaseOrderApprovers: () => api('/purchase-orders/approvers'),
+    sendPurchaseOrderForApproval: (id, form) => mutate(`/purchase-orders/${id}/send-for-approval`, form),
+    revokePurchaseOrderApproval: (id, approvalId) => mutate(`/purchase-orders/${id}/approvals/${approvalId}/revoke`, {}, 'PATCH'),
+    sendPurchaseOrderToSuppliers: (id, form) => mutate(`/purchase-orders/${id}/send-to-suppliers`, form),
+    getPurchaseOrderSupplierResponses: (id) => api(`/purchase-orders/${id}/supplier-responses`),
+    getSupplierQuoteComparison: (requestId) => api(`/purchase-order-pricing/requests/${requestId}/comparison`),
+    revokeSupplierPricingResponse: (id) => mutate(`/purchase-order-pricing/responses/${id}/revoke`, {}, 'PATCH'),
+    retrySupplierPricingEmails: (requestId) => mutate(`/purchase-order-pricing/requests/${requestId}/deliveries/retry-failed`, {}),
+    awardSupplierPricingResponse: (requestId, form) => mutate(`/purchase-order-pricing/requests/${requestId}/award`, form),
+    updateRequesterRequest: (id, form) => mutate(`/portal/requester/requisitions/${id}`, form, 'PATCH'),
     onPODecision: (id, decision) => mutate(`/purchase-orders/${id}/decision`, { decision }, 'PATCH'),
     onReceivePO: (form) => mutate('/goods-receipts', form),
     onCreateInvoice: (form) => mutate('/invoices', form),
@@ -539,27 +578,42 @@ export default function App() {
     onToggleNotifications: () => setNotificationsOpen((open) => !open),
     onOpenMenu: () => setMobileNav(true),
     onCloseMenu: () => setMobileNav(false),
-    onLogout: logout
+    onLogout: logout,
+    onRefresh: loadData
   };
 
-  const alert = error && <div role="alert" className="mb-5 flex items-center justify-between rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">
+  const alert = error && activePage !== 'Overview' && <div role="alert" className="mb-5 flex items-center justify-between rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">
     <span>{error}</span><button onClick={loadData} className="font-bold underline">Retry</button>
   </div>;
+  const showGenericPageSearch = activePage !== 'Overview'
+    && activePage !== RECEIVED_REQUESTS_PAGE
+    && activePage !== 'RFQs'
+    && activePage !== 'Purchase orders'
+    && activePage !== 'Goods receipts'
+    && activePage !== 'Invoices'
+    && activePage !== 'Stock movements'
+    && activePage !== 'Store requests'
+    && activePage !== 'Users'
+    && activePage !== 'Settings';
 
   if (portal === 'admin') {
     return <AdminLayout {...shellProps}>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        {activePage !== 'Overview' && <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search this page…" className="field max-w-xs bg-white" />}
+      {showGenericPageSearch && <div className="mb-4 flex items-center justify-between gap-3">
+        <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={activePage === 'Suppliers' ? 'Search suppliers…' : activePage === 'Stock overview' ? 'Search inventory…' : 'Search this page…'} className="field max-w-xs bg-white" />
         {loading && <span className="text-xs text-muted">Refreshing…</span>}
-      </div>
+      </div>}
+      {activePage === 'RFQs' && loading && <div className="mb-4 text-xs text-muted">Refreshing…</div>}
       {alert}
       <ErrorBoundary key={`${activePortal}-${activePage}`} onRetry={loadData} onLogout={logout}>
         <PageContent
           page={activePage}
-          data={{ ...data, user, search }}
+          data={{ ...data, user, search, error }}
           query={route.query || {}}
           actions={actions}
           portalApi={portalApi}
+          getPurchaseOrder={actions.getPurchaseOrder}
+          updatePurchaseOrder={actions.updatePurchaseOrder}
+          loading={loading}
           navigate={(nextPage, nextQuery) => go('admin', nextPage, nextQuery)}
           dateFilter={activeFilter}
           onDateFilterChange={setDateFilter}
@@ -624,7 +678,7 @@ export default function App() {
         initial={activePage === 'My Request History' ? null : extras.requesterRequests}
       />;
     } else if (activePage === 'Create Purchase Request') {
-      portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} />;
+      portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} user={displayUser} />;
     } else if (activePage === 'Messages') {
       portalContent = <PortalMessages
         portal="requester"

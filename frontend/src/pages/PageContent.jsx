@@ -24,20 +24,31 @@ import { SETTINGS_PAGE } from '../utils/access.js';
 const EmailInboxPage = lazy(() => import('./EmailInboxPage.jsx'));
 
 export default function PageContent({
-  page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange
+  page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange,
+  getPurchaseOrder, updatePurchaseOrder, loading
 }) {
   const documentId = query.view || query.request;
   const report = reportForPage(page);
-  // ReceivedRequests owns its toolbar because its local filters (department,
-  // status, sort) must be carried into the export request as well.
-  const ownsToolbar = page === RECEIVED_REQUESTS_PAGE && !documentId;
+  // ReceivedRequests and RFQs own their toolbars because their local filters,
+  // sorting and pagination must be carried into the export request as well.
+  const ownsToolbar = (page === RECEIVED_REQUESTS_PAGE && !documentId) || page === 'RFQs';
   const toolbar = report && !documentId && !ownsToolbar
-    ? <ReportToolbar report={report} dateFilter={dateFilter} onDateFilterChange={onDateFilterChange} />
+    ? <ReportToolbar
+        report={report}
+        dateFilter={dateFilter}
+        onDateFilterChange={onDateFilterChange}
+        professionalActions={['Purchase orders', 'Goods receipts', 'Invoices', 'Suppliers', 'Stock overview', 'Stock movements', 'Store requests', 'Users'].includes(page)}
+      />
     : null;
 
   let content = null;
   if (page === 'Overview') {
-    content = <OverviewPage dashboard={data.dashboard} onNavigate={actions.onNavigate} />;
+    content = <OverviewPage
+      dashboard={data.dashboard}
+      role={data.user?.role}
+      loading={loading}
+      onNavigate={actions.onNavigate}
+    />;
   } else if (page === SETTINGS_PAGE) {
     content = <SettingsPage actions={actions} />;
   } else if (page === 'Email Inbox') {
@@ -47,6 +58,7 @@ export default function PageContent({
   } else if (page === PROCUREMENT_PROCESSING_PAGE) {
     content = <ProcurementProcessingPage
       data={data} query={query} actions={actions} portalApi={portalApi} navigate={navigate}
+      getPurchaseOrder={getPurchaseOrder} updatePurchaseOrder={updatePurchaseOrder}
     />;
   } else if (page === 'Requisitions' || page === 'Approvals') {
     content = <RequisitionsPage page={page} requisitions={data.requisitions} user={data.user} search={data.search} onCreate={actions.onCreateRequisition} onDecision={actions.onRequisitionDecision} />;
@@ -61,7 +73,7 @@ export default function PageContent({
           dateFilter={dateFilter} onDateFilterChange={onDateFilterChange}
         />;
   } else if (page === 'Stock overview' || page === 'Stock movements') {
-    content = <InventoryPage page={page} items={data.items} movements={data.movements} user={data.user} search={data.search} onAddItem={actions.onAddItem} onReceive={actions.onReceive} />;
+    content = <InventoryPage page={page} items={data.items} movements={data.movements} user={data.user} search={data.search} query={query} onAddItem={actions.onAddItem} onReceive={actions.onReceive} />;
   } else if (page === 'Suppliers') {
     content = <SuppliersPage
       suppliers={data.suppliers} user={data.user} search={data.search}
@@ -90,9 +102,18 @@ export default function PageContent({
       onLoadEmailDeliveries={actions.onLoadEmailDeliveries}
       onRetryFailedEmails={actions.onRetryFailedEmails}
       onResendRfqEmail={actions.onResendRfqEmail}
+      listRfqs={actions.listRfqs} getRfqStats={actions.getRfqStats}
+      getRfqDetail={actions.getRfqDetail} onUpdateRFQ={actions.onUpdateRFQ}
+      onDeleteRFQ={actions.onDeleteRFQ} onSendRFQ={actions.onSendRFQ}
+      onCloseRFQ={actions.onCloseRFQ} navigate={navigate} portalApi={portalApi}
     />;
   } else if (page === 'Purchase orders') {
-    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO} />;
+    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} query={query} navigate={navigate}
+      onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO}
+      getPurchaseOrder={getPurchaseOrder} updatePurchaseOrder={updatePurchaseOrder}
+      loadApprovers={actions.getPurchaseOrderApprovers}
+      onSendForApproval={actions.sendPurchaseOrderForApproval}
+      onRevokeApproval={actions.revokePurchaseOrderApproval} />;
   } else if (page === 'Goods receipts') {
     content = <GoodsReceiptsPage receipts={data.goodsReceipts} />;
   } else if (page === 'Invoices') {

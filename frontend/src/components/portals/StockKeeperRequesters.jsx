@@ -69,8 +69,8 @@ function SortButton({ label, field, sort, direction, onSort }) {
 
 function RequesterAvatar({ requester, size = 'h-10 w-10' }) {
   return requester.profileImage
-    ? <img src={requester.profileImage} alt="" className={`${size} shrink-0 rounded-full object-cover ring-1 ring-slate-200`} />
-    : <span aria-hidden="true" className={`grid ${size} shrink-0 place-items-center rounded-full bg-emerald-50 text-xs font-extrabold text-emerald-800 ring-1 ring-emerald-100`}>
+    ? <img src={requester.profileImage} alt="" className={`${size} shrink-0 rounded-full object-cover ring-1 ring-brand`} />
+    : <span aria-hidden="true" className={`grid ${size} shrink-0 place-items-center rounded-full bg-white text-xs font-extrabold text-black ring-1 ring-brand`}>
       {initials(requester.name)}
     </span>;
 }
@@ -78,12 +78,12 @@ function RequesterAvatar({ requester, size = 'h-10 w-10' }) {
 function RequesterTableSkeleton() {
   return <div role="status" aria-label="Loading Requesters" className="animate-pulse space-y-3 p-5">
     {Array.from({ length: 6 }, (_, index) => <div key={index} className="grid grid-cols-6 items-center gap-4">
-      <span className="h-4 rounded bg-slate-100" />
-      <span className="h-10 rounded-lg bg-slate-100" />
-      <span className="h-8 rounded bg-slate-100" />
-      <span className="h-8 rounded bg-slate-100" />
-      <span className="h-7 w-20 rounded-full bg-slate-100" />
-      <span className="h-8 rounded bg-slate-100" />
+      <span className="h-4 rounded bg-white" />
+      <span className="h-10 rounded-lg bg-white" />
+      <span className="h-8 rounded bg-white" />
+      <span className="h-8 rounded bg-white" />
+      <span className="h-7 w-20 rounded-full bg-white" />
+      <span className="h-8 rounded bg-white" />
     </div>)}
     <span className="sr-only">Loading Requesters…</span>
   </div>;
@@ -96,7 +96,7 @@ function PageNavigation({ pagination, onPageChange, onPageSizeChange }) {
   const pages = pagination?.pages || 1;
   const first = total ? (page - 1) * limit + 1 : 0;
   const last = Math.min(page * limit, total);
-  return <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 text-[11px] text-muted sm:flex-row sm:items-center sm:justify-between sm:px-5">
+  return <div className="flex flex-col gap-3 border-t border-subtle px-4 py-3 text-[11px] text-muted sm:flex-row sm:items-center sm:justify-between sm:px-5">
     <div className="flex flex-wrap items-center gap-3">
       <label className="inline-flex items-center gap-2">
         <span>Rows per page</span>
@@ -109,12 +109,12 @@ function PageNavigation({ pagination, onPageChange, onPageSizeChange }) {
     </div>
     <div className="flex items-center gap-2 self-end sm:self-auto">
       <button type="button" disabled={page <= 1} onClick={() => onPageChange(page - 1)}
-        aria-label="Previous page" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white disabled:opacity-40">
+        aria-label="Previous page" className="grid h-8 w-8 place-items-center rounded-lg border border-brand bg-white disabled:opacity-40">
         <ChevronLeft size={15} />
       </button>
       <span className="min-w-20 text-center font-semibold text-ink">Page {page} of {pages}</span>
       <button type="button" disabled={page >= pages} onClick={() => onPageChange(page + 1)}
-        aria-label="Next page" className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 bg-white disabled:opacity-40">
+        aria-label="Next page" className="grid h-8 w-8 place-items-center rounded-lg border border-brand bg-white disabled:opacity-40">
         <ChevronRight size={15} />
       </button>
     </div>
@@ -122,8 +122,8 @@ function PageNavigation({ pagination, onPageChange, onPageSizeChange }) {
 }
 
 function InformationBlock({ icon: Icon, label, children }) {
-  return <div className="flex min-w-0 gap-3 rounded-xl border border-slate-100 bg-white p-4">
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-50 text-slate-600"><Icon size={16} /></span>
+  return <div className="flex min-w-0 gap-3 rounded-xl border border-brand bg-white p-4">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-brand bg-white text-black"><Icon size={16} /></span>
     <div className="min-w-0">
       <dt className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</dt>
       <dd className="mt-1 break-words text-sm font-semibold text-ink">{children ?? '—'}</dd>
@@ -267,17 +267,17 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
 
   const listHeader = <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
     <div className="flex items-start gap-3">
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-100">
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-black ring-1 ring-brand">
         <UsersRound size={20} />
       </span>
       <div>
-        <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Stock operations · Directory</p>
+        <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Stock operations · Directory</p>
         <h2 className="display-font mt-1 text-xl font-extrabold tracking-tight">List of Requesters</h2>
         <p className="mt-1 text-xs leading-5 text-muted">View and manage requester information across departments.</p>
       </div>
     </div>
-    <div className="inline-flex w-fit items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-ink">
-      <UsersRound size={14} className="text-brand" />
+    <div className="inline-flex w-fit items-center gap-2 rounded-full border border-brand bg-white px-3 py-2 text-xs font-semibold text-ink">
+      <UsersRound size={14} className="text-black" />
       <span>{directory.stats?.totalRequesters ?? '—'} total Requesters</span>
     </div>
   </div>;
@@ -292,14 +292,14 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           <ArrowLeft size={15} />Back to Requesters
         </button>
         <button type="button" onClick={() => openHistory(requester)}
-          className="inline-flex items-center gap-2 rounded-lg bg-brand px-3.5 py-2.5 text-xs font-bold text-white hover:bg-brand/90">
+          className="inline-flex items-center gap-2 rounded-lg bg-brand px-3.5 py-2.5 text-xs font-bold text-black hover:bg-brand">
           <History size={14} />View Stock Issue History
         </button>
       </div>
-      <header className="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-card sm:p-6">
+      <header className="flex flex-wrap items-center gap-4 rounded-2xl border border-brand bg-white p-5 sm:p-6">
         <RequesterAvatar requester={requester} size="h-14 w-14" />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Requester profile</p>
+          <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Requester profile</p>
           <h2 className="display-font mt-1 truncate text-xl font-extrabold">{requester.name}</h2>
           <p className="mt-1 text-xs text-muted">Requester ID #{requester.id}</p>
         </div>
@@ -307,8 +307,8 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
       </header>
       <ErrorState message={detailsError} onRetry={() => openDetails(selectedRequester)} />
       {detailsLoading && !detail ? <div role="status" className="animate-pulse space-y-3">
-        <div className="h-24 rounded-xl bg-slate-100" />
-        <div className="h-48 rounded-xl bg-slate-100" />
+        <div className="h-24 rounded-xl bg-white" />
+        <div className="h-48 rounded-xl bg-white" />
       </div> : detailsError && !detail ? null : <div className="space-y-5">
         <PageCard title="Personal information" description="Read-only details from the Requester account">
           <dl className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4 sm:p-5">
@@ -338,10 +338,10 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
 
           <PageCard title="Stock issue summary" description="Recorded stock-out transactions linked to this Requester">
             <div className="grid gap-4 p-4 sm:grid-cols-[150px_1fr] sm:p-5">
-              <div className="rounded-xl bg-emerald-50 p-4">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">Issues recorded</p>
-                <p className="display-font mt-2 text-3xl font-extrabold text-emerald-950">{issueSummary.totalIssues ?? 0}</p>
-                <p className="mt-1 text-[11px] text-emerald-800">{issueSummary.totalUnits ?? 0} total units issued</p>
+              <div className="rounded-xl border border-brand bg-white p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-black">Issues recorded</p>
+                <p className="display-font mt-2 text-3xl font-extrabold text-black">{issueSummary.totalIssues ?? 0}</p>
+                <p className="mt-1 text-[11px] text-black">{issueSummary.totalUnits ?? 0} total units issued</p>
               </div>
               <div>
                 <div className="mb-3 flex items-center justify-between gap-2">
@@ -350,15 +350,15 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
                     {issueSummary.mostRecentIssueAt ? dateTimeLabel(issueSummary.mostRecentIssueAt) : 'No issue date'}
                   </span>
                 </div>
-                {detail?.recentIssues?.length ? <ul className="divide-y divide-slate-100">
+                {detail?.recentIssues?.length ? <ul className="divide-y divide-subtle">
                   {detail.recentIssues.map((issue) => <li key={issue.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 first:pt-0 last:pb-0">
                     <span className="min-w-0">
                       <span className="block truncate text-xs font-semibold">{issue.itemName}</span>
                       <span className="text-[10px] text-muted">{issue.referenceNo || 'No reference'} · {dateTimeLabel(issue.movementAt)}</span>
                     </span>
-                    <span className="shrink-0 rounded-lg bg-slate-50 px-2 py-1 text-xs font-bold">{issue.quantity} {issue.unit}</span>
+                    <span className="shrink-0 rounded-lg bg-white px-2 py-1 text-xs font-bold">{issue.quantity} {issue.unit}</span>
                   </li>)}
-                </ul> : <p className="rounded-lg bg-slate-50 px-3 py-4 text-xs text-muted">No stock issues recorded for this Requester.</p>}
+                </ul> : <p className="rounded-lg bg-white px-3 py-4 text-xs text-muted">No stock issues recorded for this Requester.</p>}
               </div>
             </div>
           </PageCard>
@@ -376,18 +376,18 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           className="inline-flex items-center gap-2 text-xs font-bold text-muted hover:text-ink">
           <ArrowLeft size={15} />Back to requester details
         </button>
-        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold text-ink">
+        <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-semibold text-ink">
           <UserRound size={14} />{selectedRequester.name} · #{selectedRequester.id}
         </span>
       </div>
       <PageCard title="Stock issue history" description={`Actual stock-out transactions recorded for ${selectedRequester.name}.`}>
-        <div className="grid gap-3 border-b border-slate-100 bg-slate-50/40 p-4 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_auto] sm:p-5">
+        <div className="grid gap-3 border-b border-subtle bg-white p-4 sm:grid-cols-2 xl:grid-cols-[1.4fr_1fr_1fr_auto] sm:p-5">
           <FilterInput label="Search item" value={historyFilters.item} onChange={(value) => updateHistoryFilter('item', value)}
             placeholder="Item name or SKU" icon={Search} />
           <FilterInput label="From date" type="date" value={historyFilters.from} onChange={(value) => updateHistoryFilter('from', value)} />
           <FilterInput label="To date" type="date" value={historyFilters.to} onChange={(value) => updateHistoryFilter('to', value)} />
           <button type="button" onClick={() => setHistoryFilters({ item: '', from: '', to: '', page: 1, limit: 10, sort: 'date', direction: 'desc' })}
-            className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-ink hover:bg-slate-50">
+            className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg border border-brand bg-white px-3 text-xs font-bold text-ink hover:bg-white">
             <X size={14} />Clear filters
           </button>
         </div>
@@ -396,10 +396,10 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           <table className="w-full text-left text-xs">
             <thead className="bg-white text-[10px] uppercase text-muted">
               <tr>{['Date', 'Reference No.', 'Item', 'Quantity Issued', 'Unit', 'Department', 'Issued By', 'Details'].map((column) =>
-                <th key={column} className="whitespace-nowrap border-b border-slate-100 px-4 py-3 font-bold">{column}</th>)}</tr>
+                <th key={column} className="whitespace-nowrap border-b border-subtle px-4 py-3 font-bold">{column}</th>)}</tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {rows.map((movement) => <tr key={movement.id} className="hover:bg-slate-50/70">
+            <tbody className="divide-y divide-subtle">
+              {rows.map((movement) => <tr key={movement.id} className="hover:bg-white">
                 <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(movement.movementAt)}</td>
                 <td className="px-4 py-3 font-semibold">{movement.referenceNo || '—'}</td>
                 <td className="px-4 py-3 font-semibold">{movement.itemName}<span className="ml-1 text-[10px] font-normal text-muted">{movement.sku}</span></td>
@@ -409,7 +409,7 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
                 <td className="px-4 py-3">{movement.issuedBy || '—'}</td>
                 <td className="px-4 py-3">
                   <button type="button" onClick={() => setSelectedMovement(movement)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold hover:bg-slate-50">
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[11px] font-bold hover:bg-white">
                     <Eye size={12} />View
                   </button>
                 </td>
@@ -425,17 +425,17 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           onPageSizeChange={(limit) => setHistoryFilters((current) => ({ ...current, page: 1, limit }))} />
       </PageCard>
 
-      {selectedMovement && <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/45 p-4"
+      {selectedMovement && <div className="fixed inset-0 z-[80] grid place-items-center bg-black/20 p-4"
         role="dialog" aria-modal="true" aria-labelledby="stock-issue-dialog-title"
         onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedMovement(null); }}>
-        <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white shadow-2xl">
-          <header className="flex items-start justify-between gap-4 border-b border-slate-100 p-5">
+        <section className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white ">
+          <header className="flex items-start justify-between gap-4 border-b border-subtle p-5">
             <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Bin Card transaction</p>
+              <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Bin Card transaction</p>
               <h2 id="stock-issue-dialog-title" className="mt-1 text-base font-extrabold">Stock issue details</h2>
             </div>
             <button type="button" onClick={() => setSelectedMovement(null)} aria-label="Close transaction details"
-              className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-slate-100"><X size={16} /></button>
+              className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-white"><X size={16} /></button>
           </header>
           <dl className="grid gap-3 p-5 sm:grid-cols-2">
             <InformationBlock icon={CalendarDays} label="Date">{dateTimeLabel(selectedMovement.movementAt)}</InformationBlock>
@@ -450,7 +450,7 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           </dl>
           {selectedMovement.description && <div className="px-5 pb-5">
             <p className="text-[10px] font-bold uppercase tracking-wide text-muted">Description</p>
-            <p className="mt-1 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-ink">{selectedMovement.description}</p>
+            <p className="mt-1 rounded-lg border border-brand bg-white p-3 text-xs leading-5 text-ink">{selectedMovement.description}</p>
           </div>}
         </section>
       </div>}
@@ -471,7 +471,7 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
     </div>
 
     <PageCard title="Requester directory" description={`${pagination.total} matching account${pagination.total === 1 ? '' : 's'}`}>
-      <div className="grid gap-3 border-b border-slate-100 bg-slate-50/40 p-4 sm:grid-cols-2 xl:grid-cols-[1.1fr_1.1fr_1.1fr_1fr_1fr_auto] sm:p-5">
+      <div className="grid gap-3 border-b border-subtle bg-white p-4 sm:grid-cols-2 xl:grid-cols-[1.1fr_1.1fr_1.1fr_1fr_1fr_auto] sm:p-5">
         <FilterInput label="Requester name" value={filters.name} onChange={(value) => updateFilter('name', value)}
           placeholder="Search by name" icon={Search} />
         <FilterInput label="Email address" value={filters.email} onChange={(value) => updateFilter('email', value)}
@@ -496,7 +496,7 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
           </select>
         </label>
         <button type="button" onClick={clearFilters}
-          className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-ink hover:bg-slate-50">
+          className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg border border-brand bg-white px-3 text-xs font-bold text-ink hover:bg-white">
           <X size={14} />Clear
         </button>
       </div>
@@ -505,22 +505,22 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
         <table className="w-full text-left text-xs">
           <thead className="bg-white text-[10px] uppercase text-muted">
             <tr>
-              <th className="w-12 border-b border-slate-100 px-4 py-3">#</th>
-              <th className="border-b border-slate-100 px-4 py-3">
+              <th className="w-12 border-b border-subtle px-4 py-3">#</th>
+              <th className="border-b border-subtle px-4 py-3">
                 <SortButton label="Requester" field="name" sort={filters.sort} direction={filters.direction} onSort={sortBy} />
               </th>
-              <th className="border-b border-slate-100 px-4 py-3">Contact information</th>
-              <th className="border-b border-slate-100 px-4 py-3">
+              <th className="border-b border-subtle px-4 py-3">Contact information</th>
+              <th className="border-b border-subtle px-4 py-3">
                 <SortButton label="Department" field="department" sort={filters.sort} direction={filters.direction} onSort={sortBy} />
               </th>
-              <th className="border-b border-slate-100 px-4 py-3">
+              <th className="border-b border-subtle px-4 py-3">
                 <SortButton label="Account status" field="status" sort={filters.sort} direction={filters.direction} onSort={sortBy} />
               </th>
-              <th className="border-b border-slate-100 px-4 py-3">Actions</th>
+              <th className="border-b border-subtle px-4 py-3">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
-            {requesters.map((requester, index) => <tr key={requester.id} className="transition hover:bg-slate-50/70">
+          <tbody className="divide-y divide-subtle">
+            {requesters.map((requester, index) => <tr key={requester.id} className="transition hover:bg-white">
               <td className="px-4 py-3 text-muted">{(pagination.page - 1) * pagination.limit + index + 1}</td>
               <td className="px-4 py-3">
                 <div className="flex min-w-48 items-center gap-3">
@@ -532,24 +532,24 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
                 </div>
               </td>
               <td className="px-4 py-3">
-                <a href={`mailto:${requester.email}`} className="block max-w-56 truncate font-semibold text-ink hover:text-brand">{requester.email}</a>
+                <a href={`mailto:${requester.email}`} className="block max-w-56 truncate font-semibold text-ink hover:text-black">{requester.email}</a>
                 <p className="mt-1 text-[10px] text-muted">{requester.phone || 'Phone not provided'}</p>
               </td>
               <td className="px-4 py-3">{requester.department || 'Not assigned'}</td>
               <td className="px-4 py-3">
                 <PortalBadge tone={requester.active ? 'emerald' : 'slate'}>
-                  <span className={`h-1.5 w-1.5 rounded-full ${requester.active ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+                  <span className={`h-1.5 w-1.5 rounded-full ${requester.active ? 'bg-success' : 'bg-black/40'}`} />
                   {requester.active ? 'Active' : 'Inactive'}
                 </PortalBadge>
               </td>
               <td className="px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <button type="button" onClick={() => openDetails(requester)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-ink hover:border-brand/30 hover:text-brand">
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-2 text-[11px] font-bold text-ink hover:border-brand hover:text-black">
                     <Eye size={13} />View details
                   </button>
                   <button type="button" onClick={() => openHistory(requester)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-ink hover:border-brand/30 hover:text-brand">
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-2 text-[11px] font-bold text-ink hover:border-brand hover:text-black">
                     <History size={13} />Issue history
                   </button>
                 </div>
@@ -560,7 +560,7 @@ export default function StockKeeperRequesters({ portalApi, initial }) {
       </TableScroll> : <EmptyState
         title={listError ? 'Requester list is unavailable' : 'No Requesters match these filters'}
         description={listError ? 'Retry to load the latest requester records.' : 'Clear filters or try a different name, email, or department.'}
-        action={<button type="button" onClick={clearFilters} className="text-xs font-bold text-brand hover:underline">Clear all filters</button>}
+        action={<button type="button" onClick={clearFilters} className="text-xs font-bold text-black hover:underline">Clear all filters</button>}
       />}
       <PageNavigation pagination={pagination}
         onPageChange={(page) => setFilters((current) => ({ ...current, page }))}

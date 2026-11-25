@@ -81,17 +81,29 @@ function parseItems(value) {
   }
   if (!Array.isArray(items) || !items.length) throw httpError(400, 'Add at least one item to the request.');
   if (items.length > 100) throw httpError(400, 'A request can contain at most 100 items.');
+  const seenIds = new Set();
   return items.map((item) => {
     const quantity = Number(item.quantity);
     const estimatedUnitCost = Number(item.estimatedUnitCost);
     const itemName = text(item.itemName || item.name, 180);
+    const id = item.id === undefined || item.id === null || item.id === ''
+      ? null : Number(item.id);
+    if (id !== null && (!Number.isInteger(id) || id < 1)) {
+      throw httpError(400, 'An item has an invalid identifier.');
+    }
+    if (id !== null && seenIds.has(id)) {
+      throw httpError(400, 'The same item cannot appear twice in a request.');
+    }
+    if (id !== null) seenIds.add(id);
     if (!itemName || !Number.isInteger(quantity) || quantity < 1 ||
         !Number.isFinite(estimatedUnitCost) || estimatedUnitCost < 0) {
       throw httpError(400, 'Each item needs a name, a positive whole quantity, and a valid estimated unit cost.');
     }
     return {
+      id,
       itemName,
       description: text(item.description, 1000),
+      remarks: text(item.remarks, 2000),
       quantity,
       unit: text(item.unit, 30) || 'unit',
       estimatedUnitCost: Math.round(estimatedUnitCost * 100) / 100
@@ -194,7 +206,7 @@ async function recordActivity(connection, requisitionId, userId, action, details
 
 function requisitionQuery(where = '') {
   return `
-    SELECT r.id, r.reference, r.title, r.justification, r.budget_code AS budgetCode,
+    SELECT r.id, r.reference, r.title, r.location, r.justification, r.budget_code AS budgetCode,
       r.required_by AS requiredBy, r.priority, r.status, r.status AS statusLabel,
       r.submitted_at AS submittedAt, r.created_at AS createdAt, r.forwarded_at AS forwardedAt,
       r.forwarded_by_supervisor AS forwardedBySupervisor, fwd.name AS forwardedByName,
@@ -253,7 +265,7 @@ async function loadRequisition(connection, id, req) {
 
 async function loadRequisitionParts(connection, id) {
   const [items] = await connection.execute(
-    `SELECT id, item_name AS itemName, description, quantity, unit,
+    `SELECT id, item_name AS itemName, description, remarks, quantity, unit,
       estimated_unit_cost AS estimatedUnitCost
      FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
     [id]
@@ -315,8 +327,8 @@ async function submitRequisition(connection, requisition, req, response = '', at
   }
   const [items] = await connection.execute('SELECT id FROM requisition_items WHERE requisition_id = ? LIMIT 1', [requisition.id]);
   if (!items.length) throw httpError(400, 'Add at least one item before submitting.');
-  if (!text(requisition.title) || !text(requisition.justification)) {
-    throw httpError(400, 'Complete the title and description or purpose before submitting.');
+  if (!text(requisition.title) || !text(requisition.location) || !text(requisition.justification)) {
+    throw httpError(400, 'Complete the title, location, and description or purpose before submitting.');
   }
 
   await connection.execute(
@@ -560,29 +572,31 @@ router.post('/requester/requisitions', allowRoles('requestor'), async (req, res,
     const items = parseItems(req.body.items);
     const attachments = parseAttachments(req.body.attachments);
     const title = text(req.body.title, 180);
+    const location = text(req.body.location, 255);
     const justification = text(req.body.justification, 5000);
     const budgetCode = text(req.body.budgetCode, 60);
     const requiredBy = /^\d{4}-\d{2}-\d{2}$/.test(req.body.requiredBy || '') ? req.body.requiredBy : null;
     const priority = ['Low', 'Medium', 'High', 'Urgent'].includes(req.body.priority) ? req.body.priority : 'Medium';
-    if (action === 'submit' && (!title || !justification)) {
-      return res.status(400).json({ message: 'Complete the title and description or purpose before submitting.' });
+    if (action === 'submit' && (!title || !location || !justification)) {
+      return res.status(400).json({ message: 'Complete the title, location, and description or purpose before submitting.' });
     }
     return await transaction(async (connection) => {
       const reqReference = await reference();
       const [result] = await connection.execute(
         `INSERT INTO requisitions
-          (reference, requester_id, department_id, title, justification, budget_code, required_by, priority, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [reqReference, req.user.id, department.id, title || null, justification, budgetCode, requiredBy, priority,
-          REQUISITION_STATUS.DRAFT]
+          (reference, requester_id, department_id, title, location, justification, budget_code, required_by, priority, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [reqReference, req.user.id, department.id, title || null, location || null,
+          justification, budgetCode, requiredBy, priority, REQUISITION_STATUS.DRAFT]
       );
       const requisitionId = Number(result.insertId);
       for (const item of items) {
         await connection.execute(
           `INSERT INTO requisition_items
-            (requisition_id, item_name, description, quantity, unit, estimated_unit_cost)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [requisitionId, item.itemName, item.description || null, item.quantity, item.unit, item.estimatedUnitCost]
+            (requisition_id, item_name, description, remarks, quantity, unit, estimated_unit_cost)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [requisitionId, item.itemName, item.description || null, item.remarks || null,
+            item.quantity, item.unit, item.estimatedUnitCost]
         );
       }
       await saveAttachments(connection, 'requisition_attachments', 'requisition_id', requisitionId, req.user.id, attachments);
@@ -599,6 +613,92 @@ router.post('/requester/requisitions', allowRoles('requestor'), async (req, res,
         body: {
           id: requisitionId, reference: reqReference, status: REQUISITION_STATUS.DRAFT,
           statusLabel: statusLabel(REQUISITION_STATUS.DRAFT), message: 'Draft saved.'
+        }
+      };
+    }, res, next);
+  } catch (error) { return next(error); }
+});
+
+// Drafts can be corrected in place. Reference, status, Department, ownership
+// and activity history are deliberately untouched: this is an edit, not a new
+// submission and never a workflow transition.
+router.patch('/requester/requisitions/:id', allowRoles('requestor'), async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid request identifier.' });
+  try {
+    const department = await assignedDepartment(req, res);
+    if (!department) return;
+    return await transaction(async (connection) => {
+      const existing = await loadRequisition(connection, id, req);
+      if (existing.status !== REQUISITION_STATUS.DRAFT) {
+        throw httpError(409, 'Only draft requests can be edited.');
+      }
+      const items = parseItems(req.body.items);
+      const title = text(req.body.title, 180);
+      const location = text(req.body.location, 255);
+      const justification = text(req.body.justification, 5000);
+      const budgetCode = text(req.body.budgetCode, 60);
+      const requiredBy = /^\d{4}-\d{2}-\d{2}$/.test(req.body.requiredBy || '') ? req.body.requiredBy : null;
+      const priority = ['Low', 'Medium', 'High', 'Urgent'].includes(req.body.priority) ? req.body.priority : 'Medium';
+
+      const [currentRows] = await connection.execute(
+        'SELECT id FROM requisition_items WHERE requisition_id = ?',
+        [id]
+      );
+      const currentIds = new Set(currentRows.map((row) => Number(row.id)));
+      for (const item of items) {
+        if (item.id !== null && !currentIds.has(item.id)) {
+          throw httpError(400, 'An item does not belong to this draft.');
+        }
+      }
+
+      await connection.execute(
+        `UPDATE requisitions
+            SET title = ?, location = ?, justification = ?, budget_code = ?,
+              required_by = ?, priority = ?
+          WHERE id = ? AND status = ?`,
+        [title || null, location || null, justification, budgetCode, requiredBy, priority,
+          id, REQUISITION_STATUS.DRAFT]
+      );
+
+      const keptIds = [];
+      for (const item of items) {
+        if (item.id !== null) {
+          await connection.execute(
+            `UPDATE requisition_items
+                SET item_name = ?, description = ?, remarks = ?, quantity = ?,
+                  unit = ?, estimated_unit_cost = ?
+              WHERE id = ? AND requisition_id = ?`,
+            [item.itemName, item.description || null, item.remarks || null, item.quantity,
+              item.unit, item.estimatedUnitCost, item.id, id]
+          );
+          keptIds.push(item.id);
+        } else {
+          const [inserted] = await connection.execute(
+            `INSERT INTO requisition_items
+              (requisition_id, item_name, description, remarks, quantity, unit, estimated_unit_cost)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [id, item.itemName, item.description || null, item.remarks || null,
+              item.quantity, item.unit, item.estimatedUnitCost]
+          );
+          keptIds.push(Number(inserted.insertId));
+        }
+      }
+      const placeholders = keptIds.map(() => '?').join(',');
+      await connection.execute(
+        `DELETE FROM requisition_items WHERE requisition_id = ? AND id NOT IN (${placeholders})`,
+        [id, ...keptIds]
+      );
+
+      const updated = await loadRequisition(connection, id, req);
+      return {
+        body: {
+          id,
+          reference: existing.reference,
+          status: existing.status,
+          statusLabel: statusLabel(existing.status),
+          message: 'Draft updated.',
+          requisition: { ...updated, ...await loadRequisitionParts(connection, id) }
         }
       };
     }, res, next);

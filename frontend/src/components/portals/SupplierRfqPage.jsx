@@ -28,7 +28,7 @@ export default function SupplierRfqPage({ token }) {
       }
       setForm({ notes: quotation?.notes || '', prices });
     } catch (exception) {
-      setError(exception.message || 'This quotation link could not be opened.');
+      setError(exception.message || 'This response link could not be opened.');
     } finally { setLoading(false); }
   }, [token]);
 
@@ -56,10 +56,7 @@ export default function SupplierRfqPage({ token }) {
     try {
       const result = await api(`/supplier/rfq/${encodeURIComponent(token)}/quotation`, {
         method: 'POST',
-        body: JSON.stringify({
-          notes: form.notes.trim(),
-          items
-        })
+        body: JSON.stringify({ notes: form.notes.trim(), items })
       });
       setNotice(result.message || 'Response submitted.');
       await load();
@@ -125,10 +122,10 @@ export default function SupplierRfqPage({ token }) {
                 <td className="px-4 py-3 font-bold">{currency((Number(item.quantity) || 0) * price)}</td>
               </tr>;
             })}</tbody>
-          </table></div> : <p className="p-6 text-sm text-muted">No item lines were supplied with this RFQ.</p>}
+          </table></div> : <p className="p-6 text-sm text-muted">No item lines were supplied with this form.</p>}
           {rfq.items.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-200 bg-emerald-50 px-6 py-4">
             <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-800">Your response total</span>
-            <strong className="text-xl font-extrabold text-brand">{currency(responseTotal)}</strong>
+            <strong className="text-base font-bold text-brand">{currency(responseTotal)}</strong>
           </div>}
         </section>
 
@@ -144,7 +141,7 @@ export default function SupplierRfqPage({ token }) {
             </div>}
           </> : <>
             <label className="block text-xs font-bold">Overall comment<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="field mt-1 h-auto py-2" placeholder="Add any comment that should reach Procurement…" /></label>
-            <p className="mt-3 text-xs text-muted">Your response, item prices, and comments are visible to Procurement only. Other invited Suppliers cannot see them.</p>
+            <p className="mt-3 text-xs text-muted">Your response, item prices, and comments are visible to Procurement only. Other invited suppliers cannot see them.</p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50">
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}

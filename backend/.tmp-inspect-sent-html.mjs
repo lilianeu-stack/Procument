@@ -19,7 +19,7 @@ const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
 const { access_token } = await tokenResponse.json();
 
 const response = await fetch(
-  'https://gmail.googleapis.com/gmail/v1/users/me/messages/1a2121faeae8bffe?format=full',
+  'https://gmail.googleapis.com/gmail/v1/users/me/messages/1a21246a68c2a0cd?format=full',
   { headers: { Authorization: `Bearer ${access_token}` } }
 );
 const full = await response.json();
@@ -35,6 +35,8 @@ const htmlParts = [];
 collect(full.payload, htmlParts);
 const html = htmlParts[0] || '';
 const links = [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
+console.log('HTML START', html.slice(0, 500));
+console.log('HTML END', html.slice(-1800));
 console.log('LINKS', JSON.stringify(links, null, 2));
 console.log('HAS PATH LINK', html.includes('/committee-review?token='));
 console.log('HAS HASH LINK', html.includes('/#/committee-review/Review?token='));

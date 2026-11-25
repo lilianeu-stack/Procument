@@ -16,7 +16,7 @@ export default function PortalProfile({ user, summary, portal }) {
     <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
       <PageCard title="Profile">
         <div className="p-5 text-center">
-          <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-slate-100 text-2xl font-extrabold text-brand">
+          <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-white text-2xl font-extrabold text-black">
             {user?.initials || 'HH'}
           </div>
           <h3 className="display-font mt-4 text-lg font-extrabold">{user?.name || 'User'}</h3>
@@ -32,7 +32,7 @@ export default function PortalProfile({ user, summary, portal }) {
             <KeyValue label="Role">{roleLabel(user?.role)}</KeyValue>
             <KeyValue label="Username">{user?.username || user?.email || '—'}</KeyValue>
             <KeyValue label="Phone"><span className="flex items-center gap-1.5"><Phone size={12} className="text-muted" />{user?.phone || '—'}</span></KeyValue>
-            <KeyValue label="Account status"><span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">Active</span></KeyValue>
+            <KeyValue label="Account status"><span className="rounded-full bg-white px-2 py-1 text-[10px] font-bold text-black">Active</span></KeyValue>
           </dl>
         </PageCard>
         <PageCard title="Department assignment">
@@ -44,8 +44,8 @@ export default function PortalProfile({ user, summary, portal }) {
             <KeyValue label="Active Requesters">{department.requesterCount ?? '—'}</KeyValue>
           </dl>
         </PageCard>
-        <div className="flex items-start gap-3 rounded-xl border border-slate-100 bg-white p-5 text-xs leading-5 text-muted shadow-card">
-          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-brand" />
+        <div className="flex items-start gap-3 rounded-xl border border-brand bg-white p-5 text-xs leading-5 text-muted">
+          <ShieldCheck size={18} className="mt-0.5 shrink-0 text-black" />
           <p>Your access is determined by your assigned role and Department. Contact an Administrator if any of the details above need correction.</p>
         </div>
       </div>

@@ -191,6 +191,26 @@ export async function applySchemaMigrations() {
     { table: 'requisition_items', column: 'description', ddl: 'ALTER TABLE requisition_items ADD COLUMN description TEXT NULL AFTER item_name' },
     { table: 'requisition_items', column: 'unit', ddl: "ALTER TABLE requisition_items ADD COLUMN unit VARCHAR(30) NOT NULL DEFAULT 'unit' AFTER quantity" },
 
+    // Official material-request form fields. The form's purpose maps to the
+    // existing justification column; these two columns carry only new data.
+    { table: 'requisitions', column: 'location', ddl: 'ALTER TABLE requisitions ADD COLUMN location VARCHAR(255) NULL AFTER title' },
+    { table: 'requisition_items', column: 'remarks', ddl: 'ALTER TABLE requisition_items ADD COLUMN remarks TEXT NULL AFTER description' },
+
+    // Registered supplier address used by the official purchase-order form.
+    { table: 'suppliers', column: 'address', ddl: 'ALTER TABLE suppliers ADD COLUMN address VARCHAR(255) NULL AFTER phone' },
+
+    // Official purchase-order document fields. Existing rows receive safe
+    // defaults and keep their historical status, reference and amounts.
+    { table: 'purchase_orders', column: 'type', ddl: "ALTER TABLE purchase_orders ADD COLUMN type VARCHAR(50) NOT NULL DEFAULT 'Standard' AFTER supplier_id" },
+    { table: 'purchase_orders', column: 'supplier_contact', ddl: 'ALTER TABLE purchase_orders ADD COLUMN supplier_contact VARCHAR(150) NULL AFTER type' },
+    { table: 'purchase_orders', column: 'supplier_address', ddl: 'ALTER TABLE purchase_orders ADD COLUMN supplier_address VARCHAR(255) NULL AFTER supplier_contact' },
+    { table: 'purchase_orders', column: 'subtotal', ddl: 'ALTER TABLE purchase_orders ADD COLUMN subtotal DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER supplier_address' },
+    { table: 'purchase_orders', column: 'vat_rate', ddl: 'ALTER TABLE purchase_orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER subtotal' },
+    { table: 'purchase_orders', column: 'vat_amount', ddl: 'ALTER TABLE purchase_orders ADD COLUMN vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER vat_rate' },
+    { table: 'purchase_orders', column: 'amount_in_words', ddl: 'ALTER TABLE purchase_orders ADD COLUMN amount_in_words VARCHAR(500) NULL AFTER vat_amount' },
+    { table: 'purchase_order_items', column: 'description', ddl: 'ALTER TABLE purchase_order_items ADD COLUMN description TEXT NULL AFTER item_name' },
+    { table: 'purchase_order_items', column: 'unit', ddl: "ALTER TABLE purchase_order_items ADD COLUMN unit VARCHAR(30) NOT NULL DEFAULT 'unit' AFTER quantity" },
+
     // Audit and lifecycle metadata. `updated_at` is maintained by MySQL and is
     // never accepted from a request body.
     { table: 'departments', column: 'updated_at', ddl: 'ALTER TABLE departments ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
@@ -215,6 +235,8 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', column: 'idempotency_key', ddl: 'ALTER TABLE inventory_movements ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER store_request_id' },
     { table: 'rfqs', column: 'issued_at', ddl: 'ALTER TABLE rfqs ADD COLUMN issued_at DATETIME NULL AFTER selected_quotation_id' },
     { table: 'rfqs', column: 'message', ddl: 'ALTER TABLE rfqs ADD COLUMN message TEXT NULL AFTER issued_at' },
+    { table: 'rfqs', column: 'instructions', ddl: 'ALTER TABLE rfqs ADD COLUMN instructions TEXT NULL AFTER due_date' },
+    { table: 'rfqs', column: 'terms', ddl: 'ALTER TABLE rfqs ADD COLUMN terms TEXT NULL AFTER instructions' },
     // Prevents duplicate RFQs when the administrator double-clicks Send RFQ or
     // retries a request whose first response was lost.
     { table: 'rfqs', column: 'idempotency_key', ddl: 'ALTER TABLE rfqs ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER reference' },
@@ -229,6 +251,7 @@ export async function applySchemaMigrations() {
     { table: 'requisition_email_threads', column: 'response_submitted_at', ddl: 'ALTER TABLE requisition_email_threads ADD COLUMN response_submitted_at DATETIME NULL AFTER created_at' },
     { table: 'purchase_orders', column: 'approved_at', ddl: 'ALTER TABLE purchase_orders ADD COLUMN approved_at DATETIME NULL AFTER reviewed_by' },
     { table: 'purchase_orders', column: 'updated_at', ddl: 'ALTER TABLE purchase_orders ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
+    { table: 'purchase_orders', column: 'supplier_pricing_status', ddl: "ALTER TABLE purchase_orders ADD COLUMN supplier_pricing_status VARCHAR(30) NOT NULL DEFAULT 'Not requested' AFTER status" },
     { table: 'goods_receipts', column: 'expected_at', ddl: 'ALTER TABLE goods_receipts ADD COLUMN expected_at DATETIME NULL AFTER received_by' },
     { table: 'goods_receipts', column: 'updated_at', ddl: 'ALTER TABLE goods_receipts ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER received_at' },
     { table: 'invoices', column: 'invoice_date', ddl: 'ALTER TABLE invoices ADD COLUMN invoice_date DATE NULL AFTER status' },
@@ -284,7 +307,8 @@ export async function applySchemaMigrations() {
 
   const enumUpdates = [
     { table: 'users', column: 'role', values: USER_ROLES, required: "'storekeeper'", definition: `ENUM(${USER_ROLES.map((role) => `'${role}'`).join(', ')}) NOT NULL DEFAULT 'requestor'` },
-    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Forwarded to Procurement'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` }
+    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Forwarded to Procurement'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` },
+    { table: 'rfqs', column: 'status', values: ['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'], required: "'Draft'", definition: "ENUM('Draft','Sent','Evaluating','Awarded','Closed') NOT NULL DEFAULT 'Sent'" }
   ];
   for (const update of enumUpdates) {
     const [rows] = await pool.query(
@@ -490,6 +514,123 @@ export async function applySchemaMigrations() {
       CONSTRAINT fk_requisition_email_comment_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
       CONSTRAINT fk_requisition_email_comment_thread FOREIGN KEY (thread_id) REFERENCES requisition_email_threads(id) ON DELETE SET NULL,
       INDEX idx_requisition_email_comment_req_date (requisition_id, received_at)
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_approval_requests (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      purchase_order_id INT UNSIGNED NOT NULL,
+      po_reference VARCHAR(30) NOT NULL,
+      total DECIMAL(12,2) NOT NULL DEFAULT 0,
+      sender_user_id INT UNSIGNED NULL,
+      sender_name VARCHAR(150) NOT NULL,
+      sender_email VARCHAR(190) NOT NULL,
+      recipient_user_id INT UNSIGNED NULL,
+      recipient_name VARCHAR(150) NOT NULL,
+      recipient_email VARCHAR(190) NOT NULL,
+      recipient_role VARCHAR(40) NOT NULL,
+      token_hash CHAR(64) NULL,
+      status ENUM('Pending','Approved','Rejected','Revoked','Expired','Superseded') NOT NULL DEFAULT 'Pending',
+      message VARCHAR(1000) NULL,
+      sent_at DATETIME NOT NULL,
+      expires_at DATETIME NOT NULL,
+      viewed_at DATETIME NULL,
+      decided_at DATETIME NULL,
+      decision_comment VARCHAR(2000) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_po_approval_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_approval_sender FOREIGN KEY (sender_user_id) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_po_approval_recipient FOREIGN KEY (recipient_user_id) REFERENCES users(id) ON DELETE SET NULL,
+      UNIQUE KEY uq_po_approval_token_hash (token_hash),
+      INDEX idx_po_approval_order (purchase_order_id, created_at),
+      INDEX idx_po_approval_status (status, expires_at)
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_pricing_requests (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      reference VARCHAR(30) NOT NULL UNIQUE,
+      purchase_order_id INT UNSIGNED NOT NULL,
+      po_reference VARCHAR(30) NOT NULL,
+      rfq_id INT UNSIGNED NULL,
+      rfq_reference VARCHAR(30) NULL,
+      requisition_id INT UNSIGNED NULL,
+      requisition_reference VARCHAR(190) NULL,
+      currency VARCHAR(10) NOT NULL DEFAULT 'RWF',
+      submission_deadline DATE NULL,
+      message VARCHAR(1000) NULL,
+      status ENUM('Open','Closed','Awarded','Cancelled') NOT NULL DEFAULT 'Open',
+      created_by INT UNSIGNED NULL,
+      awarded_response_id BIGINT UNSIGNED NULL,
+      awarded_at DATETIME NULL,
+      awarded_by INT UNSIGNED NULL,
+      award_comment VARCHAR(2000) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_po_pricing_request_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_pricing_request_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_po_pricing_request_order_status (purchase_order_id, status),
+      INDEX idx_po_pricing_request_rfq (rfq_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_pricing_responses (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      request_id BIGINT UNSIGNED NOT NULL,
+      purchase_order_id INT UNSIGNED NOT NULL,
+      supplier_id INT UNSIGNED NOT NULL,
+      supplier_name VARCHAR(190) NOT NULL,
+      supplier_email VARCHAR(190) NOT NULL,
+      supplier_contact VARCHAR(190) NULL,
+      supplier_address VARCHAR(500) NULL,
+      token_hash CHAR(64) NOT NULL UNIQUE,
+      status ENUM('Pending','Invited','Opened','Draft','Submitted','Revoked','Expired','Email failed') NOT NULL DEFAULT 'Pending',
+      email_status VARCHAR(40) NOT NULL DEFAULT 'Pending',
+      email_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+      provider_message_id VARCHAR(255) NULL,
+      provider_response VARCHAR(255) NULL,
+      email_error TEXT NULL,
+      sent_at DATETIME NULL,
+      accepted_at DATETIME NULL,
+      delivered_at DATETIME NULL,
+      bounced_at DATETIME NULL,
+      opened_at DATETIME NULL,
+      expires_at DATETIME NOT NULL,
+      draft_saved_at DATETIME NULL,
+      submitted_at DATETIME NULL,
+      revoked_at DATETIME NULL,
+      currency VARCHAR(10) NOT NULL DEFAULT 'RWF',
+      subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
+      vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0,
+      vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+      other_charges DECIMAL(12,2) NOT NULL DEFAULT 0,
+      total DECIMAL(12,2) NOT NULL DEFAULT 0,
+      quotation_validity VARCHAR(120) NULL,
+      delivery_lead_time VARCHAR(120) NULL,
+      comments VARCHAR(2000) NULL,
+      technical_remarks VARCHAR(2000) NULL,
+      awarded TINYINT(1) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_po_pricing_response_request FOREIGN KEY (request_id) REFERENCES purchase_order_pricing_requests(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_pricing_response_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_pricing_response_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+      UNIQUE KEY uq_po_pricing_response_supplier (request_id, supplier_id),
+      INDEX idx_po_pricing_response_status_expiry (status, expires_at),
+      INDEX idx_po_pricing_response_email_status (email_status),
+      INDEX idx_po_pricing_response_provider_message (provider_message_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_pricing_response_items (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      response_id BIGINT UNSIGNED NOT NULL,
+      purchase_order_item_id INT UNSIGNED NOT NULL,
+      item_no INT UNSIGNED NOT NULL,
+      item_name VARCHAR(255) NOT NULL,
+      description TEXT NULL,
+      quantity DECIMAL(12,2) NOT NULL,
+      unit VARCHAR(50) NOT NULL,
+      unit_price DECIMAL(12,4) NULL,
+      line_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_po_pricing_item_response FOREIGN KEY (response_id) REFERENCES purchase_order_pricing_responses(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_pricing_item_order_line FOREIGN KEY (purchase_order_item_id) REFERENCES purchase_order_items(id) ON DELETE CASCADE,
+      UNIQUE KEY uq_po_pricing_item_line (response_id, purchase_order_item_id)
     )`,
     `CREATE TABLE IF NOT EXISTS inventory_movement_attachments (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

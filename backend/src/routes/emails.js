@@ -154,7 +154,7 @@ router.post('/rfqs/send-to-committee', allowRoles(...managers), async (req, res,
             JSON.stringify(snapshot)]
         );
         reviewIds.push(Number(result.insertId));
-        links.push({ reference: section.reference, url: committeeReviewLink(token) });
+        links.push({ id: section.id, reference: section.reference, url: committeeReviewLink(token) });
       }
 
       const text = [
@@ -162,7 +162,7 @@ router.post('/rfqs/send-to-committee', allowRoles(...managers), async (req, res,
         '',
         `Procurement has sent ${responseCount} supplier response(s) for your decision. Prepared ${readableGeneratedAt(generatedAt, settings)}.`,
         '',
-        'OPEN YOUR DECISION FORM(S) BELOW. For every supplier response, choose Accept or Deny. Give a reason for each Deny. Only one decision set is accepted per link.',
+        'OPEN YOUR DECISION FORM(S) BELOW. Open the OPEN DECISION FORM link for every supplier response, choose Accept or Deny, and give a reason for each Deny. Only one decision set is accepted per link.',
         '',
         ...links.map((link) => `- ${link.reference}: ${link.url}`),
         '',
@@ -314,7 +314,7 @@ router.post('/rfqs/:id/committee-reviews/:reviewId/resend', allowRoles(...manage
       html: committeeReviewEmailHtml({
         recipientName: row.recipientName || 'Committee member',
         sections: [snapshot],
-        links: [{ reference: snapshot.reference || row.reference, url: link }],
+        links: [{ id: snapshot.id || row.id, reference: snapshot.reference || row.reference, url: link }],
         recommendations: recommendation ? { [String(snapshot.id || row.id)]: recommendation } : {},
         generatedAt,
         settings

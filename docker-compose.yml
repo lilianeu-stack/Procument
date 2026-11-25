@@ -55,16 +55,9 @@ services:
       backend:
         condition: service_healthy
     environment:
-      VITE_API_URL: /api
-      CHOKIDAR_USEPOLLING: "true"
-      # Inside this container, localhost is the frontend itself. Reach the
-      # backend through the compose service name instead of the host port.
-      API_PROXY_TARGET: http://backend:4000
+      VITE_API_URL: http://localhost:4000/api
     ports:
       - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:5173',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s

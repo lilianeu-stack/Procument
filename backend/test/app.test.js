@@ -1,11 +1,13 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
 import net from 'node:net';
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import app from '../src/app.js';
 import pool, { applySchemaMigrations } from '../src/config/db.js';
+import { amountInWords } from '../src/utils/money.js';
+import { createRfqToken } from '../src/utils/rfq-link.js';
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret-with-at-least-thirty-two-characters';
 const PASSWORD = 'QaPortalTest!2026';
@@ -14,7 +16,6 @@ let baseUrl;
 let admin;
 let departments;
 let users;
-let testDepartmentRoot;
 const createdUserIds = [];
 const createdDepartmentIds = [];
 const createdRequisitionIds = [];
@@ -24,7 +25,8 @@ const createdStoreRequestIds = [];
 const createdRfqIds = [];
 const createdPurchaseOrderIds = [];
 const createdSupplierIds = [];
-const createdCommitteeMemberIds = [];
+const createdPricingRequestIds = [];
+const createdPricingResponseIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
@@ -50,15 +52,32 @@ async function binaryRequest(path, user) {
   return { response, buffer: Buffer.from(await response.arrayBuffer()) };
 }
 
+// PDFKit writes text as hexadecimal strings inside TJ arrays, using numeric
+// operands for kerning between fragments. Decode the text operands and ignore
+// the kerning numbers so tests can assert the exact labels users see on paper.
+function pdfText(buffer) {
+  const raw = buffer.toString('latin1');
+  const token = /<([0-9A-Fa-f]+)>|\(((?:\\.|[^()\\])*)\)/g;
+  return raw.replace(/\[([^\]]*)\]\s*TJ/g, (_, operands) => (
+    [...operands.matchAll(token)].map((match) => (
+      match[1] !== undefined
+        ? Buffer.from(match[1], 'hex').toString('latin1')
+        : match[2].replace(/\\([()\\])/g, '$1')
+    )).join('')
+  ));
+}
+
+function assertPdfIncludes(buffer, ...values) {
+  const text = pdfText(buffer);
+  for (const value of values) {
+    assert.ok(text.includes(value), `Official PDF should contain "${value}"`);
+  }
+}
+
 async function createDepartment(name) {
-  // Departments in the test suite are subdepartments under one test root,
-  // matching the production hierarchy (department -> subdepartment -> user).
-  const [result] = await pool.execute(
-    'INSERT INTO departments (name, description, parent_id) VALUES (?, ?, ?)',
-    [name, 'QA portal test department', testDepartmentRoot?.id || null]
-  );
+  const [result] = await pool.execute('INSERT INTO departments (name, description) VALUES (?, ?)', [name, 'QA portal test department']);
   createdDepartmentIds.push(Number(result.insertId));
-  return { id: Number(result.insertId), name, parentId: testDepartmentRoot?.id || null };
+  return { id: Number(result.insertId), name };
 }
 
 async function createUser(name, email, role, departmentId, active = true) {
@@ -77,6 +96,7 @@ async function submitRequest(user, suffix, extra = {}) {
     user,
     body: {
       title: `QA workflow request ${suffix}`,
+      location: `QA Store ${suffix}`,
       justification: 'Replace worn-out department equipment.',
       budgetCode: `QA-${suffix}`,
       priority: 'High',
@@ -101,8 +121,7 @@ async function createInventoryItem(name, quantity, reorderLevel = 2, departmentI
 }
 
 async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
-  // store_requests.reference is VARCHAR(30), so keep the generated value short.
-  const reference = `QASR-${Date.now().toString(36).toUpperCase()}`;
+  const reference = `QA-SR-${Date.now().toString().slice(-6)}-${String(suffix).slice(-4)}`;
   const [result] = await pool.execute(
     `INSERT INTO store_requests
        (reference, requester_id, department_id, purpose, status, approved_at)
@@ -119,13 +138,13 @@ async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
 }
 
 async function createRequisitionInDepartment(departmentId, requesterId, suffix) {
-  // requisitions.reference is VARCHAR(30), so keep the generated value short.
-  const reference = `QADEL-${Date.now().toString(36).toUpperCase()}`;
+  const shortSuffix = String(suffix).replace(/[^a-z0-9]/gi, '').slice(-6);
   const [result] = await pool.execute(
     `INSERT INTO requisitions
       (reference, requester_id, department_id, title, justification, budget_code, priority)
      VALUES (?, ?, ?, ?, ?, ?, 'Medium')`,
-    [reference, requesterId, departmentId, `QA delete test ${suffix}`, 'Delete dependency test', `QA-${suffix}`]
+    [`QA-DEL-${shortSuffix}-${Date.now().toString().slice(-6)}`, requesterId, departmentId,
+      `QA delete test ${suffix}`, 'Delete dependency test', `QA-${suffix}`]
   );
   const id = Number(result.insertId);
   createdRequisitionIds.push(id);
@@ -141,8 +160,7 @@ async function createMessageInDepartment(departmentId, senderId, suffix) {
 }
 
 async function createMovementInDepartment(itemId, departmentId, suffix) {
-  // inventory_movements.reference_no is VARCHAR(40), so keep this short too.
-  const reference = `QAMV-${Date.now().toString(36).toUpperCase()}`;
+  const reference = `QA-MV-${suffix}-${Date.now()}`;
   const [result] = await pool.execute(
     `INSERT INTO inventory_movements
       (item_id, department_id, movement_type, direction, quantity, reference_no, source, balance_after)
@@ -165,11 +183,6 @@ before(async () => {
   admin = admins[0];
 
   const stamp = Date.now();
-  const [rootResult] = await pool.execute(
-    'INSERT INTO departments (name, description) VALUES (?, ?)',
-    [`QA Hierarchy Root ${stamp}`, 'QA test hierarchy root']
-  );
-  testDepartmentRoot = { id: Number(rootResult.insertId), name: `QA Hierarchy Root ${stamp}` };
   departments = {
     a: await createDepartment(`QA Dept A ${stamp}`),
     b: await createDepartment(`QA Dept B ${stamp}`)
@@ -220,8 +233,6 @@ after(async () => {
   if (createdRequisitionIds.length) {
     const placeholders = createdRequisitionIds.map(() => '?').join(',');
     await pool.execute(`DELETE FROM requisition_attachments WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
-    await pool.execute(`DELETE FROM requisition_email_comments WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
-    await pool.execute(`DELETE FROM requisition_email_threads WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
     await pool.execute(`DELETE FROM requisition_activity WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
     await pool.execute(`DELETE FROM requisition_items WHERE requisition_id IN (${placeholders})`, createdRequisitionIds);
   }
@@ -231,25 +242,32 @@ after(async () => {
     await pool.execute(`DELETE FROM purchase_orders WHERE id IN (${placeholders})`, createdPurchaseOrderIds);
   }
   if (createdRfqIds.length) {
-    await pool.execute(`DELETE FROM rfqs WHERE id IN (${createdRfqIds.map(() => '?').join(',')})`, createdRfqIds);
+    const placeholders = createdRfqIds.map(() => '?').join(',');
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'rfq' AND entity_id IN (${placeholders})`,
+      createdRfqIds.map(String)
+    );
+    await pool.execute(`DELETE FROM rfqs WHERE id IN (${placeholders})`, createdRfqIds);
+  }
+  if (createdPricingResponseIds.length) {
+    const placeholders = createdPricingResponseIds.map(() => '?').join(',');
+    await pool.execute(`DELETE FROM purchase_order_pricing_response_items WHERE response_id IN (${placeholders})`, createdPricingResponseIds);
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'supplier_pricing_response' AND entity_id IN (${placeholders})`,
+      createdPricingResponseIds.map(String)
+    );
+    await pool.execute(`DELETE FROM purchase_order_pricing_responses WHERE id IN (${placeholders})`, createdPricingResponseIds);
+  }
+  if (createdPricingRequestIds.length) {
+    const placeholders = createdPricingRequestIds.map(() => '?').join(',');
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'purchase_order_pricing_request' AND entity_id IN (${placeholders})`,
+      createdPricingRequestIds.map(String)
+    );
+    await pool.execute(`DELETE FROM purchase_order_pricing_requests WHERE id IN (${placeholders})`, createdPricingRequestIds);
   }
   if (createdSupplierIds.length) {
-    await pool.execute(
-      `DELETE FROM audit_logs WHERE entity_type = 'supplier' AND entity_id IN (${createdSupplierIds.map(() => '?').join(',')})`,
-      createdSupplierIds.map(String)
-    );
     await pool.execute(`DELETE FROM suppliers WHERE id IN (${createdSupplierIds.map(() => '?').join(',')})`, createdSupplierIds);
-  }
-  if (createdCommitteeMemberIds.length) {
-    const ids = createdCommitteeMemberIds.map(String);
-    await pool.execute(
-      `DELETE FROM audit_logs WHERE entity_type = 'procurement_committee_member' AND entity_id IN (${ids.map(() => '?').join(',')})`,
-      ids
-    );
-    await pool.execute(
-      `DELETE FROM procurement_committee_members WHERE id IN (${createdCommitteeMemberIds.map(() => '?').join(',')})`,
-      createdCommitteeMemberIds
-    );
   }
   if (createdRequisitionIds.length) {
     const placeholders = createdRequisitionIds.map(() => '?').join(',');
@@ -265,10 +283,6 @@ after(async () => {
   if (createdDepartmentIds.length) {
     await pool.execute(`DELETE FROM audit_logs WHERE entity_type = 'department' AND entity_id IN (${createdDepartmentIds.map(() => '?').join(',')})`, createdDepartmentIds.map(String));
     await pool.execute(`DELETE FROM departments WHERE id IN (${createdDepartmentIds.map(() => '?').join(',')})`, createdDepartmentIds);
-  }
-  if (testDepartmentRoot) {
-    await pool.execute("DELETE FROM audit_logs WHERE entity_type = 'department' AND entity_id = ?", [String(testDepartmentRoot.id)]);
-    await pool.execute('DELETE FROM departments WHERE id = ?', [testDepartmentRoot.id]);
   }
   if (server?.listening) {
     const closed = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -511,7 +525,10 @@ test('Stock Keeper records stock-in, authorized partial issues, adjustments, and
   assert.equal(noMatchingHistory.response.status, 200);
   assert.equal(noMatchingHistory.data.pagination.total, 0);
 
-  const requesters = await request('/portal/stockkeeper/requesters', { user: users.stockkeeper });
+  const requesters = await request(
+    `/portal/stockkeeper/requesters?search=${encodeURIComponent(users.requesterA.email)}`,
+    { user: users.stockkeeper }
+  );
   assert.equal(requesters.response.status, 200);
   assert.ok(requesters.data.requesters.some((requester) => requester.id === users.requesterA.id));
   assert.equal('password_hash' in requesters.data.requesters[0], false);
@@ -696,104 +713,6 @@ test('administrator keeps system-wide management access', async () => {
   assert.ok(Array.isArray(data.users));
 });
 
-test('procurement can edit and safely remove suppliers', async () => {
-  const suffix = Date.now();
-  const created = await request('/suppliers', {
-    method: 'POST', user: admin,
-    body: { name: `QA Editable Supplier ${suffix}`, email: `qa.supplier.${suffix}@example.test`, phone: '12345' }
-  });
-  assert.equal(created.response.status, 201, created.data.message);
-  createdSupplierIds.push(created.data.id);
-
-  const denied = await request(`/suppliers/${created.data.id}`, {
-    method: 'PATCH', user: users.requesterA,
-    body: { name: 'Unauthorized edit' }
-  });
-  assert.equal(denied.response.status, 403);
-
-  const invalid = await request(`/suppliers/${created.data.id}`, {
-    method: 'PATCH', user: users.procurement, body: { name: '  ' }
-  });
-  assert.equal(invalid.response.status, 400);
-
-  const updated = await request(`/suppliers/${created.data.id}`, {
-    method: 'PATCH', user: users.procurement,
-    body: { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890' }
-  });
-  assert.equal(updated.response.status, 200, updated.data.message);
-  const [rowsAfterUpdate] = await pool.execute(
-    'SELECT name, email, phone, status FROM suppliers WHERE id = ?', [created.data.id]
-  );
-  assert.deepEqual(
-    { name: rowsAfterUpdate[0].name, email: rowsAfterUpdate[0].email, phone: rowsAfterUpdate[0].phone, status: rowsAfterUpdate[0].status },
-    { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890', status: 'Active' }
-  );
-
-  const removed = await request(`/suppliers/${created.data.id}`, {
-    method: 'DELETE', user: users.procurement, body: {}
-  });
-  assert.equal(removed.response.status, 200, removed.data.message);
-  assert.equal(removed.data.softDeleted, true);
-  const [rowsAfterRemoval] = await pool.execute('SELECT status FROM suppliers WHERE id = ?', [created.data.id]);
-  assert.equal(rowsAfterRemoval[0].status, 'Inactive');
-});
-
-test('procurement committee contacts support authorized create, edit, and delete', async () => {
-  const suffix = Date.now();
-  const member = {
-    firstName: 'QA',
-    lastName: `Committee ${suffix}`,
-    email: `qa.committee.${suffix}@example.test`,
-    phone: '+250 700 000 000'
-  };
-  const denied = await request('/procurement-committee', { user: users.requesterA });
-  assert.equal(denied.response.status, 403);
-
-  const invalid = await request('/procurement-committee', {
-    method: 'POST', user: admin, body: { ...member, email: 'not-an-email' }
-  });
-  assert.equal(invalid.response.status, 400);
-
-  const created = await request('/procurement-committee', { method: 'POST', user: admin, body: member });
-  assert.equal(created.response.status, 201, created.data.message);
-  createdCommitteeMemberIds.push(created.data.id);
-
-  const duplicate = await request('/procurement-committee', { method: 'POST', user: admin, body: member });
-  assert.equal(duplicate.response.status, 409);
-
-  const listed = await request('/procurement-committee', { user: users.procurement });
-  assert.equal(listed.response.status, 200);
-  assert.ok(listed.data.members.some((item) => item.id === created.data.id && item.email === member.email));
-
-  const updatedMember = { ...member, firstName: 'Updated', phone: '+250 700 111 111' };
-  const updated = await request(`/procurement-committee/${created.data.id}`, {
-    method: 'PATCH', user: users.procurement, body: updatedMember
-  });
-  assert.equal(updated.response.status, 200, updated.data.message);
-  const [rowsAfterUpdate] = await pool.execute(
-    'SELECT first_name AS firstName, last_name AS lastName, email, phone FROM procurement_committee_members WHERE id = ?',
-    [created.data.id]
-  );
-  assert.deepEqual(rowsAfterUpdate[0], updatedMember);
-
-  const deleted = await request(`/procurement-committee/${created.data.id}`, {
-    method: 'DELETE', user: users.procurement, body: {}
-  });
-  assert.equal(deleted.response.status, 200, deleted.data.message);
-  const [remaining] = await pool.execute(
-    'SELECT id FROM procurement_committee_members WHERE id = ?', [created.data.id]
-  );
-  assert.equal(remaining.length, 0);
-});
-
-test('committee reviews endpoint is restricted to procurement staff', async () => {
-  const denied = await request('/rfqs/999999/committee-reviews', { user: users.requesterA });
-  assert.equal(denied.response.status, 403);
-
-  const allowed = await request('/rfqs/999999/committee-reviews', { user: users.procurement });
-  assert.equal(allowed.response.status, 404);
-});
-
 test('administrator settings are validated, persisted and restricted', async () => {
   const denied = await request('/admin/settings', { user: users.procurement });
   assert.equal(denied.response.status, 403);
@@ -822,30 +741,6 @@ test('administrator settings are validated, persisted and restricted', async () 
     method: 'POST', user: admin,
     body: { keys: ['system_name', 'table_page_size'] }
   });
-});
-
-test('Google inbox endpoints require authorized staff and expose no OAuth secrets', async () => {
-  const anonymous = await request('/email/google/status');
-  assert.equal(anonymous.response.status, 401);
-
-  const requester = await request('/email/google/status', { user: users.requesterA });
-  assert.equal(requester.response.status, 403);
-
-  const adminStatus = await request('/email/google/status', { user: admin });
-  assert.equal(adminStatus.response.status, 200, adminStatus.data.message);
-  assert.equal(typeof adminStatus.data.configured, 'boolean');
-  assert.equal('clientSecret' in adminStatus.data, false);
-
-  const procurementStatus = await request('/email/google/status', { user: users.procurement });
-  assert.equal(procurementStatus.response.status, 200);
-
-  const invalidMessage = await request('/email/send', {
-    method: 'POST', user: admin, body: { to: 'not-an-email', subject: 'Test', text: 'Body' }
-  });
-  assert.equal(invalidMessage.response.status, 400);
-
-  const invalidCallback = await fetch(`${baseUrl}/email/google/callback`);
-  assert.equal(invalidCallback.status, 400);
 });
 
 test('requisition validation returns a client error for an empty request', async () => {
@@ -888,24 +783,141 @@ test('requester submits a request routed only to the assigned Department Supervi
   assert.equal(await download.text(), 'QA attachment contents');
 });
 
-test('requester can submit a request without a budget code', async () => {
-  const created = await submitRequest(users.requesterA, 'NO-BUDGET', {
-    budgetCode: '',
-    items: [
-      { itemName: 'QA item one', description: 'First item purpose.', quantity: 2, unit: 'box', estimatedUnitCost: 25 },
-      { itemName: 'QA item two', description: 'Second item purpose.', quantity: 3, unit: 'piece', estimatedUnitCost: 10 }
-    ]
+test('requisition location and item remarks persist through portal and Procurement views', async () => {
+  const location = 'Ward 3 - Main Store';
+  const remarks = 'Deliver through the side entrance.';
+  const created = await submitRequest(users.requesterA, 'FIELDS', {
+    location,
+    items: [{
+      itemName: 'QA field item', description: 'Field test', quantity: 3,
+      unit: 'box', estimatedUnitCost: 12, remarks
+    }]
   });
   assert.equal(created.response.status, 201, created.data.message);
+  const id = created.data.id;
 
-  const detail = await request(`/portal/requester/requisitions/${created.data.id}`, { user: users.requesterA });
+  const list = await request('/portal/requester/requisitions?limit=100', { user: users.requesterA });
+  assert.equal(list.response.status, 200, list.data.message);
+  const listed = list.data.requisitions.find((row) => Number(row.id) === id);
+  assert.ok(listed, 'the request must appear in the requester list');
+  assert.equal(listed.location, location);
+
+  const detail = await request(`/portal/requester/requisitions/${id}`, { user: users.requesterA });
   assert.equal(detail.response.status, 200, detail.data.message);
-  assert.equal(detail.data.requisition.budgetCode, '');
-  assert.equal(detail.data.requisition.title, 'QA workflow request NO-BUDGET');
-  assert.equal(detail.data.requisition.items.length, 2);
-  assert.equal(detail.data.requisition.items[0].itemName, 'QA item one');
-  assert.equal(detail.data.requisition.items[1].itemName, 'QA item two');
-  assert.equal(detail.data.requisition.total, 80);
+  assert.equal(detail.data.requisition.location, location);
+  assert.equal(detail.data.requisition.items[0].remarks, remarks);
+
+  const decided = await request(`/portal/supervisor/requisitions/${id}/decision`, {
+    method: 'POST', user: users.supervisorA, body: { decision: 'Approve' }
+  });
+  assert.equal(decided.response.status, 200, decided.data.message);
+  const forwarded = await request(`/portal/supervisor/requisitions/${id}/forward`, {
+    method: 'POST', user: users.supervisorA, body: {}
+  });
+  assert.equal(forwarded.response.status, 200, forwarded.data.message);
+
+  const receivedList = await request('/procurement/received-requests?limit=100', { user: users.procurement });
+  assert.equal(receivedList.response.status, 200, receivedList.data.message);
+  const receivedRow = receivedList.data.requisitions.find((row) => Number(row.id) === id);
+  assert.ok(receivedRow, 'the forwarded request must appear in the Procurement queue');
+  assert.equal(receivedRow.location, location);
+
+  const receivedDetail = await request(`/procurement/received-requests/${id}`, { user: users.procurement });
+  assert.equal(receivedDetail.response.status, 200, receivedDetail.data.message);
+  assert.equal(receivedDetail.data.requisition.location, location);
+  assert.equal(receivedDetail.data.requisition.items[0].remarks, remarks);
+});
+
+test('submitting a requisition without a location is rejected', async () => {
+  const missing = await submitRequest(users.requesterA, 'NOLOCATION', { location: '' });
+  assert.equal(missing.response.status, 400);
+  assert.match(missing.data.message, /location/i);
+});
+
+test('draft requests can be corrected in place without changing workflow history', async () => {
+  const draft = await request('/portal/requester/requisitions', {
+    method: 'POST', user: users.requesterA,
+    body: {
+      title: 'QA draft before edit', location: 'Old store',
+      justification: 'Old purpose', budgetCode: 'QA-DRAFT-EDIT', action: 'draft',
+      items: [{
+        itemName: 'Old item', description: 'Old detail', quantity: 1,
+        unit: 'unit', estimatedUnitCost: 10, remarks: 'old remark'
+      }]
+    }
+  });
+  assert.equal(draft.response.status, 201, draft.data.message);
+  const id = draft.data.id;
+  createdRequisitionIds.push(id);
+
+  const before = await request(`/portal/requester/requisitions/${id}`, { user: users.requesterA });
+  assert.equal(before.response.status, 200, before.data.message);
+  const originalItemId = before.data.requisition.items[0].id;
+  const originalActivityCount = before.data.requisition.activity.length;
+
+  const patch = await request(`/portal/requester/requisitions/${id}`, {
+    method: 'PATCH', user: users.requesterA,
+    body: {
+      title: 'QA draft after edit', location: 'New store', justification: 'New purpose',
+      budgetCode: 'QA-DRAFT-EDIT-2', priority: 'Urgent',
+      items: [
+        {
+          id: originalItemId, itemName: 'Updated item', description: 'Updated detail',
+          quantity: 2, unit: 'carton', estimatedUnitCost: 15, remarks: 'updated remark'
+        },
+        {
+          itemName: 'Added item', quantity: 4, unit: 'each',
+          estimatedUnitCost: 5, remarks: 'added remark'
+        }
+      ]
+    }
+  });
+  assert.equal(patch.response.status, 200, patch.data.message);
+  assert.equal(patch.data.reference, draft.data.reference);
+  assert.equal(patch.data.status, 'Draft');
+  assert.equal(patch.data.requisition.title, 'QA draft after edit');
+  assert.equal(patch.data.requisition.location, 'New store');
+  assert.equal(patch.data.requisition.items.length, 2);
+  const kept = patch.data.requisition.items.find((item) => Number(item.id) === Number(originalItemId));
+  assert.ok(kept, 'the existing item should be updated by id');
+  assert.equal(kept.itemName, 'Updated item');
+  assert.equal(kept.remarks, 'updated remark');
+  const added = patch.data.requisition.items.find((item) => item.itemName === 'Added item');
+  assert.ok(added?.id, 'a new item should be inserted');
+  assert.equal(patch.data.requisition.activity.length, originalActivityCount);
+
+  const pruned = await request(`/portal/requester/requisitions/${id}`, {
+    method: 'PATCH', user: users.requesterA,
+    body: {
+      title: 'QA draft after edit', location: 'New store', justification: 'New purpose',
+      budgetCode: 'QA-DRAFT-EDIT-2', priority: 'Urgent',
+      items: [{
+        id: added.id, itemName: 'Added item', quantity: 6, unit: 'each',
+        estimatedUnitCost: 5, remarks: 'added remark'
+      }]
+    }
+  });
+  assert.equal(pruned.response.status, 200, pruned.data.message);
+  assert.deepEqual(pruned.data.requisition.items.map((item) => Number(item.id)), [Number(added.id)]);
+  assert.equal(pruned.data.requisition.activity.length, originalActivityCount);
+
+  const wrongOwner = await request(`/portal/requester/requisitions/${id}`, {
+    method: 'PATCH', user: users.requesterB, body: { items: [{ itemName: 'Hijack', quantity: 1, estimatedUnitCost: 1 }] }
+  });
+  assert.equal(wrongOwner.response.status, 404);
+
+  const submitted = await request(`/portal/requester/requisitions/${id}/submit`, {
+    method: 'POST', user: users.requesterA, body: {}
+  });
+  assert.equal(submitted.response.status, 200, submitted.data.message);
+  assert.equal(submitted.data.status, 'Pending Supervisor Approval');
+
+  const afterSubmit = await request(`/portal/requester/requisitions/${id}`, {
+    method: 'PATCH', user: users.requesterA,
+    body: { items: [{ itemName: 'Too late', quantity: 1, estimatedUnitCost: 1 }] }
+  });
+  assert.equal(afterSubmit.response.status, 409);
+  assert.match(afterSubmit.data.message, /draft/i);
 });
 
 test('supervisor approval never forwards; explicit forward is the only route into Procurement', async () => {
@@ -1017,77 +1029,6 @@ test('supervisor approval never forwards; explicit forward is the only route int
   createdRfqIds.push(rfq.data.id);
   const afterRfq = await request('/requisitions', { user: admin });
   assert.equal(afterRfq.data.requisitions.find((row) => row.id === id).status, 'Under Procurement Review');
-});
-
-test('a requisition response link lets an external recipient submit a comment directly', async () => {
-  const created = await submitRequest(users.requesterA, 'RESPONSE-LINK');
-  assert.equal(created.response.status, 201, created.data.message);
-  const requisitionId = created.data.id;
-  await request(`/portal/supervisor/requisitions/${requisitionId}/decision`, {
-    method: 'POST', user: users.supervisorA, body: { decision: 'Approve' }
-  });
-  const forwarded = await request(`/portal/supervisor/requisitions/${requisitionId}/forward`, {
-    method: 'POST', user: users.supervisorA, body: {}
-  });
-  assert.equal(forwarded.response.status, 200, forwarded.data.message);
-
-  const token = randomBytes(16).toString('hex');
-  const recipientEmail = 'external.recipient@example.test';
-  const procurementMessage = 'Please confirm the quantities and comment if anything needs changing.';
-  await pool.execute(
-    `INSERT INTO requisition_email_threads (requisition_id, token, recipient_email, message, created_by)
-     VALUES (?, ?, ?, ?, ?)`,
-    [requisitionId, token, recipientEmail, procurementMessage, admin.id]
-  );
-
-  const invalidLink = await request('/request-response/not-a-valid-token');
-  assert.equal(invalidLink.response.status, 404);
-
-  const opened = await request(`/request-response/${token}`);
-  assert.equal(opened.response.status, 200, opened.data.message);
-  assert.equal(opened.data.request.reference, created.data.reference);
-  assert.equal(opened.data.request.recipientEmail, recipientEmail);
-  assert.equal(opened.data.request.message, procurementMessage, 'the Procurement message must reach the response form');
-  assert.equal(opened.data.request.items.length, 1);
-  assert.equal(opened.data.request.items[0].quantity, 2);
-  assert.equal(opened.data.comments.length, 0);
-
-  const emptyComment = await request(`/request-response/${token}/comment`, {
-    method: 'POST', body: { comment: '   ' }
-  });
-  assert.equal(emptyComment.response.status, 400);
-
-  const submitted = await request(`/request-response/${token}/comment`, {
-    method: 'POST',
-    body: { responderName: 'Recipient One', comment: 'Please add two more units and deliver on Tuesday.' }
-  });
-  assert.equal(submitted.response.status, 201, submitted.data.message);
-  assert.equal(submitted.data.reference, created.data.reference);
-
-  const duplicateSubmission = await request(`/request-response/${token}/comment`, {
-    method: 'POST',
-    body: { responderName: 'Recipient One', comment: 'A second response must not be accepted.' }
-  });
-  assert.equal(duplicateSubmission.response.status, 409);
-  assert.match(duplicateSubmission.data.message, /already been submitted/i);
-
-  const afterComment = await request(`/request-response/${token}`);
-  assert.equal(afterComment.response.status, 200);
-  assert.equal(afterComment.data.request.responded, true);
-  assert.equal(afterComment.data.comments.length, 1);
-  assert.equal(afterComment.data.comments[0].comment, 'Please add two more units and deliver on Tuesday.');
-  assert.equal(afterComment.data.comments[0].sender, `Recipient One <${recipientEmail}>`);
-
-  const detail = await request(`/procurement/received-requests/${requisitionId}`, { user: users.procurement });
-  assert.equal(detail.response.status, 200, detail.data.message);
-  assert.equal(detail.data.requisition.emailComments.length, 1);
-  assert.equal(detail.data.requisition.emailComments[0].comment, 'Please add two more units and deliver on Tuesday.');
-  const activity = detail.data.requisition.activity.find((entry) => entry.action === 'email_comment_received');
-  assert.ok(activity, 'the response comment must appear in request history');
-  assert.equal(activity.details.source, 'response_form');
-
-  const notices = await request('/notifications', { user: users.procurement });
-  assert.ok(notices.data.notifications.some((notice) => notice.title === 'Response comment received'));
 });
 
 test('supervisor rejection records the reason and notifies the requester', async () => {
@@ -1286,7 +1227,7 @@ test('draft, rejected, and information-required requests stay invisible to Procu
   assert.equal((await request('/procurement/received-requests', { user: users.supervisorA })).response.status, 403);
 });
 
-test('received requests support search, filters, sorting, and pagination', async () => {
+test('received requests support real statistics, search, filters, sorting, pagination and exports', async () => {
   const response = await request('/procurement/received-requests?search=FORWARD&sort=forwardedAt&direction=asc&page=1&limit=1', {
     user: users.procurement
   });
@@ -1295,19 +1236,72 @@ test('received requests support search, filters, sorting, and pagination', async
   assert.ok(response.data.requisitions.length <= 1);
   assert.ok(response.data.requisitions.every((row) => row.forwardedAt));
 
-  const fresh = await submitRequest(users.requesterA, 'FILTER');
+  const stats = await request('/procurement/received-requests/stats', { user: users.procurement });
+  assert.equal(stats.response.status, 200, stats.data.message);
+  assert.deepEqual(Object.keys(stats.data.stats).sort(),
+    ['completed', 'new', 'processing', 'rejected', 'total', 'underReview']);
+  const listTotal = await request('/procurement/received-requests?limit=1', { user: users.procurement });
+  assert.equal(stats.data.stats.total, listTotal.data.pagination.total);
+  assert.ok(Object.values(stats.data.stats).every((value) => Number.isInteger(value) && value >= 0));
+  assert.ok(stats.data.stats.new + stats.data.stats.underReview + stats.data.stats.processing
+    + stats.data.stats.completed + stats.data.stats.rejected <= stats.data.stats.total);
+  assert.equal((await request('/procurement/received-requests/stats', { user: users.requesterA })).response.status, 403);
+  const grouped = await request('/procurement/received-requests?statusGroup=underReview&limit=100', { user: users.procurement });
+  assert.equal(grouped.response.status, 200, grouped.data.message);
+  assert.ok(grouped.data.requisitions.length > 0);
+  assert.ok(grouped.data.requisitions.every((row) => row.status === 'Under Procurement Review'));
+  const groupedExport = await binaryRequest('/exports/receivedRequests/csv?statusGroup=underReview', users.procurement);
+  assert.equal(groupedExport.response.status, 200);
+  assert.ok(!groupedExport.buffer.toString('utf8').includes('Forwarded to Procurement'));
+
+  const fresh = await submitRequest(users.requesterA, 'FILTER', {
+    attachments: [{ fileName: 'filter-evidence.txt', mimeType: 'text/plain', data: Buffer.from('filter evidence').toString('base64') }]
+  });
+  assert.equal(fresh.response.status, 201, fresh.data.message);
   await request(`/portal/supervisor/requisitions/${fresh.data.id}/decision`, {
     method: 'POST', user: users.supervisorA, body: { decision: 'Approve' }
   });
   await request(`/portal/supervisor/requisitions/${fresh.data.id}/forward`, {
     method: 'POST', user: users.supervisorA, body: {}
   });
+  const [[freshReferenceRow]] = await pool.execute('SELECT reference FROM requisitions WHERE id = ?', [fresh.data.id]);
+  const reference = freshReferenceRow.reference;
+
+  for (const [label, params] of [
+    ['reference', `reference=${encodeURIComponent(reference)}`],
+    ['requester', `requester=${encodeURIComponent(users.requesterA.name)}`],
+    ['department query', `departmentQuery=${encodeURIComponent(departments.a.name.slice(0, 4))}`]
+  ]) {
+    const filteredByText = await request(`/procurement/received-requests?${params}`, { user: users.procurement });
+    assert.equal(filteredByText.response.status, 200, filteredByText.data.message);
+    assert.ok(filteredByText.data.requisitions.some((row) => Number(row.id) === fresh.data.id), `${label} filter`);
+    assert.ok(filteredByText.data.requisitions.every((row) => Number(row.itemCount) >= 0), `${label} item count`);
+  }
+
   const filtered = await request(`/procurement/received-requests?department=${encodeURIComponent(departments.a.name)}&status=Forwarded%20to%20Procurement`, {
     user: users.procurement
   });
   assert.equal(filtered.response.status, 200, filtered.data.message);
   assert.ok(filtered.data.requisitions.some((row) => row.department === departments.a.name && row.status === 'Forwarded to Procurement'));
   assert.ok(filtered.data.requisitions.every((row) => row.status === 'Forwarded to Procurement'));
+
+  const freshDocument = await request(`/procurement/received-requests/${fresh.data.id}`, { user: users.procurement });
+  assert.equal(freshDocument.response.status, 200, freshDocument.data.message);
+  assert.equal(freshDocument.data.requisition.itemCount, 1);
+  const attachmentId = freshDocument.data.requisition.attachments[0].id;
+  const inlinePreview = await fetch(
+    `${baseUrl}/procurement/received-requests/${fresh.data.id}/attachments/${attachmentId}?inline=1&inline=1`,
+    { headers: { Authorization: `Bearer ${tokenFor(users.procurement)}`, Connection: 'close' } }
+  );
+  assert.equal(inlinePreview.status, 200);
+  assert.match(inlinePreview.headers.get('content-disposition') || '', /inline/);
+
+  const exportCsv = await binaryRequest(`/exports/receivedRequests/csv?reference=${encodeURIComponent(reference)}`, users.procurement);
+  assert.equal(exportCsv.response.status, 200);
+  assert.ok(exportCsv.buffer.toString('utf8').includes(reference));
+  const exportNone = await binaryRequest('/exports/receivedRequests/csv?reference=NO-SUCH-REFERENCE', users.procurement);
+  assert.equal(exportNone.response.status, 200);
+  assert.ok(!exportNone.buffer.toString('utf8').includes(reference));
 
   const badSort = await request('/procurement/received-requests?sort=id;DROP TABLE requisitions&direction=desc', { user: users.procurement });
   assert.equal(badSort.response.status, 200, badSort.data.message);
@@ -1550,15 +1544,93 @@ test('department deletion checks every dependency and reassigns historical recor
   assert.equal(emptyDelete.data.reassigned, null);
 });
 
-function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function futureBusinessDate() {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + 7);
   while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() + 1);
   return date.toISOString().slice(0, 10);
+}
+
+async function createAwardedPurchaseOrder(suffix, options = {}) {
+  const stamp = Date.now();
+  const quoteAmount = options.quoteAmount ?? 8996000;
+  const location = options.location || 'QA Purchase Order Store';
+  const itemRemarks = options.itemRemarks || 'Confirm before delivery';
+  const type = options.type || 'Standard';
+  const department = await createDepartment(`QA PO Document Dept ${stamp}`);
+  const supervisor = await createUser('QA PO Document Supervisor', `qa.po.doc.supervisor.${stamp}@example.org`, 'supervisor', department.id);
+  const requester = await createUser('QA PO Document Requester', `qa.po.doc.requester.${stamp}@example.org`, 'requestor', department.id);
+
+  const requisition = await submitRequest(requester, suffix, {
+    location,
+    items: [{
+      itemName: `QA PO item ${suffix}`, description: 'Official form line',
+      quantity: 2, unit: 'box', estimatedUnitCost: 25, remarks: itemRemarks
+    }]
+  });
+  assert.equal(requisition.response.status, 201, requisition.data.message);
+  const approvedRequest = await request(`/portal/supervisor/requisitions/${requisition.data.id}/decision`, {
+    method: 'POST', user: supervisor, body: { decision: 'Approve' }
+  });
+  assert.equal(approvedRequest.response.status, 200, approvedRequest.data.message);
+  const forwarded = await request(`/portal/supervisor/requisitions/${requisition.data.id}/forward`, {
+    method: 'POST', user: supervisor, body: {}
+  });
+  assert.equal(forwarded.response.status, 200, forwarded.data.message);
+
+  const supplierName = `QA PO Document Supplier ${stamp}`;
+  const supplierEmail = `qa.po.doc.supplier.${stamp}@example.test`;
+  const supplierResponse = await request('/suppliers', {
+    method: 'POST', user: admin, body: { name: supplierName, email: supplierEmail }
+  });
+  assert.equal(supplierResponse.response.status, 201, supplierResponse.data.message);
+  const supplierId = supplierResponse.data.id;
+  createdSupplierIds.push(supplierId);
+  const contactName = `QA Contact ${suffix}`;
+  const phone = '0788000000';
+  const address = `QA Address ${suffix}`;
+  await pool.execute(
+    'UPDATE suppliers SET contact_name = ?, phone = ?, address = ? WHERE id = ?',
+    [contactName, phone, address, supplierId]
+  );
+
+  const rfq = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: { requisitionId: requisition.data.id, supplierIds: [supplierId], dueDate: futureBusinessDate() }
+  });
+  assert.equal(rfq.response.status, 201, rfq.data.message);
+  createdRfqIds.push(rfq.data.id);
+
+  const [quotes] = await pool.execute(
+    `INSERT INTO quotations (rfq_id, supplier_id, amount, delivery_days, quality_score, rating_score, submitted_at)
+     VALUES (?, ?, ?, 5, 4, 4, UTC_TIMESTAMP())`,
+    [rfq.data.id, supplierId, quoteAmount]
+  );
+  const award = await request(`/rfqs/${rfq.data.id}/award`, {
+    method: 'POST', user: admin, body: { quotationId: Number(quotes.insertId) }
+  });
+  assert.equal(award.response.status, 200, award.data.message);
+
+  const purchaseOrder = await request('/purchase-orders', {
+    method: 'POST', user: users.procurement,
+    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate(), type }
+  });
+  assert.equal(purchaseOrder.response.status, 201, purchaseOrder.data.message);
+  createdPurchaseOrderIds.push(purchaseOrder.data.id);
+  // Legacy workflow fixtures approve the PO directly. Supplier pricing is only
+  // required when a test explicitly creates a supplier pricing request.
+  await pool.execute(
+    "UPDATE purchase_orders SET supplier_pricing_status = 'Not requested' WHERE id = ?",
+    [purchaseOrder.data.id]
+  );
+
+  return {
+    department, supervisor, requester,
+    requisition: requisition.data,
+    supplier: { id: supplierId, name: supplierName, email: supplierEmail, contactName, phone, address },
+    rfq: rfq.data,
+    purchaseOrder: purchaseOrder.data
+  };
 }
 
 function startTestSmtp() {
@@ -1646,6 +1718,12 @@ function linksIn(message) {
     .filter((link) => link.includes('/supplier/RFQ?token='));
 }
 
+function purchaseOrderLinksIn(message) {
+  return [...normalizedMessage(message).matchAll(/https?:\/\/[^\s"<>']+/g)]
+    .map((match) => match[0])
+    .filter((link) => link.includes('/po-approval/review?token='));
+}
+
 function tokenFrom(link) {
   return /token=([^&\s"']+)/.exec(link)?.[1] || '';
 }
@@ -1677,16 +1755,9 @@ test('purchase orders stay linked to their original department request', async (
   const supplierId = supplierResponse.data.id;
   createdSupplierIds.push(supplierId);
 
-  const badDates = await request('/rfqs', {
-    method: 'POST', user: users.procurement,
-    body: { requisitionId, supplierIds: [supplierId], startDate: futureBusinessDate(), dueDate: todayIsoDate() }
-  });
-  assert.equal(badDates.response.status, 400);
-  assert.match(badDates.data.message, /End date \(deadline\) must be on or after Send start date/);
-
   const rfq = await request('/rfqs', {
     method: 'POST', user: users.procurement,
-    body: { requisitionId, supplierIds: [supplierId], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
+    body: { requisitionId, supplierIds: [supplierId], dueDate: futureBusinessDate() }
   });
   assert.equal(rfq.response.status, 201, rfq.data.message);
   createdRfqIds.push(rfq.data.id);
@@ -1728,6 +1799,197 @@ test('purchase orders stay linked to their original department request', async (
   assert.ok(audit.data.logs.some((log) =>
     log.action === 'created' && String(log.entityId) === String(purchaseOrder.data.id)
   ));
+});
+
+test('purchase orders calculate VAT, amount words, linkage and supplier data from the awarded quotation', async () => {
+  const settingsBefore = await request('/admin/settings', { user: admin });
+  assert.equal(settingsBefore.response.status, 200);
+  const originalRate = settingsBefore.data.settings.tax_rate ?? 0;
+  const configured = await request('/admin/settings', {
+    method: 'PUT', user: admin, body: { settings: { tax_rate: 10 } }
+  });
+  assert.equal(configured.response.status, 200, configured.data.message);
+
+  try {
+    const context = await createAwardedPurchaseOrder('POCALC', {
+      quoteAmount: 8996000, type: 'Capital', location: 'Warehouse 2',
+      itemRemarks: 'Keep crates upright'
+    });
+    await pool.execute(
+      "UPDATE purchase_orders SET supplier_pricing_status = 'Not requested' WHERE id = ?",
+      [context.purchaseOrder.id]
+    );
+    const created = context.purchaseOrder;
+    assert.equal(created.subtotal, 8996000);
+    assert.equal(created.vatRate, 10);
+    assert.equal(created.vatAmount, 899600);
+    assert.equal(created.total, 9895600);
+    assert.equal(created.amountInWords, amountInWords(9895600));
+
+    const detail = await request(`/purchase-orders/${created.id}`, { user: users.procurement });
+    assert.equal(detail.response.status, 200, detail.data.message);
+    const order = detail.data.purchaseOrder;
+    assert.ok(order, 'the detail response must include the purchaseOrder object');
+    assert.equal(order.type, 'Capital');
+    assert.equal(order.status, 'Pending approval');
+    assert.equal(order.supplierContact, `${context.supplier.contactName} / ${context.supplier.phone} / ${context.supplier.email}`);
+    assert.equal(order.supplierAddress, context.supplier.address);
+    assert.equal(Number(order.requisitionId), context.requisition.id);
+    assert.equal(Number(order.rfqId), context.rfq.id);
+    assert.equal(order.requisition, context.requisition.reference);
+    assert.equal(order.rfq, context.rfq.reference);
+    assert.equal(order.items.length, 1);
+    assert.equal(order.items[0].description, 'Official form line');
+    assert.equal(order.items[0].unit, 'box');
+    assert.equal(order.items[0].quantity, 2);
+    assert.equal(order.items[0].lineTotal, 8996000);
+    assert.equal(order.subtotal, 8996000);
+    assert.equal(order.vatAmount, 899600);
+    assert.equal(order.total, 9895600);
+    assert.equal(order.amountInWords, amountInWords(9895600));
+    assert.equal(order.preparedBy, users.procurement.name);
+    assert.equal(order.approvedBy, null);
+    assert.equal(order.approvedAt, null);
+
+    const requesterDetail = await request(`/purchase-orders/${created.id}`, { user: context.requester });
+    assert.equal(requesterDetail.response.status, 403);
+    const requesterEdit = await request(`/purchase-orders/${created.id}`, {
+      method: 'PATCH', user: context.requester,
+      body: { items: [{ itemName: 'Not allowed', quantity: 1, unitPrice: 1 }] }
+    });
+    assert.equal(requesterEdit.response.status, 403);
+    const supervisorEdit = await request(`/purchase-orders/${created.id}`, {
+      method: 'PATCH', user: context.supervisor,
+      body: { items: [{ itemName: 'Not allowed', quantity: 1, unitPrice: 1 }] }
+    });
+    assert.equal(supervisorEdit.response.status, 403);
+
+    const edited = await request(`/purchase-orders/${created.id}`, {
+      method: 'PATCH', user: users.procurement,
+      body: {
+        type: 'Urgent', supplierContact: 'Updated contact', supplierAddress: 'Updated address',
+        subtotal: 1, vatAmount: 1, total: 1, amountInWords: 'Client supplied value',
+        items: [{
+          id: order.items[0].id, itemName: 'Revised item', description: 'Revised detail',
+          quantity: 4, unit: 'carton', unitPrice: 1000, lineTotal: 1
+        }]
+      }
+    });
+    assert.equal(edited.response.status, 200, edited.data.message);
+    assert.equal(edited.data.type, 'Urgent');
+    assert.equal(edited.data.supplierContact, 'Updated contact');
+    assert.equal(edited.data.supplierAddress, 'Updated address');
+    assert.equal(edited.data.subtotal, 4000);
+    assert.equal(edited.data.vatRate, 10);
+    assert.equal(edited.data.vatAmount, 400);
+    assert.equal(edited.data.total, 4400);
+    assert.equal(edited.data.amountInWords, amountInWords(4400));
+    assert.equal(edited.data.items.length, 1);
+    assert.equal(edited.data.items[0].lineTotal, 4000);
+    assert.equal(edited.data.items[0].unitPrice, 1000);
+
+    const approval = await request(`/purchase-orders/${created.id}/decision`, {
+      method: 'PATCH', user: admin, body: { decision: 'Approved' }
+    });
+    assert.equal(approval.response.status, 200, approval.data.message);
+    const approvedDetail = await request(`/purchase-orders/${created.id}`, { user: users.procurement });
+    assert.equal(approvedDetail.response.status, 200);
+    assert.equal(approvedDetail.data.approvedBy, admin.name);
+    assert.ok(approvedDetail.data.approvedAt);
+
+    const locked = await request(`/purchase-orders/${created.id}`, {
+      method: 'PATCH', user: users.procurement,
+      body: { items: [{ itemName: 'Too late', quantity: 1, unitPrice: 1 }] }
+    });
+    assert.equal(locked.response.status, 409);
+    assert.match(locked.data.message, /pending approval/i);
+  } finally {
+    const restored = await request('/admin/settings', {
+      method: 'PUT', user: admin, body: { settings: { tax_rate: originalRate } }
+    });
+    assert.equal(restored.response.status, 200);
+  }
+});
+
+test('official requisition and purchase order PDFs render the supplied form templates', async () => {
+  const stamp = Date.now();
+  const department = await createDepartment(`QA PDF Dept ${stamp}`);
+  const supervisor = await createUser('QA PDF Supervisor', `qa.pdf.supervisor.${stamp}@example.org`, 'supervisor', department.id);
+  const requester = await createUser('QA PDF Requester', `qa.pdf.requester.${stamp}@example.org`, 'requestor', department.id);
+
+  const requisition = await submitRequest(requester, 'PDFREQ', {
+    location: 'Records room',
+    items: [{ itemName: 'Archive boxes', quantity: 5, unit: 'box', estimatedUnitCost: 20, remarks: 'Label each box' }]
+  });
+  assert.equal(requisition.response.status, 201, requisition.data.message);
+  const approved = await request(`/portal/supervisor/requisitions/${requisition.data.id}/decision`, {
+    method: 'POST', user: supervisor, body: { decision: 'Approve' }
+  });
+  assert.equal(approved.response.status, 200, approved.data.message);
+
+  const requisitionPdf = await binaryRequest(
+    `/exports/record/requisition/${requisition.data.id}/pdf`, requester
+  );
+  assert.equal(requisitionPdf.response.status, 200);
+  assert.equal(requisitionPdf.buffer.subarray(0, 5).toString(), '%PDF-');
+  assertPdfIncludes(
+    requisitionPdf.buffer,
+    'MATERIAL REQUEST FORM',
+    'Requesting Department:',
+    'Location where the items are needed:',
+    'Item #', 'Item Description', 'Quantity', 'Unity of Measures', 'Remarks',
+    'Purposes the goods are requested for:',
+    'Name(Requested by):', 'Signature:', 'Date:', 'Name(Approved by):',
+    requester.name, supervisor.name, 'Records room', 'Label each box'
+  );
+
+  const pendingRequest = await submitRequest(requester, 'PDFPENDING', {
+    location: 'Front desk',
+    items: [{ itemName: 'Desk lamp', quantity: 1, unit: 'unit', estimatedUnitCost: 30 }]
+  });
+  assert.equal(pendingRequest.response.status, 201, pendingRequest.data.message);
+  const pendingPdf = await binaryRequest(
+    `/exports/record/requisition/${pendingRequest.data.id}/pdf`, requester
+  );
+  assert.equal(pendingPdf.response.status, 200);
+  assertPdfIncludes(pendingPdf.buffer, 'Name(Approved by):');
+  assert.ok(!pdfText(pendingPdf.buffer).includes(supervisor.name),
+    'approval details must stay blank until the Supervisor actually approves');
+
+  const context = await createAwardedPurchaseOrder('PDFPO', { quoteAmount: 8996000 });
+  const purchaseOrderId = context.purchaseOrder.id;
+  await pool.execute(
+    "UPDATE purchase_orders SET supplier_pricing_status = 'Not requested' WHERE id = ?",
+    [purchaseOrderId]
+  );
+  const pendingOrderPdf = await binaryRequest(
+    `/exports/record/purchaseOrder/${purchaseOrderId}/pdf`, users.procurement
+  );
+  assert.equal(pendingOrderPdf.response.status, 200);
+  assert.equal(pendingOrderPdf.buffer.subarray(0, 5).toString(), '%PDF-');
+  assertPdfIncludes(
+    pendingOrderPdf.buffer,
+    'PURCHASE ORDER', 'Supplier:', 'P.O No:', 'Supplier Contact:', 'Type:',
+    'Address:', 'Date:', 'Date of Delivery:',
+    'Item No.', 'Quantity', 'Unit', 'Description', 'Unit Price', 'Total Price',
+    'VAT:', 'Total Amount:', 'Total Amount in Words: Rwandan Francs',
+    'Rwandan Francs (RWF)', 'Prepared By:', 'Approved By:',
+    context.purchaseOrder.reference, context.supplier.name, context.supplier.address,
+    amountInWords(context.purchaseOrder.total), users.procurement.name
+  );
+  assert.ok(!pdfText(pendingOrderPdf.buffer).includes(admin.name),
+    'Approved By must stay blank until the purchase order is approved');
+
+  const orderApproval = await request(`/purchase-orders/${purchaseOrderId}/decision`, {
+    method: 'PATCH', user: admin, body: { decision: 'Approved' }
+  });
+  assert.equal(orderApproval.response.status, 200, orderApproval.data.message);
+  const approvedOrderPdf = await binaryRequest(
+    `/exports/record/purchaseOrder/${purchaseOrderId}/pdf`, users.procurement
+  );
+  assert.equal(approvedOrderPdf.response.status, 200);
+  assert.ok(pdfText(approvedOrderPdf.buffer).includes(admin.name),
+    'Approved By must show the approver after approval');
 });
 
 test('supplier RFQ email delivery, secure links, statuses and retry use the real SMTP path', async () => {
@@ -1794,10 +2056,6 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const supplierB = await makeSupplier(`QA Email Supplier B ${stamp}`, `qa.supplier.b.${stamp}@example.test`);
     const supplierC = await makeSupplier(`QA Email Supplier C ${stamp}`, `qa.supplier.c.${stamp}@example.test`);
     const requisition = await forwardedRequest('EMAIL3');
-    const supplierMessage = 'Please quote including delivery to the school.';
-    const rfqDay = futureBusinessDate();
-    const startAt = `${rfqDay}T09:15`;
-    const dueAt = `${rfqDay}T16:45`;
 
     const idempotencyKey = `qa-rfq-${stamp}`;
     const rfq = await request('/rfqs', {
@@ -1805,8 +2063,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       body: {
         requisitionId: requisition.id,
         supplierIds: [supplierA.id, supplierB.id, supplierC.id],
-        startDate: startAt, dueDate: dueAt,
-        message: supplierMessage,
+        dueDate: futureBusinessDate(),
         idempotencyKey
       }
     });
@@ -1821,7 +2078,7 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       body: {
         requisitionId: requisition.id,
         supplierIds: [supplierA.id, supplierB.id, supplierC.id],
-        startDate: startAt, dueDate: dueAt,
+        dueDate: futureBusinessDate(),
         idempotencyKey
       }
     });
@@ -1844,16 +2101,6 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       tokens.push(tokenFrom(links[0]));
       assert.ok(tokens[index], 'RFQ link must contain a token');
       assert.match(normalizedMessage(message), new RegExp(rfq.data.reference));
-      assert.match(normalizedMessage(message), /Send date: \d{4}-\d{2}-\d{2} \d{2}:15/);
-      assert.match(normalizedMessage(message), /End date \(deadline\): \d{4}-\d{2}-\d{2} \d{2}:45/);
-      assert.match(normalizedMessage(message), /Item \| Quantity \| Unit price \| Total/);
-      assert.doesNotMatch(normalizedMessage(message), /Description/);
-      assert.doesNotMatch(normalizedMessage(message), /Requester/);
-      assert.doesNotMatch(normalizedMessage(message), /GRAND TOTAL/);
-      assert.match(normalizedMessage(message), /VIEW REQUEST AND RESPOND/);
-      assert.match(normalizedMessage(message), new RegExp(supplierMessage.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.doesNotMatch(normalizedMessage(message), /Request for Quotation/);
-      assert.doesNotMatch(normalizedMessage(message), /\[REQ:/);
       const others = [supplierA, supplierB, supplierC].filter((entry) => entry.id !== supplier.id);
       for (const other of others) assert.ok(!normalizedMessage(message).includes(other.email));
     });
@@ -1866,62 +2113,16 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
       const document = await opened.json();
       assert.equal(document.rfq.supplier.name, supplier.name);
       assert.equal(document.rfq.reference, rfq.data.reference);
-      assert.equal(document.rfq.message, supplierMessage);
-      assert.equal(document.rfq.justification, undefined);
       assert.ok(Array.isArray(document.rfq.items));
 
-      const pricedItems = document.rfq.items.map((item, itemIndex) => ({
-        requisitionItemId: item.requisitionItemId,
-        unitPrice: 100 + index + itemIndex,
-        comment: `QA item comment ${index}-${itemIndex}`
-      }));
       const quote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}/quotation`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: `QA quote ${index}`, items: pricedItems })
+        body: JSON.stringify({ amount: 100 + index, deliveryDays: 5 + index, notes: `QA quote ${index}` })
       });
       assert.equal(quote.status, 200, await quote.text());
-
-      const duplicateQuote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}/quotation`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: `Duplicate quote ${index}`, items: pricedItems })
-      });
-      assert.equal(duplicateQuote.status, 409);
-      assert.match((await duplicateQuote.json()).message, /already been submitted/i);
-
-      const afterQuote = await fetch(`${baseUrl}/supplier/rfq/${encodeURIComponent(tokens[index])}`);
-      assert.equal(afterQuote.status, 200);
-      assert.equal((await afterQuote.json()).rfq.quotation.notes, `QA quote ${index}`);
     }
     const quotes = await request(`/rfqs/${rfq.data.id}/quotations`, { user: users.procurement });
     assert.equal(quotes.data.quotations.length, 3);
-    assert.equal(quotes.data.rfq.reference, rfq.data.reference);
-    assert.equal(quotes.data.rfq.message, supplierMessage);
-    assert.ok(quotes.data.rfq.requestedItems.length > 0);
-    assert.ok(quotes.data.quotations.every((quote) => quote.items.length >= 1));
-    assert.ok(quotes.data.quotations.every((quote) => quote.supplierEmail));
-    assert.match(JSON.stringify(quotes.data.quotations), /QA item comment/);
-    const rfqList = await request('/rfqs', { user: users.procurement });
-    const listedRfq = rfqList.data.rfqs.find((entry) => entry.id === rfq.data.id);
-    assert.equal(listedRfq.responses.length, 3);
-    assert.ok(listedRfq.responses.every((response) => response.items.length >= 1));
-    assert.match(JSON.stringify(listedRfq.responses), /QA item comment/);
-
-    const committeeMember = {
-      firstName: 'QA',
-      lastName: `RFQ Committee ${stamp}`,
-      email: `qa.rfq.committee.${stamp}@example.test`,
-      phone: '+250 700 000 000'
-    };
-    const createdCommitteeMember = await request('/procurement-committee', {
-      method: 'POST', user: admin, body: committeeMember
-    });
-    assert.equal(createdCommitteeMember.response.status, 201, createdCommitteeMember.data.message);
-    createdCommitteeMemberIds.push(createdCommitteeMember.data.id);
-    const deniedCommitteeSend = await request('/rfqs/send-to-committee', {
-      method: 'POST', user: users.requesterA, body: { rfqIds: [rfq.data.id] }
-    });
-    assert.equal(deniedCommitteeSend.response.status, 403);
-
     const openedStatus = await request(`/rfqs/${rfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(openedStatus.data.summary.Opened, 3);
 
@@ -1933,154 +2134,13 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const singleRequisition = await forwardedRequest('EMAIL1');
     const singleRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: singleRequisition.id, supplierIds: [singleSupplier.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
+      body: { requisitionId: singleRequisition.id, supplierIds: [singleSupplier.id], dueDate: futureBusinessDate() }
     });
     assert.equal(singleRfq.response.status, 201, singleRfq.data.message);
     createdRfqIds.push(singleRfq.data.id);
     assert.equal(singleRfq.data.emailDelivery.accepted, 1);
     assert.equal(singleRfq.data.emailDelivery.failed, 0);
     assert.equal(relay.messages.length, 4);
-    const prematureCommitteeSend = await request('/rfqs/send-to-committee', {
-      method: 'POST', user: users.procurement, body: { rfqIds: [singleRfq.data.id] }
-    });
-    assert.equal(prematureCommitteeSend.response.status, 409);
-
-    const recordedQuote = await request(`/rfqs/${singleRfq.data.id}/quotations`, {
-      method: 'POST',
-      user: users.procurement,
-      body: {
-        supplierId: singleSupplier.id,
-        amount: 456,
-        deliveryDays: 3,
-        qualityScore: 4,
-        ratingScore: 4,
-        notes: 'QA batch response'
-      }
-    });
-    assert.equal(recordedQuote.response.status, 201, recordedQuote.data.message);
-
-    const committeeSend = await request('/rfqs/send-to-committee', {
-      method: 'POST', user: users.procurement,
-      body: { rfqIds: [rfq.data.id, singleRfq.data.id], memberIds: [createdCommitteeMember.data.id] }
-    });
-    assert.equal(committeeSend.response.status, 200, committeeSend.data.message);
-    assert.equal(committeeSend.data.failed, 0);
-    assert.equal(committeeSend.data.accepted, committeeSend.data.total);
-    assert.equal(committeeSend.data.rfqCount, 2);
-    assert.equal(committeeSend.data.responseCount, 4);
-    assert.ok(committeeSend.data.deliveries.some((delivery) => delivery.email === committeeMember.email));
-    const committeeMessages = relay.messages.slice(4);
-    assert.equal(committeeMessages.length, committeeSend.data.total);
-    assert.ok(committeeMessages.every((message) => normalizedMessage(message).includes(rfq.data.reference)));
-    assert.ok(committeeMessages.every((message) => normalizedMessage(message).includes(singleRfq.data.reference)));
-    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes(supplierA.name)));
-    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item EMAIL3')));
-    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item EMAIL1')));
-    assert.ok(committeeMessages.some((message) => normalizedMessage(message).includes('QA item comment 0-0')));
-    assert.equal(committeeSend.data.reviewsCreated, 2);
-    for (const message of committeeMessages) {
-      const text = normalizedMessage(message);
-      assert.match(text, /OPEN YOUR DECISION FORM\(S\)/);
-      assert.match(text, /Message from Procurement: Please quote including delivery to the school\./);
-      assert.match(text, /Send date and time:/);
-      assert.match(text, /Response deadline:/);
-      assert.match(text, /Supplier response total: RWF/);
-      assert.match(text, /Decision required: open the decision link, choose Accept or Deny/);
-      assert.match(text, /OPEN DECISION FORM/);
-      assert.match(text, /Accept/);
-      assert.match(text, /Deny/);
-      assert.doesNotMatch(text, /Procurement recommendation/);
-    }
-
-    const committeeLinks = [...new Set(committeeMessages.flatMap((message) =>
-      [...normalizedMessage(message).matchAll(/https?:\/\/[^\s"<>']+/g)]
-        .map((match) => match[0])
-        .filter((link) => link.includes('/committee-review?token='))
-    ))];
-    assert.equal(committeeLinks.length, 2, 'each selected RFQ must produce its own committee decision link');
-    const formsByReference = new Map();
-    for (const link of committeeLinks) {
-      const token = /token=([^&\s"']+)/.exec(link)?.[1] || '';
-      assert.match(token, /^[a-f0-9]{64}$/i);
-      const formResponse = await fetch(`${baseUrl}/committee-review/${token}`);
-      assert.equal(formResponse.status, 200);
-      const { review } = await formResponse.json();
-      assert.ok(review.responses.length >= 1);
-      assert.ok(review.requestedItems.length >= 1);
-      assert.ok(review.responses.every((response) => response.supplier && response.amount !== null));
-      formsByReference.set(review.reference, { token, review });
-    }
-    assert.ok(formsByReference.has(rfq.data.reference));
-    assert.ok(formsByReference.has(singleRfq.data.reference));
-    const mainCommitteeForm = formsByReference.get(rfq.data.reference);
-    assert.equal(mainCommitteeForm.review.message, supplierMessage);
-
-    const reviewList = await request(`/rfqs/${rfq.data.id}/committee-reviews`, {
-      method: 'GET', user: users.procurement
-    });
-    assert.equal(reviewList.response.status, 200);
-    const pendingReview = reviewList.data.reviews.find((review) => !review.submittedAt);
-    assert.ok(pendingReview);
-    const relayCountBeforeResend = relay.messages.length;
-    const resentReview = await request(`/rfqs/${rfq.data.id}/committee-reviews/${pendingReview.id}/resend`, {
-      method: 'POST', user: users.procurement, body: {}
-    });
-    assert.equal(resentReview.response.status, 200, resentReview.data.message);
-    assert.equal(relay.messages.length, relayCountBeforeResend + 1);
-    assert.match(normalizedMessage(relay.messages.at(-1)), /\/committee-review\?token=/);
-
-    const invalidToken = await fetch(`${baseUrl}/committee-review/${'a'.repeat(64)}`);
-    assert.equal(invalidToken.status, 404);
-
-    const decisionUrl = `${baseUrl}/committee-review/${mainCommitteeForm.token}/decisions`;
-    const invalidDecision = await fetch(decisionUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        responderName: 'QA Committee Reviewer',
-        decisions: mainCommitteeForm.review.responses.map((response, index) => ({
-          supplierId: response.supplierId,
-          decision: index === 0 ? 'Deny' : 'Accept',
-          reason: ''
-        }))
-      })
-    });
-    assert.equal(invalidDecision.status, 400, 'a Deny decision must include a reason');
-    assert.match((await invalidDecision.json()).message, /reason for denying/i);
-
-    const validDecisionBody = JSON.stringify({
-      responderName: 'QA Committee Reviewer',
-      decisions: mainCommitteeForm.review.responses.map((response, index) => ({
-        supplierId: response.supplierId,
-        decision: index === 0 ? 'Deny' : 'Accept',
-        reason: index === 0 ? 'QA committee denial reason' : ''
-      }))
-    });
-    const submittedDecision = await fetch(decisionUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
-    });
-    assert.equal(submittedDecision.status, 201);
-    assert.equal((await submittedDecision.json()).decisionCount, mainCommitteeForm.review.responses.length);
-
-    const duplicateDecision = await fetch(decisionUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: validDecisionBody
-    });
-    assert.equal(duplicateDecision.status, 409, 'one emailed link must accept only one decision set');
-
-    const afterDecision = await fetch(`${baseUrl}/committee-review/${mainCommitteeForm.token}`);
-    const afterDecisionPayload = await afterDecision.json();
-    assert.equal(afterDecisionPayload.review.responded, true);
-    assert.ok(afterDecisionPayload.review.decisions.some((decision) =>
-      decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason' &&
-      decision.responderName === 'QA Committee Reviewer'));
-
-    const committeeReviewList = await request(`/rfqs/${rfq.data.id}/committee-reviews`, { user: users.procurement });
-    assert.equal(committeeReviewList.response.status, 200);
-    assert.equal(committeeReviewList.data.reviews.length, 1);
-    assert.ok(committeeReviewList.data.reviews[0].submittedAt);
-    assert.ok(committeeReviewList.data.reviews[0].decisions.some((decision) =>
-      decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason'));
-    const messagesAfterCommittee = relay.messages.length;
-
     const singleDeliveries = await request(`/rfqs/${singleRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(singleDeliveries.data.deliveries.length, 1);
     assert.equal(singleDeliveries.data.deliveries[0].recipientEmail, singleSupplier.email);
@@ -2092,12 +2152,12 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const secondRequisition = await forwardedRequest('EMAILINV');
     const invalidRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: secondRequisition.id, supplierIds: [invalidSupplier.id, validSupplier.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
+      body: { requisitionId: secondRequisition.id, supplierIds: [invalidSupplier.id, validSupplier.id], dueDate: futureBusinessDate() }
     });
     assert.equal(invalidRfq.response.status, 201, invalidRfq.data.message);
     createdRfqIds.push(invalidRfq.data.id);
     assert.equal(invalidRfq.data.emailDelivery.failed, 1);
-    assert.equal(relay.messages.length, messagesAfterCommittee + 1);
+    assert.equal(relay.messages.length, 5);
     const invalidDeliveries = await request(`/rfqs/${invalidRfq.data.id}/email-deliveries`, { user: users.procurement });
     const invalidRecord = invalidDeliveries.data.deliveries.find((row) => row.supplierId === invalidSupplier.id);
     assert.equal(invalidRecord.status, 'Failed');
@@ -2113,12 +2173,12 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     const failedSupplierB = await makeSupplier(`QA Failure Supplier B ${stamp}`, `qa.failure.b.${stamp}@example.test`);
     const failedRfq = await request('/rfqs', {
       method: 'POST', user: users.procurement,
-      body: { requisitionId: failureRequisition.id, supplierIds: [failedSupplierA.id, failedSupplierB.id], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
+      body: { requisitionId: failureRequisition.id, supplierIds: [failedSupplierA.id, failedSupplierB.id], dueDate: futureBusinessDate() }
     });
     assert.equal(failedRfq.response.status, 201, failedRfq.data.message);
     createdRfqIds.push(failedRfq.data.id);
     assert.equal(failedRfq.data.emailDelivery.failed, 2);
-    assert.equal(relay.messages.length, messagesAfterCommittee + 1, 'a provider failure must not produce a queued message');
+    assert.equal(relay.messages.length, 5, 'a provider failure must not produce a queued message');
     const failedDeliveries = await request(`/rfqs/${failedRfq.data.id}/email-deliveries`, { user: users.procurement });
     assert.equal(failedDeliveries.data.summary.Failed, 2);
     assert.ok(failedDeliveries.data.deliveries.every((row) => row.errorDetails?.message));
@@ -2149,70 +2209,378 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
   }
 });
 
-test('a sent request form can be resent with the current public response link', async () => {
-  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL', 'CLIENT_ORIGIN'];
+test('purchase order send-for-approval uses secure links, real SMTP, recipient-only decisions and full history', async () => {
+  const envNames = [
+    'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER',
+    'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL', 'PO_APPROVAL_LINK_HOURS',
+    'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET', 'GOOGLE_MAILBOX',
+    'GOOGLE_OAUTH_REDIRECT_URI', 'GOOGLE_TOKEN_ENCRYPTION_KEY'
+  ];
   const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
   let relay = null;
+  const stamp = Date.now();
+
+  // Create the procurement fixtures while email is still unconfigured so the
+  // relay captures only the approval workflow messages asserted below.
+  const approver = await createUser('QA PO Approver', `qa.po.approver.${stamp}@example.org`, 'approver', departments.a.id);
+  const otherApprover = await createUser('QA PO Approver Two', `qa.po.approver.two.${stamp}@example.org`, 'approver', departments.a.id);
+  const inactiveApprover = await createUser('QA Inactive Approver', `qa.po.approver.inactive.${stamp}@example.org`, 'approver', departments.a.id, false);
+  const approveOrder = await createAwardedPurchaseOrder('POAPPA', { quoteAmount: 1234567 });
+  const rejectOrder = await createAwardedPurchaseOrder('POAPPR', { quoteAmount: 2345678 });
+  const securityOrder = await createAwardedPurchaseOrder('POAPPS', { quoteAmount: 3456789 });
+  const missingConfigOrder = await createAwardedPurchaseOrder('POAPPM', { quoteAmount: 4567890 });
+  for (const fixture of [approveOrder, rejectOrder, securityOrder, missingConfigOrder]) {
+    await pool.execute(
+      "UPDATE purchase_orders SET supplier_pricing_status = 'Not requested' WHERE id = ?",
+      [fixture.purchaseOrder.id]
+    );
+  }
+
+  function reviewTokenFor(reference) {
+    const messages = relay.messages.filter((raw) => (
+      purchaseOrderLinksIn(raw).length > 0 && normalizedMessage(raw).includes(reference)
+    ));
+    assert.ok(messages.length, `An approval email for ${reference} must be captured by the test SMTP relay.`);
+    // A PO can be sent more than once; callers always want the newest link.
+    const message = messages[messages.length - 1];
+    const links = purchaseOrderLinksIn(message);
+    assert.equal(new Set(links).size, 1, 'each approval email must contain one distinct review link');
+    return tokenFrom(links[0]);
+  }
+
+  async function approvalRow(id) {
+    const [[row]] = await pool.execute(
+      `SELECT id, purchase_order_id AS purchaseOrderId, po_reference AS poReference,
+         total, token_hash AS tokenHash, status, message, sender_email AS senderEmail,
+         recipient_user_id AS recipientUserId, recipient_email AS recipientEmail,
+         sent_at AS sentAt, expires_at AS expiresAt, viewed_at AS viewedAt,
+         decided_at AS decidedAt, decision_comment AS decisionComment
+       FROM purchase_order_approval_requests WHERE id = ?`,
+      [id]
+    );
+    assert.ok(row, `Approval request ${id} must exist.`);
+    return row;
+  }
+
+  async function auditActions(orderId) {
+    const [rows] = await pool.execute(
+      `SELECT action, details, previous_status AS previousStatus, new_status AS newStatus
+         FROM audit_logs WHERE entity_type = 'purchase_order' AND entity_id = ? ORDER BY id`,
+      [String(orderId)]
+    );
+    return rows;
+  }
+
+  function assertAudit(actions, action) {
+    assert.ok(actions.some((row) => row.action === action), `Audit history must contain ${action}.`);
+  }
+
+  async function assertFinancialsUnchanged(orderId, before) {
+    const response = await request(`/purchase-orders/${orderId}`, { user: users.procurement });
+    assert.equal(response.response.status, 200);
+    for (const field of ['subtotal', 'vatRate', 'vatAmount', 'total', 'deliveryDate']) {
+      assert.deepEqual(response.data.purchaseOrder[field], before[field], `${field} must not change during approval`);
+    }
+    assert.deepEqual(
+      response.data.purchaseOrder.items.map((item) => item.itemName),
+      before.items.map((item) => item.itemName)
+    );
+  }
+
   try {
+    const eligible = await request('/purchase-orders/approvers', { user: users.procurement });
+    assert.equal(eligible.response.status, 200, eligible.data.message);
+    const eligibleIds = new Set(eligible.data.users.map((user) => user.id));
+    assert.ok(eligibleIds.has(approver.id), 'an active Approver must be selectable');
+    assert.ok(eligibleIds.has(otherApprover.id));
+    assert.ok(eligibleIds.has(admin.id), 'an active Administrator must be selectable');
+    assert.ok(!eligibleIds.has(inactiveApprover.id), 'an inactive user must not be selectable');
+    assert.ok(!eligibleIds.has(users.procurement.id), 'Procurement must not be selectable as its own approver');
+    assert.ok(!eligibleIds.has(approveOrder.requester.id), 'a Requester must not be selectable');
+    const requesterBlocked = await request('/purchase-orders/approvers', { user: users.requesterA });
+    assert.equal(requesterBlocked.response.status, 403);
+
     relay = await startTestSmtp();
-    const stamp = Date.now();
     process.env.SMTP_HOST = '127.0.0.1';
     process.env.SMTP_PORT = String(relay.port);
     process.env.SMTP_SECURE = 'false';
     process.env.SMTP_REQUIRE_TLS = 'false';
-    process.env.SMTP_USER = `qa.form.smtp.${stamp}@example.test`;
+    process.env.SMTP_USER = `qa.po.smtp.${stamp}@example.test`;
     process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
-    process.env.SMTP_FROM = `qa.form.sender.${stamp}@hopehaven.test`;
+    process.env.SMTP_FROM = `qa.po.sender.${stamp}@hopehaven.test`;
     process.env.SMTP_FROM_NAME = 'Hope Haven QA';
-    process.env.APP_BASE_URL = 'https://public.example.test';
-    process.env.CLIENT_ORIGIN = 'https://public.example.test';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+    process.env.PO_APPROVAL_LINK_HOURS = '72';
 
-    const formDepartment = await createDepartment(`QA Form Dept ${stamp}`);
-    const formSupervisor = await createUser('QA Form Supervisor', `qa.form.supervisor.${stamp}@example.org`, 'supervisor', formDepartment.id);
-    const formRequester = await createUser('QA Form Requester', `qa.form.requester.${stamp}@example.org`, 'requestor', formDepartment.id);
-    const created = await submitRequest(formRequester, 'RESENDLINK');
-    assert.equal(created.response.status, 201, created.data.message);
-    const requisitionId = created.data.id;
-    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/decision`, {
-      method: 'POST', user: formSupervisor, body: { decision: 'Approve' }
-    })).response.status, 200);
-    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/forward`, {
-      method: 'POST', user: formSupervisor, body: {}
-    })).response.status, 200);
+    const approveId = approveOrder.purchaseOrder.id;
+    const beforeApprove = await request(`/purchase-orders/${approveId}`, { user: users.procurement });
+    assert.equal(beforeApprove.response.status, 200);
+    assert.equal(beforeApprove.data.purchaseOrder.status, 'Pending approval');
+    const approveReference = beforeApprove.data.purchaseOrder.reference;
+    const senderMessage = 'Please verify the awarded quotation totals.';
 
-    const token = randomBytes(16).toString('hex');
-    const [inserted] = await pool.execute(
-      `INSERT INTO requisition_email_threads
-         (requisition_id, token, recipient_email, recipient_phone, message, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [requisitionId, token, 'qa.form.recipient@example.test', '+250700000000', 'Please confirm the quantities.', admin.id]
+    for (const recipientId of [0, approveOrder.supplier.id, inactiveApprover.id, users.procurement.id]) {
+      const rejected = await request(`/purchase-orders/${approveId}/send-for-approval`, {
+        method: 'POST', user: users.procurement, body: { recipientId }
+      });
+      assert.equal(rejected.response.status, 400, `recipientId ${recipientId} must be rejected`);
+    }
+    const selfSend = await request(`/purchase-orders/${approveId}/send-for-approval`, {
+      method: 'POST', user: admin, body: { recipientId: admin.id }
+    });
+    assert.equal(selfSend.response.status, 400);
+    assert.match(selfSend.data.message, /another authorized user/i);
+    assert.equal(relay.messages.length, 0, 'invalid recipients must not receive email');
+
+    const sentApprove = await request(`/purchase-orders/${approveId}/send-for-approval`, {
+      method: 'POST', user: users.procurement,
+      body: { recipientId: approver.id, message: senderMessage }
+    });
+    assert.equal(sentApprove.response.status, 200, sentApprove.data.message);
+    assert.match(sentApprove.data.message, /^Sent for approval\.$/);
+    assert.equal(sentApprove.data.emailDelivery.ok, true);
+    assert.equal(sentApprove.data.emailDelivery.status, 'Accepted by Email Provider');
+    assert.equal(relay.messages.length, 1);
+    assert.equal(sentApprove.data.approval.status, 'Pending');
+    assert.equal(sentApprove.data.approval.purchaseOrder.status, 'Pending approval');
+    assert.equal(sentApprove.data.approval.message, senderMessage);
+    assert.equal(sentApprove.data.approval.sender.email, users.procurement.email);
+    assert.equal(sentApprove.data.approval.recipient.email, approver.email);
+
+    const reviewMessage = normalizedMessage(relay.messages[0]);
+    for (const expected of [
+      'View Purchase Order', approveReference, beforeApprove.data.purchaseOrder.supplier,
+      `RWF ${Number(beforeApprove.data.purchaseOrder.total).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      String(beforeApprove.data.purchaseOrder.deliveryDate).slice(0, 10),
+      senderMessage, approver.email
+    ]) {
+      assert.ok(reviewMessage.includes(expected), `approval email must include ${expected}`);
+    }
+    const approveToken = reviewTokenFor(approveReference);
+    assert.match(approveToken, /^[A-Za-z0-9_-]{43}$/, 'the token must be 256 bits in base64url form');
+    const approveLink = purchaseOrderLinksIn(relay.messages[0])[0];
+    assert.ok(approveLink.startsWith('http://localhost:5173/#/po-approval/review?token='));
+    assert.ok(!approveLink.includes('id='), 'the public URL must not contain a database identifier');
+    assert.ok(!approveLink.includes(`/purchase-orders/${approveId}`));
+
+    const sentRow = await approvalRow(sentApprove.data.approval.id);
+    assert.equal(sentRow.tokenHash, createHash('sha256').update(approveToken).digest('hex'));
+    assert.notEqual(sentRow.tokenHash, approveToken, 'the raw token must never be stored');
+    const [[plaintextMatches]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM purchase_order_approval_requests WHERE token_hash = ?',
+      [approveToken]
     );
-    const threadId = Number(inserted.insertId);
+    assert.equal(plaintextMatches.total, 0);
+    assert.equal(sentRow.status, 'Pending');
+    assert.equal(sentRow.recipientUserId, approver.id);
+    assert.equal(sentRow.message, senderMessage);
+    const sentActions = await auditActions(approveId);
+    assertAudit(sentActions, 'sent_for_approval');
+    assertAudit(sentActions, 'review_email_sent');
+    assert.equal(JSON.parse(sentActions.find((row) => row.action === 'sent_for_approval').details).recipientEmail, approver.email);
 
-    const forms = await request(`/email/requisitions/${requisitionId}/forms`, { user: users.procurement });
-    assert.equal(forms.response.status, 200, forms.data.message);
-    const form = forms.data.forms.find((row) => Number(row.id) === threadId);
-    assert.ok(form, 'the sent form must appear in the Procurement sent-forms list');
-    assert.equal(form.responded, false);
-    assert.equal(form.message, 'Please confirm the quantities.');
+    const publicPath = `/purchase-order-approvals/${approveToken}`;
+    const anonymousView = await request(publicPath);
+    assert.equal(anonymousView.response.status, 401);
+    assert.match(anonymousView.data.message, /Sign in with the intended recipient/i);
+    assert.ok(!JSON.stringify(anonymousView.data).includes(approveReference), 'the PO must not be revealed before sign-in');
+    const wrongUserView = await request(publicPath, { user: otherApprover });
+    assert.equal(wrongUserView.response.status, 403);
+    assert.ok(!JSON.stringify(wrongUserView.data).includes(approveReference), 'a forwarded link must not reveal the PO');
+    const wrongRoleView = await request(publicPath, { user: users.procurement });
+    assert.equal(wrongRoleView.response.status, 403);
 
-    const denied = await request(`/email/requisitions/${requisitionId}/forms/${threadId}/resend`, {
-      method: 'POST', user: users.requesterA
+    const viewed = await request(publicPath, { user: approver });
+    assert.equal(viewed.response.status, 200, viewed.data.message);
+    assert.equal(viewed.data.approval.purchaseOrder.reference, approveReference);
+    assert.equal(viewed.data.approval.purchaseOrder.preparedBy, users.procurement.name);
+    assert.equal(viewed.data.approval.purchaseOrder.rfq, approveOrder.rfq.reference);
+    assert.equal(viewed.data.approval.sender.name, users.procurement.name);
+    assert.equal(viewed.data.approval.recipient.email, approver.email);
+    assert.equal(viewed.data.approval.message, senderMessage);
+    assert.ok(viewed.data.approval.viewedAt, 'viewing must be recorded');
+    assert.ok(Array.isArray(viewed.data.approval.purchaseOrder.items));
+    await request(publicPath, { user: approver });
+    assert.equal((await auditActions(approveId)).filter((row) => row.action === 'approval_link_viewed').length, 1);
+
+    const noReason = await request(`${publicPath}/decision`, {
+      method: 'POST', user: approver, body: { decision: 'Rejected' }
     });
-    assert.equal(denied.response.status, 403);
-
-    const resent = await request(`/email/requisitions/${requisitionId}/forms/${threadId}/resend`, {
-      method: 'POST', user: users.procurement
+    assert.equal(noReason.response.status, 400);
+    assert.match(noReason.data.message, /reason is required/i);
+    const unauthorizedDecision = await request(`${publicPath}/decision`, {
+      method: 'POST', user: otherApprover, body: { decision: 'Approved' }
     });
-    assert.equal(resent.response.status, 200, resent.data.message);
-    assert.equal(resent.data.threadId, threadId);
-    assert.equal(relay.messages.length, 1, 'resend must deliver exactly one message');
-    const message = normalizedMessage(relay.messages[0]);
-    assert.ok(message.includes('https://public.example.test/#/response?token=' + token), 'resend must use the current public link and the original token');
-    assert.match(message, /Please confirm the quantities\./);
+    assert.equal(unauthorizedDecision.response.status, 403);
+    assert.equal(relay.messages.length, 1, 'an invalid or unauthorized decision must not notify anyone');
 
-    const opened = await fetch(`${baseUrl}/request-response/${token}`);
-    assert.equal(opened.status, 200, 'the resent link must still open the response form');
+    const approved = await request(`${publicPath}/decision`, {
+      method: 'POST', user: approver,
+      body: { decision: 'Approved', comment: 'Amounts verified against the awarded quotation.' }
+    });
+    assert.equal(approved.response.status, 200, approved.data.message);
+    assert.equal(approved.data.approval.status, 'Approved');
+    assert.equal(approved.data.approval.purchaseOrder.status, 'Approved');
+    assert.equal(approved.data.approval.purchaseOrder.approvedBy, approver.name);
+    assert.equal(approved.data.approval.decisionComment, 'Amounts verified against the awarded quotation.');
+    assert.equal(approved.data.emailDelivery.ok, true);
+    assert.equal(relay.messages.length, 2);
+    const approvalEmail = normalizedMessage(relay.messages[1]);
+    assert.ok(approvalEmail.includes(approveReference));
+    assert.ok(approvalEmail.includes('has been approved'));
+    assert.ok(approvalEmail.includes(approver.name));
+    assert.ok(approvalEmail.includes('Amounts verified against the awarded quotation.'));
+    assert.ok(approvalEmail.includes(users.procurement.email));
+    assert.ok(approvalEmail.includes('/#/admin/Procurement%20Processing'));
+    await assertFinancialsUnchanged(approveId, beforeApprove.data.purchaseOrder);
+    const replay = await request(`${publicPath}/decision`, {
+      method: 'POST', user: approver, body: { decision: 'Rejected', comment: 'Changed my mind.' }
+    });
+    assert.equal(replay.response.status, 409, 'a decided link must not be reusable');
+    const approvedActions = await auditActions(approveId);
+    assertAudit(approvedActions, 'approved');
+    assertAudit(approvedActions, 'decision_email_sent');
+    assert.equal(JSON.parse(approvedActions.find((row) => row.action === 'approved').details).recipientUserId, approver.id);
+
+    const rejectId = rejectOrder.purchaseOrder.id;
+    const beforeReject = await request(`/purchase-orders/${rejectId}`, { user: users.procurement });
+    const rejectReference = beforeReject.data.purchaseOrder.reference;
+    const sentReject = await request(`/purchase-orders/${rejectId}/send-for-approval`, {
+      method: 'POST', user: users.procurement, body: { recipientId: otherApprover.id, message: 'Check supplier history.' }
+    });
+    assert.equal(sentReject.response.status, 200, sentReject.data.message);
+    const rejectToken = reviewTokenFor(rejectReference);
+    assert.notEqual(rejectToken, approveToken);
+    const rejectPublicPath = `/purchase-order-approvals/${rejectToken}`;
+    const rejectView = await request(rejectPublicPath, { user: otherApprover });
+    assert.equal(rejectView.response.status, 200, rejectView.data.message);
+    const rejected = await request(`${rejectPublicPath}/decision`, {
+      method: 'POST', user: otherApprover,
+      body: { decision: 'Rejected', comment: 'The supplier failed the quality review.' }
+    });
+    assert.equal(rejected.response.status, 200, rejected.data.message);
+    assert.equal(rejected.data.approval.status, 'Rejected');
+    assert.equal(rejected.data.approval.purchaseOrder.status, 'Rejected');
+    assert.equal(rejected.data.approval.decisionComment, 'The supplier failed the quality review.');
+    assert.equal(rejected.data.emailDelivery.ok, true);
+    assert.equal(relay.messages.length, 4);
+    const rejectionEmail = normalizedMessage(relay.messages[3]);
+    assert.ok(rejectionEmail.includes(rejectReference));
+    assert.ok(rejectionEmail.includes('has been rejected'));
+    assert.ok(rejectionEmail.includes('The supplier failed the quality review.'));
+    assert.ok(rejectionEmail.includes(users.procurement.email));
+    await assertFinancialsUnchanged(rejectId, beforeReject.data.purchaseOrder);
+    assertAudit(await auditActions(rejectId), 'rejected');
+
+    const secureId = securityOrder.purchaseOrder.id;
+    const beforeSecure = await request(`/purchase-orders/${secureId}`, { user: users.procurement });
+    const secureReference = beforeSecure.data.purchaseOrder.reference;
+    const firstSend = await request(`/purchase-orders/${secureId}/send-for-approval`, {
+      method: 'POST', user: users.procurement, body: { recipientId: approver.id }
+    });
+    assert.equal(firstSend.response.status, 200, firstSend.data.message);
+    const firstToken = reviewTokenFor(secureReference);
+    const revoked = await request(`/purchase-orders/${secureId}/approvals/${firstSend.data.approval.id}/revoke`, {
+      method: 'PATCH', user: users.procurement, body: {}
+    });
+    assert.equal(revoked.response.status, 200, revoked.data.message);
+    assert.equal((await approvalRow(firstSend.data.approval.id)).status, 'Revoked');
+    const revokedView = await request(`/purchase-order-approvals/${firstToken}`, { user: approver });
+    assert.equal(revokedView.response.status, 410);
+    assert.match(revokedView.data.message, /revoked/i);
+    const revokedDecision = await request(`/purchase-order-approvals/${firstToken}/decision`, {
+      method: 'POST', user: approver, body: { decision: 'Approved' }
+    });
+    assert.equal(revokedDecision.response.status, 410);
+    const genericBlocked = await request(`/purchase-orders/${secureId}/decision`, {
+      method: 'PATCH', user: approver, body: { decision: 'Approved' }
+    });
+    assert.equal(genericBlocked.response.status, 409);
+    assert.match(genericBlocked.data.message, /send a new link/i);
+
+    const secondSend = await request(`/purchase-orders/${secureId}/send-for-approval`, {
+      method: 'POST', user: users.procurement, body: { recipientId: otherApprover.id }
+    });
+    assert.equal(secondSend.response.status, 200, secondSend.data.message);
+    const secondToken = reviewTokenFor(secureReference);
+    assert.notEqual(secondToken, firstToken);
+    const secondWrongUser = await request(`/purchase-order-approvals/${secondToken}`, { user: approver });
+    assert.equal(secondWrongUser.response.status, 403, 'a token is bound to exactly one recipient');
+    const secondView = await request(`/purchase-order-approvals/${secondToken}`, { user: otherApprover });
+    assert.equal(secondView.response.status, 200, secondView.data.message);
+
+    const thirdSend = await request(`/purchase-orders/${secureId}/send-for-approval`, {
+      method: 'POST', user: users.procurement, body: { recipientId: approver.id }
+    });
+    assert.equal(thirdSend.response.status, 200, thirdSend.data.message);
+    const thirdToken = reviewTokenFor(secureReference);
+    assert.equal(new Set([firstToken, secondToken, thirdToken]).size, 3);
+    assert.equal((await approvalRow(secondSend.data.approval.id)).status, 'Superseded');
+    const supersededView = await request(`/purchase-order-approvals/${secondToken}`, { user: otherApprover });
+    assert.equal(supersededView.response.status, 410);
+    assert.match(supersededView.data.message, /newer approval link/i);
+
+    await pool.execute(
+      `UPDATE purchase_order_approval_requests
+          SET expires_at = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY)
+        WHERE id = ?`,
+      [thirdSend.data.approval.id]
+    );
+    const expiredView = await request(`/purchase-order-approvals/${thirdToken}`, { user: approver });
+    assert.equal(expiredView.response.status, 410);
+    assert.match(expiredView.data.message, /expired/i);
+    assert.equal((await approvalRow(thirdSend.data.approval.id)).status, 'Expired');
+    const expiredDecision = await request(`/purchase-order-approvals/${thirdToken}/decision`, {
+      method: 'POST', user: approver, body: { decision: 'Approved' }
+    });
+    assert.equal(expiredDecision.response.status, 410);
+    const genericExpired = await request(`/purchase-orders/${secureId}/decision`, {
+      method: 'PATCH', user: approver, body: { decision: 'Approved' }
+    });
+    assert.equal(genericExpired.response.status, 409);
+    const secureAfter = await request(`/purchase-orders/${secureId}`, { user: users.procurement });
+    assert.equal(secureAfter.data.purchaseOrder.status, 'Pending approval');
+    await assertFinancialsUnchanged(secureId, beforeSecure.data.purchaseOrder);
+    for (const token of [firstToken, secondToken, thirdToken]) {
+      assert.notEqual(createHash('sha256').update(token).digest('hex'), token);
+      const [[match]] = await pool.execute(
+        'SELECT COUNT(*) AS total FROM purchase_order_approval_requests WHERE token_hash = ?',
+        [token]
+      );
+      assert.equal(match.total, 0, 'raw tokens must never be recoverable from the database');
+    }
+    const secureActions = await auditActions(secureId);
+    assertAudit(secureActions, 'sent_for_approval');
+    assertAudit(secureActions, 'approval_link_revoked');
+    assertAudit(secureActions, 'approval_link_superseded');
+    assertAudit(secureActions, 'approval_link_viewed');
+    assert.equal(secureActions.filter((row) => row.action === 'sent_for_approval').length, 3);
+
+    // With the provider configuration removed, the request is still saved but
+    // the response reports the exact missing variables and never claims delivery.
+    for (const name of [
+      'SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM',
+      'GOOGLE_OAUTH_CLIENT_ID', 'GOOGLE_OAUTH_CLIENT_SECRET', 'GOOGLE_MAILBOX',
+      'GOOGLE_OAUTH_REDIRECT_URI', 'GOOGLE_TOKEN_ENCRYPTION_KEY'
+    ]) delete process.env[name];
+    const messagesBeforeMissingConfig = relay.messages.length;
+    const missingConfigId = missingConfigOrder.purchaseOrder.id;
+    const missingConfig = await request(`/purchase-orders/${missingConfigId}/send-for-approval`, {
+      method: 'POST', user: users.procurement, body: { recipientId: approver.id }
+    });
+    assert.equal(missingConfig.response.status, 200, missingConfig.data.message);
+    assert.equal(missingConfig.data.emailDelivery.ok, false);
+    assert.equal(missingConfig.data.emailDelivery.reason, 'not_configured');
+    for (const name of ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM']) {
+      assert.match(missingConfig.data.message, new RegExp(name), `the response must name missing ${name}`);
+    }
+    assert.match(missingConfig.data.message, /not delivered/i);
+    assert.doesNotMatch(missingConfig.data.message, /email delivered|delivery confirmed|has been delivered/i);
+    assert.equal(relay.messages.length, messagesBeforeMissingConfig, 'an unconfigured provider must not queue a message');
+    assert.equal((await approvalRow(missingConfig.data.approval.id)).status, 'Pending');
+    const missingActions = await auditActions(missingConfigId);
+    assertAudit(missingActions, 'sent_for_approval');
+    assert.equal(JSON.parse(missingActions.find((row) => row.action === 'review_email_sent').details).emailStatus, 'Failed');
   } finally {
     if (relay) await relay.close();
     for (const name of envNames) {
@@ -2220,4 +2588,642 @@ test('a sent request form can be resent with the current public response link', 
       else process.env[name] = savedEnv[name];
     }
   }
+});
+
+test('supplier pricing requests keep original purchase orders, isolate private links and compare submitted quotations', async () => {
+  const envNames = [
+    'SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER',
+    'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL',
+    'PO_SUPPLIER_PRICING_LINK_HOURS'
+  ];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let relay = null;
+  const stamp = Date.now();
+  const fixture = await createAwardedPurchaseOrder('SPRICE', { quoteAmount: 7777777 });
+  const poId = fixture.purchaseOrder.id;
+  await pool.execute(
+    "UPDATE purchase_orders SET supplier_pricing_status = 'Required' WHERE id = ?",
+    [poId]
+  );
+  const beforeResult = await request(`/purchase-orders/${poId}`, { user: users.procurement });
+  assert.equal(beforeResult.response.status, 200, beforeResult.data.message);
+  const original = beforeResult.data.purchaseOrder;
+  const originalLine = original.items[0];
+  const poItemId = Number(originalLine.id);
+  const prematureApproval = await request(`/purchase-orders/${poId}/send-for-approval`, {
+    method: 'POST', user: users.procurement, body: { recipientId: admin.id }
+  });
+  assert.equal(prematureApproval.response.status, 409);
+  const prematureDecision = await request(`/purchase-orders/${poId}/decision`, {
+    method: 'PATCH', user: admin, body: { decision: 'Approved' }
+  });
+  assert.equal(prematureDecision.response.status, 409);
+  const deadline = futureBusinessDate();
+  const senderMessage = 'Please quote the line items below for this purchase order.';
+
+  const settingsResult = await request('/admin/settings', { user: admin });
+  assert.equal(settingsResult.response.status, 200);
+  const taxRate = Number(settingsResult.data.settings.tax_rate) || 0;
+
+  function pricingLinksIn(raw) {
+    return [...normalizedMessage(raw).matchAll(/https?:\/\/[^\s"<>']+/g)]
+      .map((match) => match[0])
+      .filter((link) => link.includes('/supplier-pricing/quote?token='));
+  }
+
+  async function makeSupplier(label, email) {
+    const name = `QA Pricing ${label} ${stamp}`;
+    const created = await request('/suppliers', { method: 'POST', user: admin, body: { name, email } });
+    assert.equal(created.response.status, 201, created.data.message);
+    createdSupplierIds.push(created.data.id);
+    const contactName = `QA Pricing Contact ${label}`;
+    const address = `QA Pricing Address ${label}`;
+    await pool.execute(
+      'UPDATE suppliers SET contact_name = ?, address = ?, status = ? WHERE id = ?',
+      [contactName, address, 'Active', created.data.id]
+    );
+    return { id: created.data.id, name, email, contactName, address };
+  }
+
+  async function registerPricingRows(requestId) {
+    const [rows] = await pool.execute(
+      'SELECT id FROM purchase_order_pricing_responses WHERE request_id = ?', [requestId]
+    );
+    for (const row of rows) {
+      if (!createdPricingResponseIds.includes(Number(row.id))) createdPricingResponseIds.push(Number(row.id));
+    }
+  }
+
+  async function responseRows(requestId) {
+    const [rows] = await pool.execute(
+      `SELECT id, supplier_id AS supplierId, token_hash AS tokenHash, status,
+         email_status AS emailStatus, email_attempts AS emailAttempts,
+         submitted_at AS submittedAt, opened_at AS openedAt
+        FROM purchase_order_pricing_responses WHERE request_id = ? ORDER BY id`,
+      [requestId]
+    );
+    return rows;
+  }
+
+  function expectedTotals(unitPrice) {
+    const subtotal = Math.round((unitPrice * Number(originalLine.quantity) + Number.EPSILON) * 100) / 100;
+    const vatAmount = Math.round((subtotal * taxRate + Number.EPSILON)) / 100;
+    return { subtotal, vatAmount, total: Math.round((subtotal + vatAmount + Number.EPSILON) * 100) / 100 };
+  }
+
+  try {
+    relay = await startTestSmtp();
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(relay.port);
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.pricing.smtp.${stamp}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = `qa.pricing.sender.${stamp}@hopehaven.test`;
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+    process.env.PO_SUPPLIER_PRICING_LINK_HOURS = '72';
+
+    const supplierA = await makeSupplier('A', `qa.pricing.a.${stamp}@example.test`);
+    const supplierB = await makeSupplier('B', `qa.pricing.b.${stamp}@example.test`);
+    const supplierC = await makeSupplier('C', `qa.pricing.c.${stamp}@example.test`);
+    const supplierD = await makeSupplier('D', `qa.pricing.d.${stamp}@example.test`);
+    const invalidSupplier = await makeSupplier('Invalid', 'not-an-email');
+    const inactiveSupplier = await makeSupplier('Inactive', `qa.pricing.inactive.${stamp}@example.test`);
+    await pool.execute('UPDATE suppliers SET status = ? WHERE id = ?', ['Inactive', inactiveSupplier.id]);
+
+    const [foreignRows] = await pool.execute(
+      'SELECT id FROM purchase_order_items WHERE purchase_order_id <> ? LIMIT 1', [poId]
+    );
+    let foreignItemId = foreignRows[0] ? Number(foreignRows[0].id) : null;
+    if (!foreignItemId) {
+      const other = await createAwardedPurchaseOrder('SPRXITEM', { quoteAmount: 123456 });
+      const otherOrder = await request(`/purchase-orders/${other.purchaseOrder.id}`, { user: users.procurement });
+      foreignItemId = Number(otherOrder.data.purchaseOrder.items[0].id);
+    }
+
+    const invalidAttempt = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement,
+      body: { supplierIds: [supplierA.id, invalidSupplier.id, inactiveSupplier.id], submissionDeadline: deadline }
+    });
+    assert.equal(invalidAttempt.response.status, 400, invalidAttempt.data.message);
+    assert.match(invalidAttempt.data.message, new RegExp(invalidSupplier.name));
+    assert.match(invalidAttempt.data.message, new RegExp(inactiveSupplier.name));
+    assert.match(invalidAttempt.data.message, /not-an-email/);
+    assert.equal(relay.messages.length, 0, 'invalid suppliers must not receive a pricing link');
+
+    const duplicateSelection = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement,
+      body: { supplierIds: [supplierA.id, supplierA.id] }
+    });
+    assert.equal(duplicateSelection.response.status, 400);
+
+    const sent = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement,
+      body: {
+        supplierIds: [supplierA.id, supplierB.id],
+        message: senderMessage,
+        submissionDeadline: deadline
+      }
+    });
+    assert.equal(sent.response.status, 201, sent.data.message);
+    assert.match(sent.data.message, /saved/i);
+    assert.equal(sent.data.emailDelivery.total, 2);
+    assert.equal(sent.data.emailDelivery.accepted, 2, JSON.stringify(sent.data.deliveries));
+    assert.equal(sent.data.emailDelivery.failed, 0);
+    assert.equal(relay.messages.length, 2);
+    createdPricingRequestIds.push(sent.data.requestId);
+    await registerPricingRows(sent.data.requestId);
+
+    const duplicateLink = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement,
+      body: { supplierIds: [supplierA.id, supplierB.id] }
+    });
+    assert.equal(duplicateLink.response.status, 409);
+    assert.match(duplicateLink.data.message, /already exists/i);
+
+    const tokens = [];
+    const suppliers = [supplierA, supplierB];
+    for (let index = 0; index < suppliers.length; index += 1) {
+      const supplier = suppliers[index];
+      const raw = normalizedMessage(relay.messages[index]);
+      const links = pricingLinksIn(relay.messages[index]);
+      assert.equal(new Set(links).size, 1, 'each invitation must carry one distinct private link');
+      assert.ok(links[0].startsWith('http://localhost:5173/#/supplier-pricing/quote?token='));
+      const token = tokenFrom(links[0]);
+      assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+      tokens.push(token);
+      for (const expected of [
+        supplier.name, original.reference, 'Official form line', '2 box', deadline,
+        senderMessage, 'Open Purchase Order / Submit Prices'
+      ]) {
+        assert.ok(raw.includes(expected), `pricing email must include ${expected}`);
+      }
+      const other = suppliers.find((entry) => entry.id !== supplier.id);
+      assert.ok(!raw.includes(other.name), 'an invitation must not reveal another supplier');
+      assert.ok(!raw.includes(other.email), 'an invitation must not reveal another supplier email');
+      for (const originalPrice of [
+        String(original.total), String(original.subtotal), String(originalLine.unitPrice),
+        original.amountInWords || 'amount in words sentinel'
+      ]) {
+        assert.ok(!raw.includes(originalPrice), `the invitation must not reveal the original price ${originalPrice}`);
+      }
+    }
+    assert.equal(new Set(tokens).size, 2, 'each supplier must receive a different token');
+
+    const rowsAfterSend = await responseRows(sent.data.requestId);
+    assert.equal(rowsAfterSend.length, 2);
+    for (const token of tokens) {
+      const [[plaintextMatches]] = await pool.execute(
+        'SELECT COUNT(*) AS total FROM purchase_order_pricing_responses WHERE token_hash = ?', [token]
+      );
+      assert.equal(plaintextMatches.total, 0, 'a raw token must never be stored');
+    }
+    for (const row of rowsAfterSend) {
+      const matchingToken = tokens.find((token) => createHash('sha256').update(token).digest('hex') === row.tokenHash);
+      assert.ok(matchingToken, 'stored hash must be SHA-256 of the emailed token');
+      assert.notEqual(row.tokenHash, matchingToken);
+      assert.equal(row.emailStatus, 'Accepted by Email Provider');
+      assert.equal(row.status, 'Invited');
+      assert.equal(row.emailAttempts, 1);
+      assert.ok(row.openedAt === null);
+    }
+
+    const publicDocuments = [];
+    for (let index = 0; index < tokens.length; index += 1) {
+      const opened = await request(`/supplier-pricing/${encodeURIComponent(tokens[index])}`);
+      assert.equal(opened.response.status, 200, opened.data.message);
+      const document = opened.data;
+      publicDocuments.push(document);
+      assert.equal(document.pricingRequest.reference, sent.data.reference);
+      assert.equal(document.pricingRequest.purchaseOrderReference, original.reference);
+      assert.equal(document.pricingRequest.organization.name, 'Hope Haven');
+      assert.equal(document.pricingRequest.submissionDeadline, deadline);
+      assert.equal(document.pricingRequest.supplier.name, suppliers[index].name);
+      assert.equal(document.pricingRequest.supplier.email, suppliers[index].email);
+      assert.equal(document.pricingRequest.isSubmitted, false);
+      assert.equal(document.response, null);
+      assert.equal(document.items.length, 1);
+      assert.equal(document.items[0].description, 'Official form line');
+      assert.equal(Number(document.items[0].quantity), Number(originalLine.quantity));
+      assert.equal(document.items[0].unit, originalLine.unit);
+      const json = JSON.stringify(document);
+      const other = suppliers.find((entry) => entry.id !== suppliers[index].id);
+      assert.ok(!json.includes(other.name));
+      assert.ok(!json.includes(other.email));
+      for (const secret of ['token_hash', 'tokenHash', 'unit_price', 'amount_in_words', String(original.total)]) {
+        assert.ok(!json.includes(secret), `private pricing view must not expose ${secret}`);
+      }
+    }
+    const afterOpenRows = await responseRows(sent.data.requestId);
+    assert.ok(afterOpenRows.every((row) => row.openedAt && row.status === 'Opened'));
+
+    const foreignInjection = await request(`/supplier-pricing/${encodeURIComponent(tokens[1])}/draft`, {
+      method: 'PATCH',
+      body: { items: [{ purchaseOrderItemId: foreignItemId, unitPrice: 1 }] }
+    });
+    assert.equal(foreignInjection.response.status, 400);
+    assert.match(foreignInjection.data.message, /does not belong/i);
+
+    const priceA = 1250.75;
+    const priceB = 980;
+    const submittedA = await request(`/supplier-pricing/${encodeURIComponent(tokens[0])}/submit`, {
+      method: 'POST',
+      body: {
+        items: [{ purchaseOrderItemId: poItemId, unitPrice: priceA }],
+        quotationValidity: '30 days',
+        deliveryLeadTime: '7 working days',
+        comments: 'Includes delivery',
+        technicalRemarks: 'Brand approved',
+        confirm: true
+      }
+    });
+    assert.equal(submittedA.response.status, 200, submittedA.data.message);
+    assert.equal(submittedA.data.response.status, 'Submitted');
+    assert.ok(submittedA.data.response.submittedAt);
+    assert.equal(submittedA.data.reference, sent.data.reference);
+    assert.equal(submittedA.data.response.subtotal, expectedTotals(priceA).subtotal);
+    assert.equal(submittedA.data.response.vatAmount, expectedTotals(priceA).vatAmount);
+    assert.equal(submittedA.data.response.total, expectedTotals(priceA).total);
+    assert.equal(submittedA.data.response.items[0].unitPrice, priceA);
+    assert.equal(submittedA.data.response.items[0].lineTotal, expectedTotals(priceA).subtotal);
+    assert.equal(submittedA.data.response.comments, 'Includes delivery');
+
+    const submittedB = await request(`/supplier-pricing/${encodeURIComponent(tokens[1])}/submit`, {
+      method: 'POST',
+      body: {
+        items: [{ purchaseOrderItemId: poItemId, unitPrice: priceB }],
+        quotationValidity: '45 days',
+        deliveryLeadTime: '10 working days',
+        comments: 'Alternative brand',
+        technicalRemarks: 'Equivalent specification',
+        confirm: true
+      }
+    });
+    assert.equal(submittedB.response.status, 200, submittedB.data.message);
+    assert.equal(submittedB.data.response.status, 'Submitted');
+    assert.equal(submittedB.data.response.total, expectedTotals(priceB).total);
+    assert.equal(submittedB.data.response.vatRate, taxRate);
+
+    const readOnly = await request(`/supplier-pricing/${encodeURIComponent(tokens[0])}`);
+    assert.equal(readOnly.response.status, 200);
+    assert.equal(readOnly.data.pricingRequest.isSubmitted, true);
+    assert.equal(readOnly.data.response.status, 'Submitted');
+    assert.equal(readOnly.data.response.items[0].unitPrice, priceA);
+    assert.equal(readOnly.data.response.items[0].lineTotal, expectedTotals(priceA).subtotal);
+    assert.ok(!JSON.stringify(readOnly.data).includes(String(priceB)));
+    assert.ok(readOnly.data.response.technicalRemarks === 'Brand approved');
+
+    const replay = await request(`/supplier-pricing/${encodeURIComponent(tokens[0])}/submit`, {
+      method: 'POST', body: { items: [{ purchaseOrderItemId: poItemId, unitPrice: 1 }], confirm: true }
+    });
+    assert.equal(replay.response.status, 409, 'a submitted quotation cannot be replayed');
+    const submittedDraft = await request(`/supplier-pricing/${encodeURIComponent(tokens[0])}/draft`, {
+      method: 'PATCH', body: { items: [] }
+    });
+    assert.equal(submittedDraft.response.status, 409);
+    const missingConfirm = await request(`/supplier-pricing/${encodeURIComponent(tokens[0])}/submit`, {
+      method: 'POST', body: { items: [{ purchaseOrderItemId: poItemId, unitPrice: 1 }] }
+    });
+    assert.equal(missingConfirm.response.status, 409, 'submission state is checked before confirmation');
+
+    const overview = await request(`/purchase-orders/${poId}/supplier-responses`, { user: admin });
+    assert.equal(overview.response.status, 200, overview.data.message);
+    assert.ok(overview.data.requests.some((entry) => entry.id === sent.data.requestId));
+    const overviewJson = JSON.stringify(overview.data);
+    assert.ok(!overviewJson.includes('tokenHash'));
+    assert.ok(!overviewJson.includes('token_hash'));
+    const responseA = overview.data.responses.find((entry) => entry.supplierId === supplierA.id);
+    const responseB = overview.data.responses.find((entry) => entry.supplierId === supplierB.id);
+    assert.ok(responseA && responseB);
+    assert.equal(responseA.status, 'Submitted');
+    assert.equal(responseB.status, 'Submitted');
+    assert.equal(responseA.items[0].unitPrice, priceA);
+    assert.equal(responseB.items[0].unitPrice, priceB);
+    assert.equal(responseA.supplierContact, supplierA.contactName);
+    assert.equal(responseA.supplierAddress, supplierA.address);
+
+    const comparison = await request(`/purchase-order-pricing/requests/${sent.data.requestId}/comparison`, { user: admin });
+    assert.equal(comparison.response.status, 200, comparison.data.message);
+    assert.equal(comparison.data.request.reference, sent.data.reference);
+    assert.equal(comparison.data.columns.length, 1);
+    assert.equal(comparison.data.columns[0].purchaseOrderItemId, poItemId);
+    assert.equal(comparison.data.responses.length, 2);
+    const comparedA = comparison.data.responses.find((entry) => entry.supplierId === supplierA.id);
+    const comparedB = comparison.data.responses.find((entry) => entry.supplierId === supplierB.id);
+    assert.equal(comparedA.items[0].unitPrice, priceA);
+    assert.equal(comparedB.items[0].unitPrice, priceB);
+    assert.ok(!JSON.stringify(comparison.data).includes(String(original.total)));
+
+    const revokedSend = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement, body: { supplierIds: [supplierC.id] }
+    });
+    assert.equal(revokedSend.response.status, 201, revokedSend.data.message);
+    createdPricingRequestIds.push(revokedSend.data.requestId);
+    await registerPricingRows(revokedSend.data.requestId);
+    const revokedToken = tokenFrom(pricingLinksIn(relay.messages[2])[0]);
+    assert.match(revokedToken, /^[A-Za-z0-9_-]{43}$/);
+    const revokedOverview = await request(`/purchase-orders/${poId}/supplier-responses`, { user: users.procurement });
+    const revokedRow = revokedOverview.data.responses.find((entry) => entry.supplierId === supplierC.id);
+    const revoked = await request(`/purchase-order-pricing/responses/${revokedRow.id}/revoke`, {
+      method: 'PATCH', user: users.procurement, body: {}
+    });
+    assert.equal(revoked.response.status, 200, revoked.data.message);
+    const revokedView = await request(`/supplier-pricing/${encodeURIComponent(revokedToken)}`);
+    assert.equal(revokedView.response.status, 410);
+    assert.match(revokedView.data.message, /revoked/i);
+    const revokedEdit = await request(`/supplier-pricing/${encodeURIComponent(revokedToken)}/draft`, {
+      method: 'PATCH', body: { items: [{ purchaseOrderItemId: poItemId, unitPrice: 5 }] }
+    });
+    assert.equal(revokedEdit.response.status, 410);
+    const doubleRevoke = await request(`/purchase-order-pricing/responses/${revokedRow.id}/revoke`, {
+      method: 'PATCH', user: users.procurement, body: {}
+    });
+    assert.equal(doubleRevoke.response.status, 409);
+    const revokeSubmitted = await request(`/purchase-order-pricing/responses/${responseA.id}/revoke`, {
+      method: 'PATCH', user: users.procurement, body: {}
+    });
+    assert.equal(revokeSubmitted.response.status, 409);
+
+    const probe = net.createServer();
+    await new Promise((done) => probe.listen(0, '127.0.0.1', done));
+    const closedPort = probe.address().port;
+    await new Promise((done) => probe.close(done));
+    process.env.SMTP_PORT = String(closedPort);
+    const failedSend = await request(`/purchase-orders/${poId}/send-to-suppliers`, {
+      method: 'POST', user: users.procurement, body: { supplierIds: [supplierD.id] }
+    });
+    assert.equal(failedSend.response.status, 201, failedSend.data.message);
+    assert.equal(failedSend.data.emailDelivery.failed, 1, JSON.stringify(failedSend.data.deliveries));
+    createdPricingRequestIds.push(failedSend.data.requestId);
+    await registerPricingRows(failedSend.data.requestId);
+    const failedRow = (await responseRows(failedSend.data.requestId))[0];
+    assert.equal(failedRow.emailStatus, 'Failed');
+    assert.equal(failedRow.status, 'Email failed');
+
+    process.env.SMTP_PORT = String(relay.port);
+    const messagesBeforeRetry = relay.messages.length;
+    const retried = await request(`/purchase-order-pricing/requests/${failedSend.data.requestId}/deliveries/retry-failed`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(retried.response.status, 200, retried.data.message);
+    assert.equal(retried.data.emailDelivery.accepted, 1);
+    assert.equal(relay.messages.length, messagesBeforeRetry + 1);
+    const retryToken = tokenFrom(pricingLinksIn(relay.messages[relay.messages.length - 1])[0]);
+    const [[afterRetry]] = await pool.execute(
+      `SELECT token_hash AS tokenHash, status, email_status AS emailStatus,
+         email_attempts AS emailAttempts
+        FROM purchase_order_pricing_responses WHERE id = ?`, [failedRow.id]
+    );
+    assert.equal(afterRetry.tokenHash, createHash('sha256').update(retryToken).digest('hex'),
+      'the retried email must contain the original private link');
+    assert.equal(afterRetry.tokenHash, failedRow.tokenHash,
+      'retrying a failed delivery must reuse the same token instead of rotating it');
+    assert.equal(afterRetry.status, 'Invited');
+    assert.equal(afterRetry.emailStatus, 'Accepted by Email Provider');
+    assert.equal(afterRetry.emailAttempts, 2);
+    const [[duplicateCount]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM purchase_order_pricing_responses WHERE request_id = ? AND supplier_id = ?',
+      [failedSend.data.requestId, supplierD.id]
+    );
+    assert.equal(duplicateCount.total, 1, 'a retry must not create another active link');
+
+    const award = await request(`/purchase-order-pricing/requests/${sent.data.requestId}/award`, {
+      method: 'POST', user: admin, body: { responseId: responseA.id, comment: 'Lowest compliant quotation.' }
+    });
+    assert.equal(award.response.status, 200, award.data.message);
+    assert.equal(award.data.award.supplierId, supplierA.id);
+    assert.equal(award.data.award.comment, 'Lowest compliant quotation.');
+    const [[awardedRequest]] = await pool.execute(
+      `SELECT status, awarded_response_id AS awardedResponseId, awarded_by AS awardedBy,
+         award_comment AS awardComment
+        FROM purchase_order_pricing_requests WHERE id = ?`, [sent.data.requestId]
+    );
+    assert.equal(awardedRequest.status, 'Awarded');
+    assert.equal(String(awardedRequest.awardedResponseId), String(responseA.id));
+    assert.equal(awardedRequest.awardedBy, admin.id);
+    assert.equal(awardedRequest.awardComment, 'Lowest compliant quotation.');
+    const [[awardedResponse]] = await pool.execute(
+      'SELECT awarded FROM purchase_order_pricing_responses WHERE id = ?', [responseA.id]
+    );
+    assert.equal(awardedResponse.awarded, 1);
+    const closedRetryLink = await request(`/supplier-pricing/${encodeURIComponent(retryToken)}`);
+    assert.equal(closedRetryLink.response.status, 410,
+      'other active supplier links must close when an award is recorded');
+    const duplicateAward = await request(`/purchase-order-pricing/requests/${sent.data.requestId}/award`, {
+      method: 'POST', user: admin, body: { responseId: responseB.id }
+    });
+    assert.equal(duplicateAward.response.status, 409);
+    const unsubmittedAward = await request(`/purchase-order-pricing/requests/${revokedSend.data.requestId}/award`, {
+      method: 'POST', user: admin, body: { responseId: revokedRow.id }
+    });
+    assert.equal(unsubmittedAward.response.status, 409);
+
+    const approvedForReview = await request(`/purchase-orders/${poId}/send-for-approval`, {
+      method: 'POST', user: users.procurement,
+      body: { recipientId: admin.id, message: 'Review the explicitly awarded quotation.' }
+    });
+    assert.equal(approvedForReview.response.status, 200, approvedForReview.data.message);
+
+    const afterResult = await request(`/purchase-orders/${poId}`, { user: users.procurement });
+    assert.equal(afterResult.response.status, 200);
+    const after = afterResult.data.purchaseOrder;
+    assert.equal(after.supplierPricingStatus, 'Awarded');
+    assert.equal(after.supplierPricingAward.supplierId, supplierA.id);
+    assert.equal(after.supplierPricingAward.supplierEmail, supplierA.email);
+    assert.equal(after.supplierPricingAward.total, expectedTotals(priceA).total);
+    assert.equal(after.supplierPricingAward.items[0].unitPrice, priceA);
+    assert.equal(after.supplierPricingAward.items[0].lineTotal, expectedTotals(priceA).subtotal);
+    for (const field of ['reference', 'status', 'subtotal', 'vatRate', 'vatAmount', 'total', 'amountInWords', 'deliveryDate']) {
+      assert.deepEqual(after[field], original[field], `original purchase order ${field} must not change`);
+    }
+    assert.deepEqual(
+      after.items.map((item) => ({
+        id: item.id, name: item.itemName, unitPrice: item.unitPrice, lineTotal: item.lineTotal
+      })),
+      original.items.map((item) => ({
+        id: item.id, name: item.itemName, unitPrice: item.unitPrice, lineTotal: item.lineTotal
+      }))
+    );
+  } finally {
+    if (relay) await relay.close();
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('RFQ register statistics, filters, details, draft lifecycle and supplier links use real records', async () => {
+  const stamp = Date.now();
+  const suffix = `RFQQA${stamp.toString().slice(-8)}`;
+  const [supplierResult] = await pool.execute(
+    `INSERT INTO suppliers (name, contact_name, email, phone, address, status)
+     VALUES (?, ?, ?, ?, ?, 'Active')`,
+    [`QA RFQ Supplier ${suffix}`, 'QA RFQ Contact', `qa.rfq.${stamp}@example.org`, '+10000000000', 'QA RFQ address']
+  );
+  const supplierId = Number(supplierResult.insertId);
+  createdSupplierIds.push(supplierId);
+  const [otherSupplierResult] = await pool.execute(
+    `INSERT INTO suppliers (name, contact_name, email, status)
+     VALUES (?, ?, ?, 'Active')`,
+    [`QA RFQ Other Supplier ${suffix}`, 'QA RFQ Other Contact', `qa.rfq.other.${stamp}@example.org`]
+  );
+  const otherSupplierId = Number(otherSupplierResult.insertId);
+  createdSupplierIds.push(otherSupplierId);
+
+  const [requisitionResult] = await pool.execute(
+    `INSERT INTO requisitions
+       (reference, requester_id, department_id, title, justification, budget_code, priority,
+        status, submitted_at, forwarded_at, supervisor_id, forwarded_by_supervisor, required_by)
+     VALUES (?, ?, ?, ?, ?, ?, 'High', 'Forwarded to Procurement', UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?, ?, ?)`,
+    [
+      `QA-RFQ-${suffix.slice(-8)}`, users.requesterA.id, departments.a.id,
+      `QA RFQ request ${suffix}`, 'RFQ register regression fixture', `QA-${suffix}`,
+      users.supervisorA.id, users.supervisorA.id, futureBusinessDate()
+    ]
+  );
+  const requisitionId = Number(requisitionResult.insertId);
+  createdRequisitionIds.push(requisitionId);
+  await pool.execute(
+    `INSERT INTO requisition_items
+       (requisition_id, item_name, description, quantity, unit, estimated_unit_cost)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [requisitionId, `QA RFQ item ${suffix}`, 'Official RFQ line', 3, 'box', 125]
+  );
+  const committee = await createUser('QA Committee', `qa.committee.${stamp}@example.org`, 'committee', null);
+
+  const statsBefore = await request('/rfqs/stats', { user: users.procurement });
+  assert.equal(statsBefore.response.status, 200, statsBefore.data.message);
+  assert.ok(statsBefore.data.stats, 'stats endpoint must return real database counts');
+
+  const draft = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: {
+      requisitionId, supplierIds: [supplierId], dueDate: futureBusinessDate(),
+      instructions: 'Collect sealed quotations by the stated deadline.',
+      terms: 'Prices must remain valid for 30 days.',
+      saveAsDraft: true,
+      idempotencyKey: `qa-rfq-draft-${stamp}`
+    }
+  });
+  assert.equal(draft.response.status, 201, draft.data.message);
+  assert.equal(draft.data.status, 'Draft');
+  assert.equal(draft.data.emailDelivery, null);
+  createdRfqIds.push(draft.data.id);
+
+  const filtered = await request(
+    `/rfqs?status=Draft&reference=${encodeURIComponent(draft.data.reference)}&page=1&limit=10`,
+    { user: users.procurement }
+  );
+  assert.equal(filtered.response.status, 200, filtered.data.message);
+  assert.equal(filtered.data.rfqs.length, 1);
+  assert.equal(Number(filtered.data.pagination.total), 1);
+  assert.equal(filtered.data.rfqs[0].instructions, 'Collect sealed quotations by the stated deadline.');
+  assert.equal(filtered.data.rfqs[0].terms, 'Prices must remain valid for 30 days.');
+
+  const draftDetail = await request(`/rfqs/${draft.data.id}`, { user: users.procurement });
+  assert.equal(draftDetail.response.status, 200, draftDetail.data.message);
+  assert.equal(draftDetail.data.items.length, 1);
+  assert.equal(draftDetail.data.items[0].itemName, `QA RFQ item ${suffix}`);
+  assert.equal(draftDetail.data.suppliers.length, 1);
+  assert.equal(draftDetail.data.suppliers[0].emailStatus, null);
+  assert.equal(Number(draftDetail.data.suppliers[0].emailAttempts), 0);
+  assert.ok(draftDetail.data.activity.some((entry) => entry.action === 'draft_created'));
+
+  const updated = await request(`/rfqs/${draft.data.id}`, {
+    method: 'PATCH', user: users.procurement,
+    body: {
+      requisitionId, dueDate: futureBusinessDate(), supplierIds: [supplierId],
+      instructions: 'Submit pricing and delivery terms in the supplier portal.',
+      terms: 'Quotations must remain valid for 60 days.'
+    }
+  });
+  assert.equal(updated.response.status, 200, updated.data.message);
+  const updatedDetail = await request(`/rfqs/${draft.data.id}`, { user: users.procurement });
+  assert.equal(updatedDetail.data.rfq.instructions, 'Submit pricing and delivery terms in the supplier portal.');
+  assert.equal(updatedDetail.data.rfq.terms, 'Quotations must remain valid for 60 days.');
+
+  const sent = await request(`/rfqs/${draft.data.id}/send`, {
+    method: 'POST', user: users.procurement, body: {}
+  });
+  assert.equal(sent.response.status, 200, sent.data.message);
+  assert.equal(sent.data.status, 'Sent');
+  const deliveryState = await request(`/rfqs/${draft.data.id}/email-deliveries`, { user: users.procurement });
+  assert.equal(deliveryState.response.status, 200, deliveryState.data.message);
+  assert.equal(deliveryState.data.deliveries.length, 1);
+  assert.ok(Number(deliveryState.data.deliveries[0].attempts) >= 1);
+  const sentDetail = await request(`/rfqs/${draft.data.id}`, { user: users.procurement });
+  assert.ok(Number(sentDetail.data.suppliers[0].emailAttempts) >= 1);
+  assert.ok(sentDetail.data.suppliers[0].emailStatus, 'sending must leave a recorded supplier email status');
+
+  const token = createRfqToken(draft.data.id, supplierId);
+  const publicRfq = await request(`/supplier/rfq/${encodeURIComponent(token)}`);
+  assert.equal(publicRfq.response.status, 200, publicRfq.data.message);
+  assert.equal(publicRfq.data.rfq.instructions, 'Submit pricing and delivery terms in the supplier portal.');
+  assert.equal(publicRfq.data.rfq.terms, 'Quotations must remain valid for 60 days.');
+  assert.equal(publicRfq.data.rfq.items.length, 1);
+  const foreignToken = createRfqToken(draft.data.id, otherSupplierId);
+  const foreignLink = await request(`/supplier/rfq/${encodeURIComponent(foreignToken)}`);
+  assert.equal(foreignLink.response.status, 404, 'a supplier must not open another supplier link');
+  const invalidLink = await request('/supplier/rfq/not-a-signed-token');
+  assert.equal(invalidLink.response.status, 404);
+
+  const quoted = await request(`/supplier/rfq/${encodeURIComponent(token)}/quotation`, {
+    method: 'POST', body: { amount: 12345.67, deliveryDays: 9, notes: 'Private supplier quotation.' }
+  });
+  assert.equal(quoted.response.status, 200, quoted.data.message);
+  const staffQuotations = await request(`/rfqs/${draft.data.id}/quotations`, { user: users.procurement });
+  assert.equal(staffQuotations.response.status, 200, staffQuotations.data.message);
+  assert.equal(staffQuotations.data.quotations.length, 1);
+  assert.equal(Number(staffQuotations.data.quotations[0].supplierId), supplierId);
+  assert.equal(staffQuotations.data.quotations[0].notes, 'Private supplier quotation.');
+  const evaluatingDetail = await request(`/rfqs/${draft.data.id}`, { user: users.procurement });
+  assert.equal(evaluatingDetail.data.rfq.status, 'Evaluating');
+  assert.equal(Number(evaluatingDetail.data.rfq.quotations), 1);
+
+  const award = await request(`/rfqs/${draft.data.id}/award`, {
+    method: 'POST', user: committee, body: { quotationId: staffQuotations.data.quotations[0].id }
+  });
+  assert.equal(award.response.status, 200, award.data.message);
+  const awardedDetail = await request(`/rfqs/${draft.data.id}`, { user: users.procurement });
+  assert.equal(awardedDetail.data.rfq.status, 'Awarded');
+  assert.equal(Number(awardedDetail.data.rfq.selectedQuotationId), Number(staffQuotations.data.quotations[0].id));
+  const closedLink = await request(`/supplier/rfq/${encodeURIComponent(token)}`);
+  assert.equal(closedLink.response.status, 410, 'an awarded RFQ must stop accepting supplier quotations');
+
+  const closeRfq = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: {
+      requisitionId, supplierIds: [supplierId], dueDate: futureBusinessDate(),
+      instructions: 'Close workflow fixture.', terms: 'No special terms.'
+    }
+  });
+  assert.equal(closeRfq.response.status, 201, closeRfq.data.message);
+  createdRfqIds.push(closeRfq.data.id);
+  const closed = await request(`/rfqs/${closeRfq.data.id}/close`, {
+    method: 'POST', user: users.procurement, body: {}
+  });
+  assert.equal(closed.response.status, 200, closed.data.message);
+  const closedDetail = await request(`/rfqs/${closeRfq.data.id}`, { user: users.procurement });
+  assert.equal(closedDetail.data.rfq.status, 'Closed');
+
+  const deletable = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: { requisitionId, supplierIds: [supplierId], saveAsDraft: true }
+  });
+  assert.equal(deletable.response.status, 201, deletable.data.message);
+  createdRfqIds.push(deletable.data.id);
+  const deleted = await request(`/rfqs/${deletable.data.id}`, {
+    method: 'DELETE', user: users.procurement, body: {}
+  });
+  assert.equal(deleted.response.status, 200, deleted.data.message);
+  const missing = await request(`/rfqs/${deletable.data.id}`, { user: users.procurement });
+  assert.equal(missing.response.status, 404);
+
+  const statsAfter = await request('/rfqs/stats', { user: users.procurement });
+  assert.equal(statsAfter.response.status, 200);
+  assert.equal(statsAfter.data.stats.total, statsBefore.data.stats.total + 2);
+  assert.equal(statsAfter.data.stats.receivedQuotations, statsBefore.data.stats.receivedQuotations + 1);
+  assert.equal(statsAfter.data.stats.closed, statsBefore.data.stats.closed + 1);
 });

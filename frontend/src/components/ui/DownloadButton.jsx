@@ -7,7 +7,7 @@ const FORMAT_LABELS = { pdf: 'PDF', xlsx: 'Excel', csv: 'CSV' };
 
 export default function DownloadButton({
   exportKey, type, id, format = 'pdf', params = {}, reference = '',
-  label, className = '', variant = 'secondary', onSuccess, onError
+  label, className = '', variant = 'secondary', tone = 'default', onSuccess, onError
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -36,23 +36,25 @@ export default function DownloadButton({
 
   const Icon = ICONS[format] || Download;
   const text = label || `Download ${FORMAT_LABELS[format] || format.toUpperCase()}`;
-  const classes = variant === 'primary'
-    ? 'bg-brand text-white hover:bg-brand/90 border border-brand'
-    : 'border border-slate-200 bg-white text-ink hover:bg-slate-50';
+  const classes = tone === 'toolbar'
+    ? 'h-9 rounded-xl border border-brand bg-white px-3.5 text-xs font-bold text-black shadow-dashboard transition duration-200 hover:border-accent-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
+    : `rounded-lg px-3.5 py-2 text-xs font-bold disabled:opacity-50 ${variant === 'primary'
+      ? 'bg-brand text-black hover:bg-brand border border-brand'
+      : 'border border-brand bg-white text-ink hover:bg-white'}`;
 
   return <span className="relative inline-flex no-print">
     <button
       type="button"
       onClick={handleClick}
       disabled={busy}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-bold disabled:opacity-50 ${classes} ${className}`}
+      className={`inline-flex items-center justify-center gap-1.5 ${classes} ${className}`}
     >
       <Icon size={14} aria-hidden="true" />
       {busy ? 'Preparing…' : text}
     </button>
     {message && <span
       role="status"
-      className="absolute right-0 top-full z-30 mt-1 max-w-[260px] rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] shadow-sm"
+      className="absolute right-0 top-full z-30 mt-1 max-w-[260px] rounded-md border border-strong bg-white px-2 py-1 text-[10px] "
     >{message}</span>}
   </span>;
 }

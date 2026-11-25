@@ -4,12 +4,37 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: '#172638',
-        muted: '#718096',
-        canvas: '#f5f7fb',
-        brand: { DEFAULT: '#356c63', dark: '#28574f', light: '#e5f1ed' }
+        ink: 'var(--pims-ink)',
+        muted: 'var(--pims-ink)',
+        canvas: 'var(--pims-surface)',
+        reference: 'var(--pims-reference)',
+        success: 'var(--pims-success)',
+        hover: 'var(--pims-hover)',
+        brand: { DEFAULT: 'var(--pims-surface)', dark: 'var(--pims-hover)', light: 'var(--pims-surface)' },
+        accent: {
+          DEFAULT: 'var(--pims-interaction-green)',
+          text: 'var(--pims-interaction-green-text)',
+          tint: 'var(--pims-interaction-tint)',
+          strong: 'var(--pims-interaction-tint-strong)',
+          row: 'var(--pims-interaction-row-tint)',
+          field: 'var(--pims-interaction-field-tint)',
+          border: 'var(--pims-interaction-border)',
+          focus: 'var(--pims-interaction-focus)',
+          ring: 'var(--pims-interaction-ring)'
+        }
       },
-      boxShadow: { card: '0 4px 18px rgba(27, 46, 67, 0.045)' }
+      borderColor: {
+        subtle: 'var(--pims-border-subtle)',
+        brand: 'var(--pims-border)',
+        strong: 'var(--pims-border-strong)'
+      },
+      ringColor: {
+        brand: 'var(--pims-border)'
+      },
+      boxShadow: {
+        card: 'none',
+        dashboard: '0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 24px rgba(0, 0, 0, 0.04)'
+      }
     }
   },
   plugins: []

@@ -1,8 +1,8 @@
 import { roleLabel } from '../../utils/access.js';
 
 const tones = {
-  supervisor: 'bg-[#d8f3e6] text-[#12624f]',
-  requester: 'bg-[#e3ebff] text-[#264a91]'
+  supervisor: 'bg-white text-black',
+  requester: 'bg-white text-black'
 };
 
 export default function SharedUserProfile({ user, portal = 'supervisor', className = '' }) {

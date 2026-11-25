@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Activity, ArrowDownToLine, ArrowLeftRight, ArrowUpFromLine, Package, Plus } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { currency, dateLabel } from '../utils/format.js';
+
+const addItemButtonClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-brand bg-white px-4 py-2.5 text-xs font-semibold text-black transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2';
+const recordReceiptButtonClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-black bg-reference px-4 py-2.5 text-xs font-semibold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
+const MOVEMENT_ICONS = { Receipt: ArrowDownToLine, Issue: ArrowUpFromLine, Adjustment: ArrowLeftRight };
 
 function InventoryItemForm({ onClose, onSubmit }) {
   const [form, setForm] = useState({ sku: '', name: '', category: '', unit: 'unit', reorderLevel: '10', unitCost: '0' });
@@ -47,19 +51,131 @@ function ReceiptForm({ items, onClose, onSubmit }) {
   </form></Modal>;
 }
 
-export default function InventoryPage({ page, items, movements, user, search, onAddItem, onReceive }) {
+export default function InventoryPage({ page, items, movements, user, search, query = {}, onAddItem, onReceive }) {
   const [dialog, setDialog] = useState('');
   const canEdit = ['admin', 'storekeeper'].includes(user.role);
   const canReceive = ['admin', 'storekeeper', 'procurement'].includes(user.role);
   const filtered = items.filter((item) => `${item.name} ${item.sku} ${item.category}`.toLowerCase().includes(search.toLowerCase()));
   const lowStock = filtered.filter((item) => item.quantity <= item.reorderLevel);
+  const lowStockOnly = query.lowStock === 'true' || query.lowStock === '1';
+  const visibleItems = lowStockOnly ? lowStock : filtered;
 
   return <>
-    {page === 'Stock movements' ? <PageCard title="Stock movement history" description={`${movements.length} latest receipts and issues`}>
-      {movements.length ? <div className="overflow-x-auto"><table className="w-full min-w-[650px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Date', 'Item', 'Movement', 'Quantity', 'Source', 'Balance'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{movements.map((entry) => <tr key={entry.id}><td className="px-4 py-3">{dateLabel(entry.createdAt)}</td><td className="px-4 py-3 font-semibold">{entry.item}</td><td className="px-4 py-3">{entry.type}</td><td className="px-4 py-3">{entry.quantity}</td><td className="px-4 py-3">{entry.source}</td><td className="px-4 py-3">{entry.balance}</td></tr>)}</tbody></table></div> : <EmptyState>No stock movements recorded.</EmptyState>}
-    </PageCard> : <PageCard title="Inventory catalogue" description={`${items.length} items · ${lowStock.length} below reorder level`}
-      action={<div className="flex gap-2">{canEdit && <button onClick={() => setDialog('item')} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-brand"><Plus size={14} />Add item</button>}{canReceive && <button onClick={() => setDialog('receipt')} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Record receipt</button>}</div>}>
-      {filtered.length ? <div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Item', 'Category', 'On hand', 'Reorder at', 'Unit cost', 'Status'].map((cell) => <th key={cell} className="px-5 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{filtered.map((item) => <tr key={item.id}><td className="px-5 py-4 font-bold">{item.name}<div className="mt-1 text-[10px] font-normal text-muted">{item.sku}</div></td><td className="px-5 py-4">{item.category}</td><td className="px-5 py-4 font-bold">{item.quantity} {item.unit}</td><td className="px-5 py-4">{item.reorderLevel}</td><td className="px-5 py-4">{currency(item.unitCost)}</td><td className="px-5 py-4"><StatusBadge value={item.quantity <= item.reorderLevel ? 'Low stock' : 'Approved'} /></td></tr>)}</tbody></table></div> : <EmptyState>No inventory items match your search.</EmptyState>}
+    {page === 'Stock movements' ? <PageCard
+      className="shadow-dashboard"
+      title="Movement history"
+      description={`${movements.length} recent ${movements.length === 1 ? 'movement' : 'movements'} · Receipts, issues, and adjustments`}
+    >
+      {movements.length ? <div className="overflow-x-auto">
+        <table className="w-full min-w-[920px] table-fixed text-left text-xs">
+          <colgroup>
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '23%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '21%' }} />
+            <col style={{ width: '15%' }} />
+          </colgroup>
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+            <tr>{['Date', 'Item', 'Movement', 'Quantity', 'Source', 'Balance'].map((cell) =>
+              <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y divide-subtle">
+            {movements.map((entry) => {
+              const MovementIcon = MOVEMENT_ICONS[entry.type] || Activity;
+              return <tr key={entry.id} className="transition-colors hover:bg-hover">
+                <td className="whitespace-nowrap px-5 py-4 align-middle tabular-nums">{dateLabel(entry.movementAt || entry.createdAt)}</td>
+                <td className="break-words px-5 py-4 align-middle">
+                  <span className="block font-semibold">{entry.item || '—'}</span>
+                  {entry.sku && <span className="mt-1 block text-[10px] font-medium tracking-wide text-muted">{entry.sku}</span>}
+                </td>
+                <td className="px-5 py-4 align-middle">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[10px] font-semibold text-black">
+                    <MovementIcon size={13} aria-hidden="true" />
+                    {entry.type || 'Movement'}
+                  </span>
+                </td>
+                <td className="whitespace-nowrap px-5 py-4 align-middle font-bold tabular-nums">{entry.quantity}</td>
+                <td className="break-words px-5 py-4 align-middle">{entry.source || '—'}</td>
+                <td className="whitespace-nowrap px-5 py-4 align-middle">
+                  <span className="inline-flex rounded-lg border border-brand bg-white px-2.5 py-1.5 font-semibold tabular-nums">{entry.balance}</span>
+                </td>
+              </tr>;
+            })}
+          </tbody>
+        </table>
+      </div> : <EmptyState>
+        <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-10">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl border border-brand bg-white text-black">
+            <Activity size={22} strokeWidth={1.7} aria-hidden="true" />
+          </span>
+          <h3 className="mt-4 text-sm font-bold text-black">No stock movements yet</h3>
+          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+            Receipts, issues, and adjustments will appear here as inventory changes are recorded.
+          </p>
+        </div>
+      </EmptyState>}
+    </PageCard> : <PageCard
+      className="shadow-dashboard"
+      title="Inventory register"
+      description={`${visibleItems.length} of ${items.length} items · ${lowStock.length} below reorder level${lowStockOnly ? ' · Low stock only' : ''}`}
+      action={<div className="flex flex-wrap gap-2">
+        {canEdit && <button type="button" onClick={() => setDialog('item')} className={addItemButtonClass}><Plus size={15} />Add item</button>}
+        {canReceive && <button type="button" onClick={() => setDialog('receipt')} className={recordReceiptButtonClass}><Plus size={15} />Record receipt</button>}
+      </div>}
+    >
+      {visibleItems.length ? <div className="overflow-x-auto">
+        <table className="w-full min-w-[920px] table-fixed text-left text-xs">
+          <colgroup>
+            <col style={{ width: '26%' }} />
+            <col style={{ width: '19%' }} />
+            <col style={{ width: '16%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '12%' }} />
+          </colgroup>
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+            <tr>{['Item', 'Category', 'On hand', 'Reorder at', 'Unit cost', 'Status'].map((cell) =>
+              <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
+          </thead>
+          <tbody className="divide-y divide-subtle">
+            {visibleItems.map((item) => <tr key={item.id} className="transition-colors hover:bg-hover">
+              <td className="px-5 py-4 align-middle">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-brand bg-white text-black" aria-hidden="true">
+                    <Package size={16} strokeWidth={1.8} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block break-words font-bold">{item.name}</span>
+                    <span className="mt-1 block text-[10px] font-medium tracking-wide text-muted">{item.sku}</span>
+                  </span>
+                </div>
+              </td>
+              <td className="break-words px-5 py-4 align-middle">{item.category}</td>
+              <td className="whitespace-nowrap px-5 py-4 align-middle font-bold tabular-nums">{item.quantity} {item.unit}</td>
+              <td className="whitespace-nowrap px-5 py-4 align-middle tabular-nums">{item.reorderLevel} {item.unit}</td>
+              <td className="whitespace-nowrap px-5 py-4 align-middle font-semibold tabular-nums">{currency(item.unitCost)}</td>
+              <td className="px-5 py-4 align-middle"><StatusBadge value={item.quantity <= item.reorderLevel ? 'Low stock' : 'Approved'} /></td>
+            </tr>)}
+          </tbody>
+        </table>
+      </div> : <EmptyState>
+        <div className="flex min-h-[220px] flex-col items-center justify-center px-6 py-10">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl border border-brand bg-white text-black">
+            <Package size={22} strokeWidth={1.7} aria-hidden="true" />
+          </span>
+          <h3 className="mt-4 text-sm font-bold text-black">
+            {!items.length ? 'No inventory items yet' : lowStockOnly ? 'No matching items below reorder level' : 'No inventory items match your search'}
+          </h3>
+          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+            {!items.length
+              ? 'Items added to the inventory catalogue will appear here.'
+              : lowStockOnly
+                ? 'No items matching the current search are below their reorder threshold.'
+                : 'Try another item name, SKU, or category.'}
+          </p>
+        </div>
+      </EmptyState>}
     </PageCard>}
     {dialog === 'item' && <InventoryItemForm onClose={() => setDialog('')} onSubmit={onAddItem} />}
     {dialog === 'receipt' && <ReceiptForm items={items} onClose={() => setDialog('')} onSubmit={onReceive} />}
