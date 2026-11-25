@@ -147,7 +147,7 @@ export default function CommitteeReviewPage({ token }) {
                 <tr>{['Item', 'Description', 'Quantity', 'Estimated unit price', 'Total'].map((heading) => <th key={heading} className="whitespace-nowrap px-4 py-3">{heading}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {review.requestedItems.map((item) => <tr key={item.itemName}>
+                {review.requestedItems.map((item, index) => <tr key={`${item.itemName}-${index}`}>
                   <td className="px-4 py-3 font-bold">{item.itemName}</td>
                   <td className="max-w-[280px] px-4 py-3 text-muted">{item.description || '—'}</td>
                   <td className="whitespace-nowrap px-4 py-3">{item.quantity} {item.unit || 'unit'}</td>
@@ -205,7 +205,7 @@ export default function CommitteeReviewPage({ token }) {
                       <tr>{['Item', 'Quantity', 'Unit price', 'Total'].map((heading) => <th key={heading} className="px-3 py-2">{heading}</th>)}</tr>
                     </thead>
                     <tbody className="divide-y">
-                      {response.items.map((item) => <tr key={item.itemName}>
+                      {response.items.map((item, index) => <tr key={`${item.itemName}-${index}`}>
                         <td className="px-3 py-2 font-bold">{item.itemName}{item.comment && <div className="text-[10px] font-normal text-muted">Comment: {item.comment}</div>}</td>
                         <td className="px-3 py-2">{item.quantity} {item.unit || 'unit'}</td>
                         <td className="px-3 py-2">{currency(item.unitPrice)}</td>
