@@ -66,8 +66,8 @@ export default function StockKeeperNotifications({ notifications = [], portalApi
     <PageCard title="Notifications" description={unread ? `${unread} unread` : 'You are all caught up.'}
       action={<PortalBadge tone={unread ? 'amber' : 'emerald'}><Bell size={11} />{unread} unread</PortalBadge>}>
       <div className="flex items-center gap-2 border-b border-subtle bg-white px-5 py-3">
-        <Filter size={13} className="text-muted" />
-        <label className="text-[10px] font-bold uppercase text-muted" htmlFor="stock-notification-type">Type</label>
+        <Filter size={13} className="text-black" />
+        <label className="text-[10px] font-bold uppercase text-black" htmlFor="stock-notification-type">Type</label>
         <select id="stock-notification-type" value={type} onChange={(event) => setType(event.target.value)}
           className="rounded-lg border border-brand bg-white px-2 py-1.5 text-xs">
           {TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -83,11 +83,11 @@ export default function StockKeeperNotifications({ notifications = [], portalApi
                 <span className="text-xs font-bold">{notification.title}</span>
                 <PortalBadge tone="slate">{TYPES.find(([value]) => value === notification.category)?.[1] || 'System'}</PortalBadge>
               </div>
-              <p className="mt-1 text-xs leading-5 text-muted">{notification.body}</p>
-              <p className="mt-1 text-[10px] text-muted">{dateTimeLabel(notification.createdAt)}</p>
+              <p className="mt-1 text-xs leading-5 text-black">{notification.body}</p>
+              <p className="mt-1 text-[10px] text-black">{dateTimeLabel(notification.createdAt)}</p>
             </button>
             {!notification.isRead && <button type="button" disabled={busy} onClick={() => markRead(notification)}
-              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-black disabled:opacity-50">
+              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:text-black disabled:opacity-50">
               <Check size={12} />Mark read
             </button>}
           </div>;

@@ -24,11 +24,11 @@ function firstName(name) {
 
 function InfoCard({ icon: Icon, label, value, testId }) {
   return <div data-testid={testId} className="flex min-w-0 items-center gap-3 rounded-xl border border-brand bg-white px-3.5 py-2.5">
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-brand bg-white text-black/60">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-brand bg-white text-black">
       <Icon size={16} strokeWidth={1.8} />
     </span>
     <span className="min-w-0">
-      <span className="block text-[9px] font-bold uppercase leading-3 tracking-[.1em] text-muted">{label}</span>
+      <span className="block text-[9px] font-bold uppercase leading-3 tracking-[.1em] text-black">{label}</span>
       <span className="mt-0.5 block truncate text-xs font-extrabold leading-4">{value}</span>
     </span>
   </div>;
@@ -43,14 +43,14 @@ function WorkspaceCard({ label, value, note, icon: Icon, onClick, testId }) {
     className="group flex min-h-[158px] w-full flex-col justify-between rounded-2xl border border-brand bg-white p-5 text-left shadow-[0_1px_2px_rgba(0,0,0,.03)] transition duration-200 hover:border-accent-border hover:bg-accent-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
   >
     <div className="flex items-start justify-between gap-3">
-      <span className="pt-0.5 text-[11px] font-extrabold uppercase leading-4 tracking-[.08em] text-black/55">{label}</span>
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-brand bg-white text-black/60 transition group-hover:border-accent-border group-hover:text-accent-text">
+      <span className="pt-0.5 text-[11px] font-extrabold uppercase leading-4 tracking-[.08em] text-black">{label}</span>
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-brand bg-white text-black transition group-hover:border-accent-border group-hover:text-black">
         <Icon size={16} strokeWidth={1.8} />
       </span>
     </div>
     <div className="mt-6">
       <span data-testid={`${testId}-value`} className="display-font block text-[30px] font-extrabold leading-none tracking-[-0.03em]">{value}</span>
-      <span className="mt-2 block text-[11px] leading-4 text-muted">{note}</span>
+      <span className="mt-2 block text-[11px] leading-4 text-black">{note}</span>
     </div>
   </button>;
 }
@@ -153,9 +153,9 @@ export default function RequesterDashboard({
     <section className="overflow-hidden rounded-2xl border border-brand bg-white shadow-[0_1px_2px_rgba(0,0,0,.03)]">
       <div className="flex flex-col gap-6 p-6 sm:p-8 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <p data-testid="dashboard-date" className="text-[11px] font-semibold text-muted">{formatLongDate()}</p>
+          <p data-testid="dashboard-date" className="text-[11px] font-semibold text-black">{formatLongDate()}</p>
           <h1 data-testid="dashboard-title" className="display-font mt-2 text-[26px] font-extrabold leading-tight tracking-[-0.02em] sm:text-[32px]">Requester Dashboard</h1>
-          <p data-testid="dashboard-context" className="mt-2 text-xs text-muted">{roleName} · {departmentName}</p>
+          <p data-testid="dashboard-context" className="mt-2 text-xs text-black">{roleName} · {departmentName}</p>
         </div>
         <div className="grid gap-2.5 sm:grid-cols-2 lg:w-auto">
           <InfoCard icon={Building2} label="Assigned department" value={departmentName} testId="user-department" />
@@ -164,7 +164,7 @@ export default function RequesterDashboard({
       </div>
       <div className="border-t border-subtle px-6 py-6 sm:px-8">
         <h2 data-testid="welcome-title" className="display-font text-xl font-extrabold tracking-tight sm:text-2xl">Welcome, {firstName(user?.name)}.</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-black/65">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-black">
           Create purchase requests, follow their progress and stay connected with your Department Supervisor.
         </p>
       </div>
@@ -173,7 +173,7 @@ export default function RequesterDashboard({
     <section aria-labelledby="workspace-heading">
       <div className="mb-4">
         <h2 id="workspace-heading" className="display-font text-lg font-extrabold tracking-tight">My workspace</h2>
-        <p className="mt-1 text-xs text-muted">Click a card to open the related page</p>
+        <p className="mt-1 text-xs text-black">Click a card to open the related page</p>
       </div>
       <div data-testid="workspace-grid" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => <WorkspaceCard
@@ -187,7 +187,7 @@ export default function RequesterDashboard({
     <section aria-labelledby="quick-actions-heading" className="rounded-2xl border border-brand bg-white p-5">
       <div className="mb-4">
         <h2 id="quick-actions-heading" className="display-font text-sm font-extrabold">Quick actions</h2>
-        <p className="mt-1 text-[11px] text-muted">Start a request or continue where you left off.</p>
+        <p className="mt-1 text-[11px] text-black">Start a request or continue where you left off.</p>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <QuickAction
@@ -217,7 +217,7 @@ export default function RequesterDashboard({
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-subtle px-5 py-5">
           <div>
             <h2 className="display-font text-sm font-extrabold">My recent requests</h2>
-            <p className="mt-1 text-xs text-muted">Latest activity across your workspace.</p>
+            <p className="mt-1 text-xs text-black">Latest activity across your workspace.</p>
           </div>
           <TextLink onClick={() => onNavigate(REQUESTS_PAGE)}>View all <ArrowRight size={13} /></TextLink>
         </header>
@@ -228,7 +228,7 @@ export default function RequesterDashboard({
             description="Requests will appear here as soon as they are created."
           /> : <TableScroll minWidth={620} label="My recent requests">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-subtle bg-white text-[10px] uppercase tracking-[.06em] text-muted">
+              <thead className="border-b border-subtle bg-white text-[10px] uppercase tracking-[.06em] text-black">
                 <tr>
                   {['Reference', 'Title', 'Submitted', 'Cost', 'Status'].map((heading) =>
                     <th key={heading} className="whitespace-nowrap px-5 py-3 font-bold">{heading}</th>)}
@@ -275,8 +275,8 @@ export default function RequesterDashboard({
               <span aria-label="Unread" className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-reference ring-4 ring-reference/10" />
               <span className="min-w-0">
                 <span className="block text-xs font-extrabold">{notice.title}</span>
-                {notice.body && <span className="mt-1 line-clamp-2 block text-[11px] leading-4 text-muted">{notice.body}</span>}
-                <span className="mt-2 block text-[10px] text-muted">{dateTimeLabel(notice.createdAt)}</span>
+                {notice.body && <span className="mt-1 line-clamp-2 block text-[11px] leading-4 text-black">{notice.body}</span>}
+                <span className="mt-2 block text-[10px] text-black">{dateTimeLabel(notice.createdAt)}</span>
               </span>
             </span>
           </button>)}

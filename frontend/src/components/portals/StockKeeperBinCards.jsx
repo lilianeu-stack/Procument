@@ -1,23 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowLeft, ArrowUpFromLine, Download, FileText, Printer, Search, SlidersHorizontal
+  ArrowDownToLine, ArrowLeft, ArrowUpFromLine, FileText, Search, SlidersHorizontal
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import Modal from '../ui/Modal.jsx';
-import { downloadBinary, downloadText, filesToAttachments } from '../../utils/attachments.js';
+import ReportToolbar from '../ui/ReportToolbar.jsx';
+import { downloadBinary, filesToAttachments } from '../../utils/attachments.js';
 import { dateTimeLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
 import { AttachmentList, AttachmentPicker } from './PortalUi.jsx';
 import {
   EmptyState, ErrorState, LoadingState, PageHeader, PortalBadge, TableScroll,
   primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 
+const ITEMS_REPORT = {
+  exportKey: 'stockkeeperItems',
+  title: 'Stock Register',
+  fields: [{ key: 'updated', label: 'Last updated' }],
+  defaultField: 'updated'
+};
+const BIN_CARD_REPORT = {
+  exportKey: 'stockkeeperBinCard',
+  title: 'Stock Bin Card',
+  fields: [
+    { key: 'movement', label: 'Transaction date' },
+    { key: 'created', label: 'Date recorded' }
+  ],
+  defaultField: 'movement'
+};
+
 function transactionKey() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function csvCell(value) {
-  return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
 
 function OperationForm({ operation, items, issueRequests, selectedItemId, preferredRequestId, onClose, onSubmit }) {
@@ -135,10 +149,10 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
       </label>}
 
       {operation === 'out' && selectedIssue && <div className="grid gap-2 rounded-lg border border-brand bg-white p-3 text-xs sm:grid-cols-2">
-        <p><span className="text-muted">Requester:</span> <strong>{selectedIssue.requester}</strong></p>
-        <p><span className="text-muted">Department:</span> <strong>{selectedIssue.department || '—'}</strong></p>
-        <p><span className="text-muted">Request reference:</span> <strong>{selectedIssue.reference}</strong></p>
-        <p><span className="text-muted">Available:</span> <strong>{selectedIssue.availableBalance} {selectedIssue.unit}</strong></p>
+        <p><span className="text-black">Requester:</span> <strong>{selectedIssue.requester}</strong></p>
+        <p><span className="text-black">Department:</span> <strong>{selectedIssue.department || '—'}</strong></p>
+        <p><span className="text-black">Request reference:</span> <strong>{selectedIssue.reference}</strong></p>
+        <p><span className="text-black">Available:</span> <strong>{selectedIssue.availableBalance} {selectedIssue.unit}</strong></p>
         {selectedIssue.availableBalance < selectedIssue.remainingQuantity && <p className="font-semibold text-black sm:col-span-2">
           Shortage: {selectedIssue.remainingQuantity - selectedIssue.availableBalance} {selectedIssue.unit} of the approved quantity cannot currently be issued.
         </p>}
@@ -159,13 +173,13 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
           <input required type="date" value={form.date} onChange={(event) => update('date', event.target.value)} className="field" />
         </label>
       </div>
-      <label className="block text-xs font-bold">Reference number <span className="font-normal text-muted">(optional; generated if blank)</span>
+      <label className="block text-xs font-bold">Reference number <span className="font-normal text-black">(optional; generated if blank)</span>
         <input value={form.referenceNo} onChange={(event) => update('referenceNo', event.target.value)} maxLength="40" className="field" />
       </label>
       {operation === 'in' && <label className="block text-xs font-bold">Source / supplier
         <input required value={form.source} onChange={(event) => update('source', event.target.value)} maxLength="180" className="field" />
       </label>}
-      {operation === 'out' && <label className="block text-xs font-bold">Received by <span className="font-normal text-muted">(optional)</span>
+      {operation === 'out' && <label className="block text-xs font-bold">Received by <span className="font-normal text-black">(optional)</span>
         <input value={form.receivedBy} onChange={(event) => update('receivedBy', event.target.value)} maxLength="150" className="field" />
       </label>}
       {operation === 'adjustment' && <label className="block text-xs font-bold">Reason for adjustment
@@ -176,7 +190,7 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
         <textarea rows="2" value={form.description} onChange={(event) => update('description', event.target.value)} className="field h-auto py-2" />
       </label>}
       {operation === 'in' && <div>
-        <p className="mb-2 text-xs font-bold">Supporting document <span className="font-normal text-muted">(optional)</span></p>
+        <p className="mb-2 text-xs font-bold">Supporting document <span className="font-normal text-black">(optional)</span></p>
         <AttachmentPicker files={files} onChange={(next) => { setFiles(next); setKey(transactionKey()); }} />
       </div>}
       <ErrorState message={error} />
@@ -189,28 +203,27 @@ function OperationForm({ operation, items, issueRequests, selectedItemId, prefer
   </Modal>;
 }
 
-function BinCardDetails({ card, onDownload, onError, actions }) {
+function BinCardDetails({ card, onDownload, onError, actions, user = {} }) {
   const { item, movements, openingBalance } = card;
-  const exportCsv = () => {
-    const rows = [
-      ['Date', 'Reference No.', 'Description', 'Stock In', 'Stock Out', 'Balance', 'Updated By'],
-      ...[...movements].reverse().map((movement) => [
-        movement.movementAt, movement.referenceNo || movement.source, movement.description || movement.source,
-        movement.direction === 'In' ? movement.quantity : '',
-        movement.direction === 'Out' ? movement.quantity : '',
-        movement.balance, movement.updatedBy
-      ])
-    ];
-    downloadText(rows.map((row) => row.map(csvCell).join(',')).join('\r\n'), `${item.sku}-bin-card.csv`);
-  };
+  const [dateFilter, setDateFilter] = useState({});
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
 
   return <>
+    <ReportToolbar
+      report={BIN_CARD_REPORT}
+      dateFilter={dateFilter}
+      onDateFilterChange={setDateFilter}
+      params={{ itemId: item.id }}
+      reference={item.sku}
+      user={reportUser}
+      department={user.department || ''}
+      scope="bin card transactions"
+      printLabel="Print Bin Card"
+    />
     <PageHeader eyebrow="Stock ledger" title={item.name} description={`${item.sku} · ${item.category} · ${item.department || 'General storage'}`}
-      actions={<>
-        <button type="button" onClick={() => window.print()} className={secondaryButtonClass()}><Printer size={14} />Print Bin Card</button>
-        <button type="button" onClick={exportCsv} className={secondaryButtonClass()}><Download size={14} />Download CSV</button>
-        {actions}
-      </>} />
+      actions={actions} />
     <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {[
         ['Opening Balance', `${openingBalance} ${item.unit}`],
@@ -218,13 +231,13 @@ function BinCardDetails({ card, onDownload, onError, actions }) {
         ['Minimum Stock Level', `${item.minimumStock} ${item.unit}`],
         ['Last Updated', dateTimeLabel(item.updatedAt)]
       ].map(([label, value]) => <div key={label} className="rounded-xl border border-brand bg-white p-4">
-        <p className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</p><p className="mt-2 text-sm font-extrabold">{value}</p>
+        <p className="text-[10px] font-bold uppercase tracking-wide text-black">{label}</p><p className="mt-2 text-sm font-extrabold">{value}</p>
       </div>)}
     </div>
     <PageCard title="Bin Card Transactions" description="Historical transactions are append-only and cannot be silently edited or deleted.">
       {movements.length ? <TableScroll minWidth={900}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-white text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-black">
             <tr>{['Date', 'Reference No.', 'Description', 'Stock In', 'Stock Out', 'Balance', 'Updated By', 'Documents'].map((column) =>
               <th key={column} className="whitespace-nowrap px-4 py-3 font-bold">{column}</th>)}</tr>
           </thead>
@@ -233,8 +246,8 @@ function BinCardDetails({ card, onDownload, onError, actions }) {
               <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(movement.movementAt)}</td>
               <td className="px-4 py-3 font-semibold">{movement.referenceNo || movement.source}</td>
               <td className="max-w-64 px-4 py-3">{movement.description || movement.source}
-                {movement.requester && <div className="mt-0.5 text-[10px] text-muted">{movement.requester} · {movement.department}</div>}
-                {movement.receivedBy && <div className="mt-0.5 text-[10px] text-muted">Received by {movement.receivedBy}</div>}
+                {movement.requester && <div className="mt-0.5 text-[10px] text-black">{movement.requester} · {movement.department}</div>}
+                {movement.receivedBy && <div className="mt-0.5 text-[10px] text-black">Received by {movement.receivedBy}</div>}
               </td>
               <td className="px-4 py-3 font-semibold text-black">{movement.direction === 'In' ? movement.quantity : '—'}</td>
               <td className="px-4 py-3 font-semibold text-black">{movement.direction === 'Out' ? movement.quantity : '—'}</td>
@@ -254,7 +267,7 @@ function BinCardDetails({ card, onDownload, onError, actions }) {
 }
 
 export default function StockKeeperBinCards({
-  portalApi, initialItems = [], initialIssueRequests = [], query = {}, navigate
+  portalApi, initialItems = [], initialIssueRequests = [], query = {}, navigate, user = {}
 }) {
   const [items, setItems] = useState(initialItems);
   const [issueRequests, setIssueRequests] = useState(initialIssueRequests);
@@ -265,7 +278,11 @@ export default function StockKeeperBinCards({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [listDateFilter, setListDateFilter] = useState({});
   const autoOpenedRequest = useRef('');
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
 
   useEffect(() => { setItems(initialItems); }, [initialItems]);
   useEffect(() => { setIssueRequests(initialIssueRequests); }, [initialIssueRequests]);
@@ -351,33 +368,42 @@ export default function StockKeeperBinCards({
       <>
         {notice && <div role="status" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">{notice}</div>}
         <ErrorState message={error} onRetry={() => portalApi.getBinCard(selectedId).then(setCard).catch((exception) => setError(exception.message))} />
-        <BinCardDetails card={card} onDownload={downloadDocument} onError={setError} actions={actions} />
+        <BinCardDetails card={card} onDownload={downloadDocument} onError={setError} actions={actions} user={user} />
       </> : error ? <ErrorState message={error} onRetry={() => portalApi.getBinCard(selectedId).then(setCard).catch((exception) => setError(exception.message))} /> :
       <EmptyState title="Bin Card unavailable" description="The item may have been removed or is no longer available." /> :
       <>
         <PageHeader eyebrow="Inventory ledger" title="Bin Card"
           description="Review item balances and append stock-in, authorized stock-out, or traceable adjustment transactions."
           actions={actions} />
+        <ReportToolbar
+          report={ITEMS_REPORT}
+          dateFilter={listDateFilter}
+          onDateFilterChange={setListDateFilter}
+          params={{ search }}
+          user={reportUser}
+          scope="stock register items"
+          printLabel="Print stock register"
+        />
         {notice && <div role="status" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs text-black">{notice}</div>}
         <ErrorState message={error} onRetry={refresh} />
         <PageCard title="Inventory Items" description={`${items.length} item(s)`}>
           <div className="flex flex-wrap items-end gap-3 border-b border-subtle bg-white px-4 py-4">
-            <label className="block w-full sm:max-w-sm"><span className="text-[10px] font-bold uppercase tracking-wide text-muted">Search Bin Cards</span>
-              <span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <label className="block w-full sm:max-w-sm"><span className="text-[10px] font-bold uppercase tracking-wide text-black">Search Bin Cards</span>
+              <span className="relative block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-black" />
                 <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Item, code, category or location…" className="field pl-9" /></span>
             </label>
-            <span className="text-[10px] text-muted">Select an item to open its transaction ledger.</span>
+            <span className="text-[10px] text-black">Select an item to open its transaction ledger.</span>
           </div>
           {filteredItems.length ? <TableScroll minWidth={760}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-white text-[10px] uppercase text-muted"><tr>
+              <thead className="bg-white text-[10px] uppercase text-black"><tr>
                 {['Item', 'Category', 'Location', 'Current Balance', 'Minimum Level', 'Last Updated', 'Status'].map((column) =>
                   <th key={column} className="whitespace-nowrap px-4 py-3 font-bold">{column}</th>)}
               </tr></thead>
               <tbody className="divide-y divide-subtle">
                 {filteredItems.map((item) => <tr key={item.id} className="hover:bg-white">
                   <td className="px-4 py-3"><button type="button" onClick={() => { setSelectedId(String(item.id)); navigate('Bin Card', { item: item.id }); }}
-                    className="text-left font-bold text-black hover:underline">{item.name}<span className="block text-[10px] font-normal text-muted">{item.sku}</span></button></td>
+                    className="text-left font-bold text-black hover:underline">{item.name}<span className="block text-[10px] font-normal text-black">{item.sku}</span></button></td>
                   <td className="px-4 py-3">{item.category}</td><td className="px-4 py-3">{item.department || 'General storage'}</td>
                   <td className="px-4 py-3 font-extrabold">{item.balance} {item.unit}</td><td className="px-4 py-3">{item.minimumStock} {item.unit}</td>
                   <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(item.updatedAt)}</td>
@@ -387,7 +413,7 @@ export default function StockKeeperBinCards({
                 </tr>)}
               </tbody>
             </table>
-          </TableScroll> : <EmptyState title="No Bin Cards found" description="Try a different search or record a new inventory item through the Administrator." action={<FileText size={16} className="mx-auto text-muted" />} />}
+          </TableScroll> : <EmptyState title="No Bin Cards found" description="Try a different search or record a new inventory item through the Administrator." action={<FileText size={16} className="mx-auto text-black" />} />}
         </PageCard>
       </>}
     {operation && <OperationForm operation={operation} items={items} issueRequests={issueRequests}

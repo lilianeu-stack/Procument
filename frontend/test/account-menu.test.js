@@ -18,6 +18,8 @@ const portalSidebars = {
 const supplierRfq = read('../src/components/portals/SupplierRfqPage.jsx');
 const supplierPricing = read('../src/components/portals/SupplierPricingPage.jsx');
 const purchaseOrderApproval = read('../src/components/portals/PurchaseOrderApprovalPage.jsx');
+const userAvatar = read('../src/components/ui/UserAvatar.jsx');
+const portalMessages = read('../src/components/portals/PortalMessages.jsx');
 const app = read('../src/App.jsx');
 
 test('both authenticated shells reuse one account menu component', () => {
@@ -123,6 +125,15 @@ test('the shared dropdown uses professional neutral styling with green hover', (
   for (const token of ['bg-white', 'border border-strong', 'shadow-dashboard', 'rounded-xl', 'hover:bg-accent-tint', 'focus-visible:ring', 'z-50']) {
     assert.ok(accountMenu.includes(token), `missing ${token}`);
   }
+});
+
+test('avatars only request a photo when the record actually has one', () => {
+  assert.match(userAvatar, /const photoMarker = photo === undefined \? user\?\.profilePhoto : photo/);
+  assert.match(userAvatar, /if \(!id \|\| !hasPhoto\)/);
+  assert.match(userAvatar, /apiBlob\(`\/profile\/photo\/\$\{id\}\?v=\$\{version\}`/);
+  assert.match(portalMessages, /photo=\{conversation\.photo\}/);
+  assert.match(portalMessages, /photo=\{message\.senderPhoto\}/);
+  assert.match(portalMessages, /photo=\{announcement\.senderPhoto\}/);
 });
 
 test('logout clears the token before restoring the unauthenticated view', () => {

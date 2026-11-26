@@ -58,9 +58,9 @@ export default function AccountMenu({ user, onProfile, onLogout }) {
       <UserAvatar user={user} size="h-8 w-8" textSize="text-[10px]" className="border border-brand" />
       <span className="hidden min-w-0 text-left sm:block">
         <span className="block max-w-[140px] truncate text-[11px] font-bold leading-tight">{name}</span>
-        <span className="block max-w-[140px] truncate text-[9px] uppercase tracking-wide text-muted">{role}</span>
+        <span className="block max-w-[140px] truncate text-[9px] uppercase tracking-wide text-black">{role}</span>
       </span>
-      <ChevronDown size={14} className={`shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+      <ChevronDown size={14} className={`shrink-0 text-black transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
     </button>
 
     {open && <div id={menuId} role="menu" aria-label="Account profile menu"
@@ -70,21 +70,21 @@ export default function AccountMenu({ user, onProfile, onLogout }) {
           <UserAvatar user={user} size="h-11 w-11" textSize="text-xs" className="border border-brand" />
           <div className="min-w-0 pt-0.5">
             <div className="truncate text-[13px] font-bold leading-tight" title={name}>{name}</div>
-            {email && <div className="mt-1 truncate text-[11px] text-muted" title={email}>{email}</div>}
-            <div className="mt-1.5 truncate text-[10px] font-bold uppercase tracking-wide text-muted">{role}</div>
-            {department && <div className="truncate text-[11px] text-muted" title={department}>{department}</div>}
+            {email && <div className="mt-1 truncate text-[11px] text-black" title={email}>{email}</div>}
+            <div className="mt-1.5 truncate text-[10px] font-bold uppercase tracking-wide text-black">{role}</div>
+            {department && <div className="truncate text-[11px] text-black" title={department}>{department}</div>}
           </div>
         </div>
       </div>
       <div className="p-1.5">
         <button type="button" role="menuitem" onClick={() => { setOpen(false); onProfile(); }}
-          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">
           <UserRound size={15} aria-hidden="true" />
           <span>My Profile</span>
         </button>
         <div className="my-1 border-t border-subtle" aria-hidden="true" />
         <button type="button" role="menuitem" disabled={signingOut} onClick={() => void handleLogout()}
-          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:opacity-60">
+          className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:opacity-60">
           <LogOut size={15} aria-hidden="true" />
           <span>{signingOut ? 'Signing out…' : 'Logout'}</span>
         </button>

@@ -4,7 +4,7 @@ import { PROFILE_PAGE } from '../../utils/access.js';
 import { formatDate } from '../../utils/format.js';
 
 export default function PortalLayout({
-  sidebar: Sidebar, portal, user, page, notifications,
+  sidebar: Sidebar, portal, user, page, counts = {}, notifications,
   mobileNav, notificationsOpen, refreshing, hidePageHeading = false,
   onNavigate, onNotification, onToggleNotifications,
   onOpenMenu, onCloseMenu, onLogout, children
@@ -14,6 +14,7 @@ export default function PortalLayout({
   return <div className="min-h-screen bg-canvas">
     <Sidebar
       page={page}
+      counts={counts}
       open={mobileNav}
       collapsed={collapsed}
       onNavigate={onNavigate}

@@ -5,12 +5,12 @@
   min-height: 100svh;
   grid-template-columns: minmax(0, 1fr);
   background: var(--pims-surface);
-  color: var(--pims-ink);
+  color: var(--text-primary);
 }
 
 .login-visual {
   display: none;
-  color: var(--pims-ink);
+  color: var(--text-primary);
 }
 
 .login-panel {
@@ -53,10 +53,9 @@
 
 .login-intro > p:last-child {
   margin: 12px 0 0;
-  color: var(--pims-ink);
+  color: var(--text-primary);
   font-size: 14px;
   line-height: 1.6;
-  opacity: 0.72;
 }
 
 .login-form {
@@ -82,8 +81,7 @@
   position: absolute;
   top: 50%;
   left: 15px;
-  color: var(--pims-ink);
-  opacity: 0.58;
+  color: var(--text-primary);
   pointer-events: none;
   transform: translateY(-50%);
 }
@@ -95,18 +93,18 @@
   border-radius: 10px;
   outline: none;
   background: var(--pims-surface);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   font-size: 14px;
   padding: 0 15px 0 44px;
 }
 
 .login-input::placeholder {
-  color: var(--pims-ink);
-  opacity: 0.48;
+  color: var(--text-primary);
+  opacity: 1;
 }
 
 .login-input:focus {
-  border-color: var(--pims-ink);
+  border-color: var(--text-primary);
   box-shadow: 0 0 0 3px var(--pims-hover);
 }
 
@@ -125,8 +123,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--pims-ink);
-  opacity: 0.72;
+  color: var(--text-primary);
   transform: translateY(-50%);
 }
 
@@ -137,7 +134,7 @@
 
 .login-password-toggle:focus-visible,
 .login-submit:focus-visible {
-  outline: 2px solid var(--pims-ink);
+  outline: 2px solid var(--text-primary);
   outline-offset: 3px;
 }
 
@@ -157,22 +154,23 @@
   justify-content: center;
   gap: 10px;
   margin-top: 24px;
-  border: 1px solid var(--pims-ink);
+  border: 1px solid var(--text-primary);
   border-radius: 10px;
   background: var(--pims-surface);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   font-size: 13px;
   font-weight: 800;
 }
 
 .login-submit:hover:not(:disabled) {
   background: var(--pims-reference);
-  color: var(--pims-ink);
+  color: var(--text-primary);
 }
 
 .login-submit:disabled {
   cursor: wait;
-  opacity: 0.58;
+  background: var(--pims-disabled-surface);
+  border-color: var(--pims-border);
 }
 
 .login-security-note {
@@ -182,7 +180,6 @@
   gap: 7px;
   margin: 32px 0 0;
   font-size: 11px;
-  opacity: 0.68;
 }
 
 .login-visual-heading {
@@ -205,7 +202,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--pims-ink);
+  background: var(--text-primary);
 }
 
 .login-visual-heading h1 {
@@ -222,7 +219,6 @@
   margin: 20px 0 0;
   font-size: 15px;
   line-height: 1.7;
-  opacity: 0.72;
 }
 
 .login-illustration {
@@ -250,7 +246,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--pims-ink);
+  background: var(--text-primary);
   content: '';
   transform: translateX(-50%);
 }
@@ -276,7 +272,7 @@
   border: 1px solid var(--pims-border-strong);
   border-radius: 15px;
   background: var(--pims-login-card);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   padding: 22px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.06);
   transform: translate(-50%, -50%);
@@ -314,7 +310,6 @@
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.12em;
-  opacity: 0.58;
 }
 
 .login-flow-heading strong {
@@ -342,7 +337,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--pims-ink);
+  background: var(--text-primary);
 }
 
 .login-activity {
@@ -373,7 +368,6 @@
   font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.1em;
-  opacity: 0.58;
 }
 
 .login-activity-copy strong {
@@ -393,7 +387,7 @@
   display: block;
   width: 6px;
   border-radius: 3px 3px 0 0;
-  background: var(--pims-ink);
+  background: var(--text-primary);
   transform-origin: center bottom;
   animation: login-bar-motion 2.4s ease-in-out infinite alternate;
 }
@@ -413,7 +407,7 @@
   border: 1px solid var(--pims-border-strong);
   border-radius: 12px;
   background: var(--pims-login-card);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   padding: 12px 14px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
   will-change: transform;
@@ -443,7 +437,6 @@
 
 .login-float small {
   font-size: 9px;
-  opacity: 0.62;
 }
 
 .login-float-check {
@@ -456,7 +449,6 @@
   gap: 8px;
   margin: 0;
   font-size: 11px;
-  opacity: 0.65;
 }
 
 @keyframes login-orbit-spin {

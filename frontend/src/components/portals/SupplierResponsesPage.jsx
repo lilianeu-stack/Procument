@@ -141,7 +141,7 @@ export default function SupplierResponsesPage({
     >
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
       {notice && <div className="px-4 pb-4"><p role="status" className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black"><CheckCircle2 size={14} />{notice}</p></div>}
-      {loading && <div className="flex items-center gap-2 px-5 py-8 text-xs text-muted"><Loader2 size={14} className="animate-spin" />Loading supplier responses…</div>}
+      {loading && <div className="flex items-center gap-2 px-5 py-8 text-xs text-black"><Loader2 size={14} className="animate-spin" />Loading supplier responses…</div>}
       {!loading && !error && !selectedOrder && <EmptyState>Create and send a purchase order to suppliers to see responses here.</EmptyState>}
       {!loading && !error && selectedOrder && !requests.length && !responses.length && <EmptyState>
         No pricing requests have been sent for {selectedOrder.reference}. Use “Send to Suppliers” on the purchase order to invite registered suppliers.
@@ -155,7 +155,7 @@ export default function SupplierResponsesPage({
             <header className="flex flex-wrap items-start justify-between gap-3 bg-white px-4 py-3">
               <div>
                 <h4 className="text-sm font-extrabold">{requestRow.reference || `Pricing request ${requestRow.id}`}</h4>
-                <p className="mt-1 text-[11px] text-muted">
+                <p className="mt-1 text-[11px] text-black">
                   PO {requestRow.poReference || selectedOrder?.reference || '—'}
                   {requestRow.rfqReference ? ` · RFQ ${requestRow.rfqReference}` : ''}
                   {requestRow.requisitionReference ? ` · Request ${requestRow.requisitionReference}` : ''}
@@ -174,10 +174,10 @@ export default function SupplierResponsesPage({
               </div>
             </header>
             <dl className="grid gap-3 border-b border-subtle px-4 py-3 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
-              <div><dt className="text-[10px] uppercase text-muted">Currency</dt><dd className="font-bold">{requestRow.currency || 'RWF'}</dd></div>
-              <div><dt className="text-[10px] uppercase text-muted">Submission deadline</dt><dd className="font-bold">{dateLabel(requestRow.submissionDeadline)}</dd></div>
-              <div><dt className="text-[10px] uppercase text-muted">Created</dt><dd className="font-bold">{dateTimeLabel(requestRow.createdAt)}</dd></div>
-              <div><dt className="text-[10px] uppercase text-muted">Awarded</dt>
+              <div><dt className="text-[10px] uppercase text-black">Currency</dt><dd className="font-bold">{requestRow.currency || 'RWF'}</dd></div>
+              <div><dt className="text-[10px] uppercase text-black">Submission deadline</dt><dd className="font-bold">{dateLabel(requestRow.submissionDeadline)}</dd></div>
+              <div><dt className="text-[10px] uppercase text-black">Created</dt><dd className="font-bold">{dateTimeLabel(requestRow.createdAt)}</dd></div>
+              <div><dt className="text-[10px] uppercase text-black">Awarded</dt>
                 <dd className="font-bold">{requestRow.awardedAt ? `${dateLabel(requestRow.awardedAt)}${requestRow.awardComment ? ` · ${requestRow.awardComment}` : ''}` : '—'}</dd>
               </div>
               {requestRow.message && <div className="sm:col-span-4 rounded-lg border border-brand bg-white p-3 text-xs italic text-black">“{requestRow.message}”</div>}
@@ -186,7 +186,7 @@ export default function SupplierResponsesPage({
             {!rowResponses.length ? <EmptyState>No supplier responses have arrived for this request yet.</EmptyState>
               : <div className="overflow-x-auto">
                 <table className="w-full min-w-[1080px] text-left text-xs">
-                  <thead className="bg-white text-[10px] uppercase text-muted">
+                  <thead className="bg-white text-[10px] uppercase text-black">
                     <tr>{['Supplier', 'Email / delivery', 'Status', 'Submitted', 'Subtotal', 'VAT', 'Other', 'Final amount', 'Validity', 'Lead time', 'Actions'].map((heading) =>
                       <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
                   </thead>
@@ -196,14 +196,14 @@ export default function SupplierResponsesPage({
                       return <tr key={response.id} className="align-top">
                         <td className="px-3 py-3">
                           <div className="font-bold">{response.supplierName || `Supplier ${response.supplierId}`}</div>
-                          {response.supplierContact && <div className="text-[10px] text-muted">{response.supplierContact}</div>}
+                          {response.supplierContact && <div className="text-[10px] text-black">{response.supplierContact}</div>}
                           {response.awarded && <span className="mt-1 inline-block rounded-full bg-white px-2 py-0.5 text-[10px] font-extrabold text-black">Awarded</span>}
                         </td>
                         <td className="max-w-[220px] px-3 py-3">
                           <div className="break-all">{response.supplierEmail || '—'}</div>
                           <div className="mt-1"><StatusBadge value={response.emailStatus || 'Pending'} /></div>
                           {response.emailError && <div className="mt-1 flex items-start gap-1 text-[10px] text-black"><AlertCircle size={11} className="mt-0.5 shrink-0" />{response.emailError}</div>}
-                          {response.sentAt && <div className="mt-1 text-[10px] text-muted">Sent {dateTimeLabel(response.sentAt)}</div>}
+                          {response.sentAt && <div className="mt-1 text-[10px] text-black">Sent {dateTimeLabel(response.sentAt)}</div>}
                         </td>
                         <td className="px-3 py-3"><StatusBadge value={response.status || 'Draft'} /></td>
                         <td className="px-3 py-3">{response.submittedAt ? dateTimeLabel(response.submittedAt) : '—'}</td>
@@ -248,39 +248,39 @@ export default function SupplierResponsesPage({
           <DownloadButton type="supplierPricingResponse" id={quotation.id} format="pdf" label="Download PDF" />
         </div>
         <dl className="grid gap-3 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
-          <div><dt className="text-[10px] text-muted">Supplier email</dt><dd className="break-all font-bold">{quotation.supplierEmail || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Status</dt><dd><StatusBadge value={quotation.status || 'Draft'} /></dd></div>
-          <div><dt className="text-[10px] text-muted">Submitted</dt><dd className="font-bold">{dateTimeLabel(quotation.submittedAt)}</dd></div>
-          <div><dt className="text-[10px] text-muted">Email delivery</dt><dd className="font-bold">{quotation.emailStatus || '—'}{quotation.emailError ? ` · ${quotation.emailError}` : ''}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier email</dt><dd className="break-all font-bold">{quotation.supplierEmail || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Status</dt><dd><StatusBadge value={quotation.status || 'Draft'} /></dd></div>
+          <div><dt className="text-[10px] text-black">Submitted</dt><dd className="font-bold">{dateTimeLabel(quotation.submittedAt)}</dd></div>
+          <div><dt className="text-[10px] text-black">Email delivery</dt><dd className="font-bold">{quotation.emailStatus || '—'}{quotation.emailError ? ` · ${quotation.emailError}` : ''}</dd></div>
         </dl>
         <div className="overflow-x-auto rounded-lg border border-brand">
           <table className="w-full min-w-[640px] text-left text-xs">
-            <thead className="bg-white text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-black">
               <tr>{['Item No.', 'Item', 'Quantity', 'Unit', 'Unit price', 'Line total'].map((heading) =>
                 <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y">
               {(quotation.items || []).map((item, index) => <tr key={item.id || index}>
                 <td className="px-3 py-3 font-bold">{item.itemNo ?? index + 1}</td>
-                <td className="px-3 py-3">{item.itemName || '—'}<div className="text-[10px] text-muted">{item.description || ''}</div></td>
+                <td className="px-3 py-3">{item.itemName || '—'}<div className="text-[10px] text-black">{item.description || ''}</div></td>
                 <td className="px-3 py-3">{item.quantity ?? '—'}</td>
                 <td className="px-3 py-3">{item.unit || '—'}</td>
                 <td className="px-3 py-3">{money(item.unitPrice, quotation.currency || 'RWF')}</td>
                 <td className="px-3 py-3 font-bold">{money(item.lineTotal, quotation.currency || 'RWF')}</td>
               </tr>)}
-              {!quotation.items?.length && <tr><td colSpan={6} className="px-3 py-5 text-center text-muted">No priced lines were submitted.</td></tr>}
+              {!quotation.items?.length && <tr><td colSpan={6} className="px-3 py-5 text-center text-black">No priced lines were submitted.</td></tr>}
             </tbody>
           </table>
         </div>
         <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
-          <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="font-bold">{money(quotation.subtotal, quotation.currency || 'RWF')}</dd></div>
-          <div className="flex justify-between"><dt className="text-muted">VAT</dt><dd className="font-bold">{money(quotation.vatAmount, quotation.currency || 'RWF')}</dd></div>
-          <div className="flex justify-between"><dt className="text-muted">Other charges</dt><dd className="font-bold">{money(quotation.otherCharges, quotation.currency || 'RWF')}</dd></div>
+          <div className="flex justify-between"><dt className="text-black">Subtotal</dt><dd className="font-bold">{money(quotation.subtotal, quotation.currency || 'RWF')}</dd></div>
+          <div className="flex justify-between"><dt className="text-black">VAT</dt><dd className="font-bold">{money(quotation.vatAmount, quotation.currency || 'RWF')}</dd></div>
+          <div className="flex justify-between"><dt className="text-black">Other charges</dt><dd className="font-bold">{money(quotation.otherCharges, quotation.currency || 'RWF')}</dd></div>
           <div className="flex justify-between"><dt className="font-bold">Final amount</dt><dd className="font-extrabold text-black">{money(finalTotal(quotation), quotation.currency || 'RWF')}</dd></div>
-          <div><dt className="text-[10px] text-muted">Quotation validity</dt><dd className="font-bold">{quotation.quotationValidity || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Delivery lead time</dt><dd className="font-bold">{quotation.deliveryLeadTime || '—'}</dd></div>
-          {quotation.comments && <div className="sm:col-span-2"><dt className="text-[10px] text-muted">Pricing comments</dt><dd className="whitespace-pre-wrap">{quotation.comments}</dd></div>}
-          {quotation.technicalRemarks && <div className="sm:col-span-2"><dt className="text-[10px] text-muted">Technical / commercial remarks</dt><dd className="whitespace-pre-wrap">{quotation.technicalRemarks}</dd></div>}
+          <div><dt className="text-[10px] text-black">Quotation validity</dt><dd className="font-bold">{quotation.quotationValidity || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Delivery lead time</dt><dd className="font-bold">{quotation.deliveryLeadTime || '—'}</dd></div>
+          {quotation.comments && <div className="sm:col-span-2"><dt className="text-[10px] text-black">Pricing comments</dt><dd className="whitespace-pre-wrap">{quotation.comments}</dd></div>}
+          {quotation.technicalRemarks && <div className="sm:col-span-2"><dt className="text-[10px] text-black">Technical / commercial remarks</dt><dd className="whitespace-pre-wrap">{quotation.technicalRemarks}</dd></div>}
         </dl>
       </div>
     </Modal>}

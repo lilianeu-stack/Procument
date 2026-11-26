@@ -56,7 +56,7 @@ export default function StoreRequestsPage({ requests, items, user, onCreate, onD
             <col style={{ width: '12%' }} />
             <col style={{ width: '13%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr>{['Request', 'Requester', 'Items', 'Purpose', 'Status', 'Actions'].map((cell) =>
               <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
           </thead>
@@ -64,11 +64,11 @@ export default function StoreRequestsPage({ requests, items, user, onCreate, onD
             {requests.map((request) => <tr key={request.id} className="transition-colors hover:bg-hover">
               <td className="px-5 py-4 align-middle">
                 <span className="block break-words font-mono text-[11px] font-semibold">{request.reference || '—'}</span>
-                <span className="mt-1 block whitespace-nowrap text-[10px] text-muted">{dateLabel(request.createdAt)}</span>
+                <span className="mt-1 block whitespace-nowrap text-[10px] text-black">{dateLabel(request.createdAt)}</span>
               </td>
               <td className="break-words px-5 py-4 align-middle">
                 <span className="block font-semibold">{request.requester || '—'}</span>
-                <span className="mt-1 block text-[10px] text-muted">{request.department || '—'}</span>
+                <span className="mt-1 block text-[10px] text-black">{request.department || '—'}</span>
               </td>
               <td className="break-words px-5 py-4 align-middle leading-5">{request.items || '—'}</td>
               <td className="break-words px-5 py-4 align-middle leading-5">{request.purpose || '—'}</td>
@@ -80,7 +80,7 @@ export default function StoreRequestsPage({ requests, items, user, onCreate, onD
                     <button type="button" onClick={() => act(() => onDecision(request.id, 'Rejected'))} className={secondaryActionClass}>Reject</button>
                   </>}
                   {storekeeper && request.status === 'Approved' && <button type="button" onClick={() => act(() => onIssue(request.id))} className={approveButtonClass}>Issue</button>}
-                  {!(approver && request.status === 'Pending') && !(storekeeper && request.status === 'Approved') && <span className="text-[11px] text-muted">—</span>}
+                  {!(approver && request.status === 'Pending') && !(storekeeper && request.status === 'Approved') && <span className="text-[11px] text-black">—</span>}
                 </div>
               </td>
             </tr>)}
@@ -92,7 +92,7 @@ export default function StoreRequestsPage({ requests, items, user, onCreate, onD
             <ClipboardList size={22} strokeWidth={1.7} aria-hidden="true" />
           </span>
           <h3 className="mt-4 text-sm font-bold text-black">No store requests yet</h3>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+          <p className="mt-1 max-w-sm text-xs leading-5 text-black">
             Submitted requests will appear here for approval and stock issue.
           </p>
         </div>
