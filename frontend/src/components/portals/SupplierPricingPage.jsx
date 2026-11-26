@@ -26,17 +26,12 @@ function friendlyError(exception) {
 }
 
 function emptyForm() {
-  return {
-    items: {},
-    quotationValidity: '',
-    deliveryLeadTime: '',
-    otherCharges: '0',
-    comments: '',
-    technicalRemarks: ''
-  };
+  return { items: {}, comments: '' };
 }
 
 function formFromResponse(response, items) {
+  // Prices already recorded on the purchase order are the supplier's starting
+  // figures. They can be edited before the quotation is submitted.
   const quoted = new Map((response?.items || []).map((item) => [
     Number(item.purchaseOrderItemId ?? item.id), item
   ]));
@@ -46,15 +41,7 @@ function formFromResponse(response, items) {
     const price = quoted.get(id)?.unitPrice;
     prices[id] = price === undefined || price === null ? '' : String(price);
   });
-  return {
-    items: prices,
-    quotationValidity: response?.quotationValidity ?? '',
-    deliveryLeadTime: response?.deliveryLeadTime ?? '',
-    otherCharges: response?.otherCharges === undefined || response?.otherCharges === null
-      ? '0' : String(response.otherCharges),
-    comments: response?.comments || '',
-    technicalRemarks: response?.technicalRemarks || ''
-  };
+  return { items: prices, comments: response?.comments || '' };
 }
 
 function isLocked(request) {
@@ -103,14 +90,13 @@ export default function SupplierPricingPage({ token }) {
   const items = useMemo(() => (Array.isArray(request?.items) ? request.items : []), [request]);
   const currencyCode = request?.pricingRequest?.currency || 'RWF';
   const vatRate = Number(request?.pricingRequest?.vatRate ?? request?.response?.vatRate ?? configuredVatRate()) || 0;
-  const otherCharges = Number(form.otherCharges) || 0;
   const quotedItems = useMemo(() => items.map((item) => ({
     ...item,
     unitPrice: form.items[Number(item.purchaseOrderItemId ?? item.id)] ?? ''
   })), [items, form.items]);
   const totals = useMemo(
-    () => calculateSupplierTotals(quotedItems, vatRate, otherCharges),
-    [quotedItems, vatRate, otherCharges]
+    () => calculateSupplierTotals(quotedItems, vatRate, 0),
+    [quotedItems, vatRate]
   );
 
   function updatePrice(id, value) {
@@ -131,11 +117,7 @@ export default function SupplierPricingPage({ token }) {
         const blank = raw === '' || raw === undefined || raw === null;
         return { purchaseOrderItemId: id, unitPrice: blank && allowBlank ? '' : Number(raw) };
       }),
-      quotationValidity: String(form.quotationValidity || '').trim(),
-      deliveryLeadTime: String(form.deliveryLeadTime || '').trim(),
-      otherCharges: Number(form.otherCharges || 0),
-      comments: String(form.comments || '').trim(),
-      technicalRemarks: String(form.technicalRemarks || '').trim()
+      comments: String(form.comments || '').trim()
     };
   }
 
@@ -156,9 +138,6 @@ export default function SupplierPricingPage({ token }) {
     if (!Number.isFinite(totals.subtotal) || !Number.isFinite(totals.vatAmount)
       || !Number.isFinite(totals.total) || totals.total < 0) {
       return 'The quotation totals could not be calculated. Check the entered prices.';
-    }
-    if (!Number.isFinite(otherCharges) || otherCharges < 0) {
-      return 'Other charges must be a valid amount of zero or more.';
     }
     return '';
   }
@@ -257,7 +236,6 @@ export default function SupplierPricingPage({ token }) {
                 organization.phone, organization.email].filter(Boolean).map((value, index) =>
                 <dd key={`organization-${index}`} className="mt-0.5 text-xs text-muted">{value}</dd>)}
             </div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Currency</dt><dd className="mt-1 text-sm font-bold">{details.currency || currencyCode}</dd></div>
             {details.message && <div className="sm:col-span-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black"><dt className="text-[10px] font-extrabold uppercase tracking-wide text-black">Message from Procurement</dt><dd className="mt-1 whitespace-pre-wrap">{details.message}</dd></div>}
           </dl>
         </PageCard>
@@ -302,41 +280,12 @@ export default function SupplierPricingPage({ token }) {
           </div> : <EmptyState>No requested items were supplied with this link.</EmptyState>}
         </PageCard>
 
-        <PageCard title="Your Quotation" description="Your own prices only. These figures are never shared with other suppliers.">
-          <div className="space-y-5 p-5">
-            <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:max-w-md">
-              <div className="flex justify-between"><dt className="text-muted">Your subtotal</dt><dd className="font-bold">{money(totals.subtotal, currencyCode)}</dd></div>
-              <div className="flex justify-between"><dt className="text-muted">VAT ({vatRate}%)</dt><dd className="font-bold">{money(totals.vatAmount, currencyCode)}</dd></div>
-              {otherCharges > 0 && <div className="flex justify-between"><dt className="text-muted">Other charges</dt><dd className="font-bold">{money(totals.otherCharges, currencyCode)}</dd></div>}
-              <div className="flex justify-between border-t border-subtle pt-2"><dt className="font-bold">Your total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>
-            </dl>
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className="block text-xs font-bold">Currency
-                <input value={currencyCode} readOnly className="field mt-1" />
-              </label>
-              <label className="block text-xs font-bold">Other charges
-                <input type="number" min="0" step="0.01" inputMode="decimal" value={form.otherCharges}
-                  readOnly={locked} onChange={(event) => updateField('otherCharges', event.target.value)}
-                  className="field mt-1" />
-              </label>
-              <label className="block text-xs font-bold">Quotation validity period
-                <input value={form.quotationValidity} readOnly={locked} onChange={(event) => updateField('quotationValidity', event.target.value)}
-                  placeholder="e.g. 30 days" className="field mt-1" />
-              </label>
-              <label className="block text-xs font-bold">Delivery lead time
-                <input value={form.deliveryLeadTime} readOnly={locked} onChange={(event) => updateField('deliveryLeadTime', event.target.value)}
-                  placeholder="e.g. 14 days" className="field mt-1" />
-              </label>
-              <label className="block text-xs font-bold sm:col-span-2">Pricing comments
-                <textarea rows="3" value={form.comments} readOnly={locked} onChange={(event) => updateField('comments', event.target.value)}
-                  placeholder="Explain any assumptions behind your prices…" className="field mt-1 h-auto py-2" />
-              </label>
-              <label className="block text-xs font-bold sm:col-span-2">Technical / commercial remarks (optional)
-                <textarea rows="3" value={form.technicalRemarks} readOnly={locked} onChange={(event) => updateField('technicalRemarks', event.target.value)}
-                  className="field mt-1 h-auto py-2" />
-              </label>
-            </div>
+        <PageCard title="Comments" description="Add any notes for Procurement about your prices.">
+          <div className="space-y-4 p-5">
+            <label className="block text-xs font-bold">Comments
+              <textarea rows="3" value={form.comments} readOnly={locked} onChange={(event) => updateField('comments', event.target.value)}
+                placeholder="Add a note about your prices…" className="field mt-1 h-auto py-2" />
+            </label>
 
             {!locked && <div className="no-print flex flex-wrap gap-2 border-t border-subtle pt-4">
               <button type="button" onClick={saveDraft} disabled={busy}
@@ -359,7 +308,7 @@ export default function SupplierPricingPage({ token }) {
       <div className="space-y-4">
         <div className="flex items-start gap-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black">
           <AlertCircle size={18} className="mt-0.5 shrink-0 text-black" />
-          <p>Once submitted, your quotation becomes read-only. Make sure every unit price, your validity period and your delivery lead time are correct.</p>
+          <p>Once submitted, your quotation becomes read-only. Make sure every unit price is correct.</p>
         </div>
         <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
           <div><dt className="text-[10px] text-muted">Supplier total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>

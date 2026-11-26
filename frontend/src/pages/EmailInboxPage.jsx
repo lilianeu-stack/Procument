@@ -139,7 +139,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {(status?.smtpConfigured || status?.googleSendEnabled) && <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">
+          {(status?.smtpConfigured || status?.googleSendEnabled) && <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">
             <Send size={14} />Compose
           </button>}
           {status?.connected
@@ -151,7 +151,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
                   <Unplug size={14} />Disconnect
                 </button>
               </>
-            : <button type="button" onClick={connect} disabled={Boolean(busy) || !status?.configured} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+            : <button type="button" onClick={connect} disabled={Boolean(busy) || !status?.configured} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black disabled:opacity-50">
                 {busy === 'connect' ? <LoaderCircle size={14} className="animate-spin" /> : <Link2 size={14} />}Connect Google mailbox
               </button>}
         </div>
@@ -174,7 +174,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
           <label className="block text-xs font-bold">Subject<input required maxLength="200" value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} className="field" /></label>
         </div>
         <label className="block text-xs font-bold">Message<textarea required maxLength="50000" rows="6" value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} className="field h-auto py-2" /></label>
-        <div className="flex justify-end"><button type="submit" disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+        <div className="flex justify-end"><button type="submit" disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
           {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}Send email
         </button></div>
       </form>

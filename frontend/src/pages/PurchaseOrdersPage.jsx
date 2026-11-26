@@ -9,6 +9,7 @@ import SupplierPricingAwardSummary from '../components/documents/SupplierPricing
 import SendForApprovalModal from '../components/portals/SendForApprovalModal.jsx';
 import SupplierSelectionModal from '../components/portals/SupplierSelectionModal.jsx';
 import StatusBadge from '../components/ui/StatusBadge.jsx';
+import SignatureUpload from '../components/ui/SignatureUpload.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
 import {
   PURCHASE_ORDER_TYPES, calculatePurchaseTotals,
@@ -59,9 +60,16 @@ function detailLines(order) {
 function supplierFor(rfq) {
   return {
     name: rfq?.selectedSupplier || rfq?.supplier || rfq?.awardedSupplier || '—',
-    contact: rfq?.supplierContact || rfq?.awardedSupplierContact || rfq?.selectedSupplierContact || rfq?.contact || '—',
+    email: rfq?.selectedSupplierEmail || rfq?.awardedSupplierEmail || rfq?.supplierEmail || '—',
+    phone: rfq?.selectedSupplierPhone || rfq?.awardedSupplierPhone || rfq?.supplierPhone || '—',
     address: rfq?.supplierAddress || rfq?.awardedSupplierAddress || rfq?.selectedSupplierAddress || '—'
   };
+}
+
+function recommendationDecisionLabel(value) {
+  if (value === 'Accepted') return 'Accepted';
+  if (value === 'Rejected') return 'Denied';
+  return value || 'Awaiting decision';
 }
 
 function canSendForApproval(order) {
@@ -90,6 +98,22 @@ function distributeAwardedAmount(lines, amount) {
   });
 }
 
+// Only lines the supplier actually entered in its quotation are shown on the
+// purchase order form. Requisition estimates are used solely as a fallback
+// when no itemised quotation exists.
+function supplierQuoteLines(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((line) => String(line.itemName || '').trim())
+    .map((line) => ({
+      quotationItemId: line.quotationItemId,
+      itemName: line.itemName || '',
+      description: line.description || '',
+      quantity: String(line.quantity ?? 1),
+      unit: line.unit || 'unit',
+      unitPrice: String(line.unitPrice ?? '')
+    }));
+}
+
 function validateLines(lines) {
   if (!lines.length) return 'Add at least one purchase order line.';
   for (const [index, line] of lines.entries()) {
@@ -100,8 +124,7 @@ function validateLines(lines) {
   return '';
 }
 
-function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
-  const totals = calculatePurchaseTotals(lines, vatRate ?? configuredVatRate());
+function ItemTable({ lines, onChange, onAdd, onRemove }) {
   return <div className="space-y-3">
     <div className="overflow-x-auto rounded-lg border border-brand">
       <table className="w-full min-w-[760px] text-left text-xs">
@@ -136,19 +159,51 @@ function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
     <button type="button" onClick={onAdd} className="inline-flex items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-black">
       <Plus size={14} />Add line
     </button>
-    <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
-      <dt className="sm:col-span-2 text-[10px] font-extrabold uppercase tracking-wide text-black">Financial Summary</dt>
-      <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="font-bold">{formatRwf(totals.subtotal)}</dd></div>
-      <div className="flex justify-between"><dt className="text-muted">VAT ({totals.vatRate}%)</dt><dd className="font-bold">{formatRwf(totals.vatAmount)}</dd></div>
-      <div className="flex justify-between sm:col-span-2"><dt className="font-bold">Total Amount</dt><dd className="font-extrabold text-black">{formatRwf(totals.total)}</dd></div>
-      <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Total Amount in Words · Rwandan Francs</dt><dd className="mt-1 font-semibold">{totals.amountInWords}</dd></div>
-    </dl>
   </div>;
 }
 
-export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, onSendIntent }) {
-  const awardedRfqs = rfqs.filter((rfq) => rfq.status === 'Awarded');
+export function OrderForm({
+  rfqs, recommendations = [], requisition, initialRfqId, initialSupplierId,
+  initialItems = [], onLoadQuotes, onClose, onSubmit, onSendIntent
+}) {
+  const awardedRfqs = rfqs.filter((rfq) => rfq.status === 'Awarded').map((rfq) => {
+    const recommendation = recommendations.find((entry) =>
+      Number(entry.rfqId) === Number(rfq.id) &&
+      String(entry.recommendedSupplier) === String(rfq.selectedSupplier || rfq.supplier));
+    return {
+      ...rfq,
+      __key: `rfq-${rfq.id}`,
+      __supplierId: recommendation ? Number(recommendation.supplierId) : null,
+      __recommendation: recommendation || null
+    };
+  });
+  // Procurement's recommended supplier can be used even before the RFQ has been
+  // formally awarded. The backend awards that quotation when the PO is saved.
+  const recommendedRfqs = recommendations
+    .filter((entry) => !awardedRfqs.some((rfq) =>
+      Number(rfq.id) === Number(entry.rfqId) && Number(rfq.__supplierId) === Number(entry.supplierId)))
+    .map((entry) => ({
+      id: entry.rfqId,
+      reference: entry.reference,
+      status: 'Awarded',
+      selectedSupplier: entry.recommendedSupplier,
+      supplier: entry.recommendedSupplier,
+      supplierContact: entry.supplierContact,
+      supplierAddress: entry.supplierAddress,
+      awardedAmount: Number(entry.quotationAmount) || 0,
+      __key: `recommended-${entry.rfqId}-${entry.supplierId}`,
+      __supplierId: Number(entry.supplierId),
+      __recommendation: entry,
+      supplierEmail: entry.supplierEmail,
+      supplierPhone: entry.supplierPhone
+    }));
+  const selectableRfqs = [...awardedRfqs, ...recommendedRfqs];
+  const initialKey = selectableRfqs.find((rfq) =>
+    Number(rfq.id) === Number(initialRfqId) &&
+    (!initialSupplierId || Number(rfq.__supplierId) === Number(initialSupplierId)))?.__key || '';
   const requisitionItemsKey = JSON.stringify(requisition?.items || []);
+  const initialItemsKey = JSON.stringify(initialItems || []);
+  const initialSupplierLines = useMemo(() => supplierQuoteLines(initialItems), [initialItemsKey]);
   const requisitionLines = useMemo(() => (Array.isArray(requisition?.items)
     ? requisition.items.filter((line) => String(line.itemName || '').trim()).map((line) => ({
         itemName: line.itemName || '',
@@ -159,36 +214,91 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
       }))
     : []), [requisitionItemsKey]);
   const [form, setForm] = useState({
-    rfqId: initialRfqId ? String(initialRfqId) : '',
+    selection: initialKey,
     deliveryDate: '',
     type: 'Standard'
   });
-  const [lines, setLines] = useState(requisitionLines.length ? requisitionLines : [emptyLine()]);
+  const [lines, setLines] = useState(initialSupplierLines.length
+    ? initialSupplierLines
+    : requisitionLines.length ? requisitionLines : [emptyLine()]);
+  const [preparedSignature, setPreparedSignature] = useState('');
+  const [approvedSignature, setApprovedSignature] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const selectedRfq = awardedRfqs.find((rfq) => String(rfq.id) === String(form.rfqId));
+  const selectedRfq = selectableRfqs.find((rfq) => rfq.__key === form.selection);
+  const selectedKey = selectedRfq?.__key || '';
   const awardedAmount = Number(selectedRfq?.awardedAmount) || 0;
   const supplier = supplierFor(selectedRfq);
 
   useEffect(() => {
-    if (!requisitionLines.length) return;
-    setLines(distributeAwardedAmount(requisitionLines, awardedAmount));
-  }, [requisitionLines, awardedAmount]);
+    let active = true;
+    async function applySupplierLines() {
+      if (!selectedRfq) {
+        if (active) setLines([emptyLine()]);
+        return;
+      }
+      // The recommendation card already carries the exact lines the supplier submitted.
+      const passedLines = selectedKey === initialKey ? initialSupplierLines : [];
+      if (passedLines.length) {
+        if (active) setLines(passedLines);
+        return;
+      }
+      const recommendation = recommendations.find((entry) =>
+        Number(entry.rfqId) === Number(selectedRfq.id) &&
+        (!selectedRfq.__supplierId || Number(entry.supplierId) === Number(selectedRfq.__supplierId)));
+      const recommendedLines = supplierQuoteLines(recommendation?.items);
+      if (recommendedLines.length) {
+        if (active) setLines(recommendedLines);
+        return;
+      }
+      // Awarded RFQs have no recommendation snapshot, so read the selected
+      // quotation and its itemised lines from the RFQ response record.
+      if (onLoadQuotes && selectedRfq.id) {
+        try {
+          const detail = await onLoadQuotes(selectedRfq.id);
+          const quotes = Array.isArray(detail?.quotations) ? detail.quotations : [];
+          const quote = selectedRfq.__supplierId
+            ? quotes.find((entry) => Number(entry.supplierId) === Number(selectedRfq.__supplierId))
+            : quotes.find((entry) => entry.selected) || quotes[0];
+          const quotedLines = supplierQuoteLines(quote?.items);
+          if (!active) return;
+          if (quotedLines.length) {
+            setLines(quotedLines);
+            return;
+          }
+        } catch { /* the requisition estimate remains a safe fallback */ }
+      }
+      if (!active) return;
+      setLines(requisitionLines.length ? distributeAwardedAmount(requisitionLines, awardedAmount) : [emptyLine()]);
+    }
+    void applySupplierLines();
+    return () => { active = false; };
+  }, [selectedKey, initialKey, initialItemsKey, requisitionItemsKey, awardedAmount, recommendations, onLoadQuotes]);
 
   function updateLine(index, key, value) {
     setLines((current) => current.map((line, position) => position === index ? { ...line, [key]: value } : line));
   }
 
   function formPayload() {
-    // The backend derives supplier, lines, VAT and totals from the awarded
-    // quotation and originating request; only these fields are accepted.
-    return { rfqId: Number(form.rfqId), deliveryDate: form.deliveryDate, type: form.type };
+    // The backend derives lines, VAT and totals from the quotation. When the
+    // entry came from Procurement's recommendation, send that supplier so the
+    // backend awards the matching quotation before saving the PO.
+    return {
+      rfqId: Number(selectedRfq?.id),
+      ...(selectedRfq?.__supplierId ? { supplierId: Number(selectedRfq.__supplierId) } : {}),
+      deliveryDate: form.deliveryDate,
+      type: form.type,
+      preparedBySignature: preparedSignature,
+      approvedBySignature: approvedSignature
+    };
   }
 
   function validationProblem() {
-    if (!form.rfqId) return 'Choose an awarded RFQ.';
+    if (!form.selection) return 'Choose an awarded RFQ or Procurement recommendation.';
     if (!form.deliveryDate) return 'Choose the expected delivery date.';
+    if (!preparedSignature) return 'Upload the Prepared by signature image.';
+    if (!approvedSignature) return 'Upload the Approved by signature image.';
     return validateLines(lines);
   }
 
@@ -219,10 +329,15 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
       <section>
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order details</h3>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-bold">Awarded RFQ *
-            <select required value={form.rfqId} onChange={(event) => setForm({ ...form, rfqId: event.target.value })} className="field">
-              <option value="">Choose an awarded RFQ…</option>
-              {awardedRfqs.map((rfq) => <option key={rfq.id} value={rfq.id}>{rfq.reference} · {rfq.selectedSupplier}</option>)}
+          <label className="block text-xs font-bold">Awarded RFQ / Procurement recommendation *
+            <select required value={form.selection} onChange={(event) => setForm({ ...form, selection: event.target.value })} className="field">
+              <option value="">Choose an RFQ or recommendation…</option>
+              {awardedRfqs.length > 0 && <optgroup label="Awarded RFQs">
+                {awardedRfqs.map((rfq) => <option key={rfq.__key} value={rfq.__key}>{rfq.reference} · {rfq.selectedSupplier}</option>)}
+              </optgroup>}
+              {recommendedRfqs.length > 0 && <optgroup label="Procurement recommendations">
+                {recommendedRfqs.map((rfq) => <option key={rfq.__key} value={rfq.__key}>{rfq.reference} · Recommended: {rfq.recommendedSupplier}</option>)}
+              </optgroup>}
             </select>
           </label>
           <label className="block text-xs font-bold">Type
@@ -244,19 +359,32 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
 
       <section className="rounded-lg border border-brand bg-white p-4">
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Registered supplier information</h3>
-        <dl className="grid gap-3 text-xs sm:grid-cols-3">
+        <dl className="grid gap-3 text-xs sm:grid-cols-4">
           <div><dt className="text-[10px] text-muted">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
-          <div><dt className="text-[10px] text-muted">Supplier Contact</dt><dd className="font-bold">{supplier.contact}</dd></div>
+          <div><dt className="text-[10px] text-muted">Supplier Email</dt><dd className="break-all font-bold">{supplier.email}</dd></div>
+          <div><dt className="text-[10px] text-muted">Supplier Phone</dt><dd className="font-bold">{supplier.phone}</dd></div>
           <div><dt className="text-[10px] text-muted">Address</dt><dd className="font-bold">{supplier.address}</dd></div>
         </dl>
-        <p className="mt-2 text-[10px] text-muted">Registered details come from the awarded quotation and are printed on the official purchase order.</p>
+        <p className="mt-2 text-[10px] text-muted">Registered details come from the awarded or Procurement-recommended supplier quotation and are printed on the official purchase order.</p>
+      </section>
+
+      <section className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Prepared by signature</h3>
+          <SignatureUpload label="Prepared by" value={preparedSignature} onChange={setPreparedSignature} />
+        </div>
+        <div>
+          <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Approved by signature</h3>
+          <SignatureUpload label="Approved by" value={approvedSignature} onChange={setApprovedSignature} />
+        </div>
+        <p className="sm:col-span-2 text-[10px] text-muted">Both signature images are required before the official purchase order can be saved.</p>
       </section>
 
       <section>
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
         <ItemTable lines={lines} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
-        {requisitionLines.length > 0 && <p className="mt-2 text-[10px] text-muted">Lines were prefilled from the originating requisition. Final prices are recalculated from the awarded quotation.</p>}
+        <p className="mt-2 text-[10px] text-muted">Items, quantities, descriptions and prices are the lines the selected supplier entered in its quotation. Requisition estimates are used only when a supplier did not provide itemised lines.</p>
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
@@ -281,7 +409,6 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
   const [lines, setLines] = useState(detailLines(order).length ? detailLines(order) : [emptyLine()]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const vatRate = Number(order.vatRate ?? configuredVatRate()) || 0;
 
   function updateLine(index, key, value) {
     setLines((current) => current.map((line, position) => position === index ? { ...line, [key]: value } : line));
@@ -357,7 +484,7 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
 
       <section>
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
-        <ItemTable lines={lines} vatRate={vatRate} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
+        <ItemTable lines={lines} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
       </section>
 
@@ -392,12 +519,84 @@ function ReceiptForm({ order, items, onClose, onSubmit }) {
   </form></Modal>;
 }
 
+function RecommendedSupplierDetail({ entry, canCreate, onClose, onViewPurchaseOrder, onCreatePurchaseOrder }) {
+  const quotedItems = Array.isArray(entry.items) ? entry.items : [];
+  return <Modal title={`Recommended supplier · ${entry.recommendedSupplier}`} size="xl" onClose={onClose}>
+    <div className="space-y-5 text-xs">
+      <section className="rounded-lg border-2 border-brand bg-brand-light/40 p-4">
+        <span className="inline-flex rounded-full bg-brand px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-widest text-black">Procurement recommendation</span>
+        <p className="mt-3 text-lg font-extrabold text-black">{entry.recommendedSupplier}</p>
+        <strong className="mt-3 block text-[10px] font-extrabold uppercase tracking-wide text-muted">Reason for recommendation</strong>
+        <p className="mt-1 whitespace-pre-wrap font-semibold leading-relaxed text-black">{entry.reason || 'No reason was recorded for this recommendation.'}</p>
+      </section>
+
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div><dt className="text-[10px] font-bold uppercase text-muted">RFQ</dt><dd className="font-bold">{entry.reference || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Requisition</dt><dd className="font-bold">{entry.requisitionReference || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Department</dt><dd className="font-bold">{entry.department || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Recommended by</dt><dd className="font-bold">{entry.recipientName || 'Procurement'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Sent</dt><dd className="font-bold">{dateTimeLabel(entry.sentAt)}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Committee response</dt><dd className="font-bold">{recommendationDecisionLabel(entry.decision)}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Submitted by</dt><dd className="font-bold">{entry.responderName || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-muted">Decision reason</dt><dd className="whitespace-pre-wrap font-bold">{entry.decisionReason || '—'}</dd></div>
+      </dl>
+
+      <section className="rounded-lg border border-brand bg-white p-4">
+        <h3 className="mb-3 text-[10px] font-extrabold uppercase tracking-wide">Registered supplier details</h3>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div><dt className="text-muted">Contact</dt><dd className="font-bold">{entry.supplierContact || '—'}</dd></div>
+          <div><dt className="text-muted">Phone</dt><dd className="font-bold">{entry.supplierPhone || '—'}</dd></div>
+          <div><dt className="text-muted">Email</dt><dd className="font-bold break-words">{entry.supplierEmail || '—'}</dd></div>
+          <div><dt className="text-muted">Address</dt><dd className="font-bold">{entry.supplierAddress || '—'}</dd></div>
+        </dl>
+      </section>
+
+      <section className="rounded-lg border border-brand bg-white p-4">
+        <h3 className="mb-3 text-[10px] font-extrabold uppercase tracking-wide">Quotation details</h3>
+        <dl className="mb-3 grid gap-3 sm:grid-cols-3">
+          <div><dt className="text-muted">Total quoted amount</dt><dd className="font-extrabold">{formatRwf(entry.quotationAmount)}</dd></div>
+          <div><dt className="text-muted">Delivery days</dt><dd className="font-bold">{entry.deliveryDays ?? '—'}</dd></div>
+          <div><dt className="text-muted">Supplier notes</dt><dd className="whitespace-pre-wrap font-bold">{entry.quotationNotes || '—'}</dd></div>
+        </dl>
+        {quotedItems.length ? <div className="overflow-x-auto rounded border border-subtle">
+          <table className="w-full min-w-[640px] text-left text-[11px]">
+            <thead className="bg-hover text-[10px] uppercase text-muted">
+              <tr>{['Item', 'Description', 'Qty', 'Unit price', 'Line total', 'Comment'].map((heading) =>
+                <th key={heading} className="whitespace-nowrap px-2 py-2 font-bold">{heading}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-subtle">
+              {quotedItems.map((line, index) => <tr key={line.quotationItemId || `${entry.reviewId}-${index}`}>
+                <td className="px-2 py-2 font-bold">{line.itemName || '—'}</td>
+                <td className="px-2 py-2">{line.description || '—'}</td>
+                <td className="px-2 py-2">{line.quantity ?? '—'}</td>
+                <td className="px-2 py-2">{formatRwf(line.unitPrice)}</td>
+                <td className="px-2 py-2 font-bold">{formatRwf(line.lineTotal)}</td>
+                <td className="px-2 py-2 whitespace-pre-wrap">{line.comment || '—'}</td>
+              </tr>)}
+            </tbody>
+          </table>
+        </div> : <p className="text-muted">No itemised quotation was recorded.</p>}
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
+        <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 font-bold">Close</button>
+        {entry.purchaseOrderId && <button type="button" onClick={() => onViewPurchaseOrder(entry)} className="rounded-lg border border-brand bg-white px-4 py-2 font-bold">View purchase order {entry.purchaseOrderReference || ''}</button>}
+        {!entry.purchaseOrderId && canCreate && <button type="button" onClick={() => onCreatePurchaseOrder(entry)} className="rounded-lg bg-brand px-4 py-2 font-bold">Create purchase order</button>}
+      </div>
+    </div>
+  </Modal>;
+}
+
 export default function PurchaseOrdersPage({
   orders = [], rfqs = [], items = [], suppliers = [], user = {}, requisition = null,
   query = {}, navigate, onCreate, onDecision, onReceive, getPurchaseOrder, updatePurchaseOrder,
-  loadApprovers, onSendForApproval, onRevokeApproval, sendPurchaseOrderToSuppliers
+  loadApprovers, onLoadCommitteeRecommendations, onLoadQuotes, onSendForApproval, onRevokeApproval,
+  sendPurchaseOrderToSuppliers, onSaveSignatures
 }) {
   const [creating, setCreating] = useState(false);
+  const [poSelection, setPoSelection] = useState(null);
+  const [recommendations, setRecommendations] = useState([]);
+  const [recommendationDetail, setRecommendationDetail] = useState(null);
   const [receiving, setReceiving] = useState(null);
   const [sendOrder, setSendOrder] = useState(null);
   const [notice, setNotice] = useState('');
@@ -406,6 +605,10 @@ export default function PurchaseOrdersPage({
   const [detailMode, setDetailMode] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [signatureDraft, setSignatureDraft] = useState({ preparedBySignature: '', approvedBySignature: '' });
+  const [signatureBusy, setSignatureBusy] = useState(false);
+  const [signatureError, setSignatureError] = useState('');
+  const [recommendationError, setRecommendationError] = useState('');
   const openedQueryOrder = useRef(null);
   const openedQueryRfq = useRef(null);
   const canCreate = ['admin', 'procurement'].includes(user.role);
@@ -426,10 +629,39 @@ export default function PurchaseOrdersPage({
     ? rfqs.filter((rfq) => Number(rfq.requisitionId) === requestId)
     : rfqs;
   const awardedRfqs = scopedRfqs.filter((rfq) => rfq.status === 'Awarded');
+  const visibleRecommendations = useMemo(() => {
+    const unique = new Map();
+    for (const entry of recommendations) {
+      if (requestId && Number(entry.requisitionId) !== requestId) continue;
+      const key = `${entry.rfqId}:${entry.supplierId}`;
+      if (!unique.has(key)) unique.set(key, entry);
+    }
+    return [...unique.values()];
+  }, [recommendations, requestId]);
   const linkedRfqId = Number(query.rfq || 0);
-  const initialRfqId = requestId && awardedRfqs.length === 1
+  const linkedRecommendation = visibleRecommendations.find((entry) => Number(entry.rfqId) === linkedRfqId);
+  const queryHasAwardedRfq = awardedRfqs.some((rfq) => Number(rfq.id) === linkedRfqId);
+  const initialRfqId = poSelection?.rfqId || (requestId && awardedRfqs.length === 1
     ? awardedRfqs[0].id
-    : awardedRfqs.some((rfq) => Number(rfq.id) === linkedRfqId) ? linkedRfqId : '';
+    : queryHasAwardedRfq ? linkedRfqId : linkedRecommendation?.rfqId || '');
+  const initialSupplierId = poSelection?.supplierId || (!queryHasAwardedRfq ? linkedRecommendation?.supplierId : null) || null;
+
+  async function refreshRecommendations() {
+    if (typeof onLoadCommitteeRecommendations !== 'function') return;
+    try {
+      const response = await onLoadCommitteeRecommendations();
+      setRecommendations(Array.isArray(response?.recommendations) ? response.recommendations : []);
+      setRecommendationError('');
+    } catch (exception) {
+      setRecommendationError(exception.message || 'Recommended suppliers could not be loaded.');
+    }
+  }
+
+  useEffect(() => {
+    void refreshRecommendations();
+    // Load once when the Purchase orders workspace opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!Number.isInteger(linkedRfqId) || linkedRfqId <= 0 || !initialRfqId) return;
@@ -454,6 +686,11 @@ export default function PurchaseOrdersPage({
         supplier: full.supplier || order.supplier,
         reference: full.reference || order.reference
       });
+      setSignatureDraft({
+        preparedBySignature: full.preparedSignature || '',
+        approvedBySignature: full.approvedSignature || ''
+      });
+      setSignatureError('');
     } catch (exception) {
       setDetailError(exception.message || 'The purchase order could not be opened.');
     } finally { setDetailLoading(false); }
@@ -461,6 +698,23 @@ export default function PurchaseOrdersPage({
 
   function closeDetail() {
     setDetail(null); setDetailMode(''); setDetailError('');
+  }
+
+  function viewRecommendedPurchaseOrder(entry) {
+    const existing = orders.find((order) => Number(order.id) === Number(entry.purchaseOrderId));
+    setRecommendationDetail(null);
+    void openDetail(existing || {
+      id: entry.purchaseOrderId,
+      reference: entry.purchaseOrderReference || 'Purchase order',
+      supplier: entry.recommendedSupplier
+    }, 'view');
+  }
+
+  function createRecommendedPurchaseOrder(entry) {
+    setRecommendationDetail(null);
+    setError('');
+    setPoSelection({ rfqId: entry.rfqId, supplierId: entry.supplierId, items: entry.items || [] });
+    setCreating(true);
   }
 
   // Overview links carry `order`; opening the existing Purchase orders page with
@@ -484,12 +738,35 @@ export default function PurchaseOrdersPage({
     return refreshed;
   }
 
+  async function saveSignatures() {
+    if (!onSaveSignatures || !detail) throw new Error('Signature upload is not available.');
+    setSignatureBusy(true); setSignatureError('');
+    try {
+      const payload = {
+        ...(canCreate ? { preparedBySignature: signatureDraft.preparedBySignature || null } : {}),
+        ...(canApprove ? { approvedBySignature: signatureDraft.approvedBySignature || null } : {})
+      };
+      const result = await onSaveSignatures(detail.id, payload);
+      const refreshed = normalizeDetail(result);
+      setDetail((current) => ({ ...current, ...refreshed }));
+      setSignatureDraft({
+        preparedBySignature: refreshed.preparedSignature || '',
+        approvedBySignature: refreshed.approvedSignature || ''
+      });
+      setNotice('Signature images saved to the official purchase order.');
+    } catch (exception) {
+      setSignatureError(exception.message || 'The signatures could not be saved.');
+    } finally { setSignatureBusy(false); }
+  }
+
   async function prepareSupplierRequest(preview) {
     let saved;
     if (preview.__createPayload) {
       if (!onCreate) throw new Error('Purchase Order creation is not available.');
       saved = await onCreate(preview.__createPayload);
       setCreating(false);
+      setPoSelection(null);
+      await refreshRecommendations();
     } else if (preview.__updatePayload) {
       if (!updatePurchaseOrder) throw new Error('Purchase Order editing is not available.');
       saved = normalizeDetail(await updatePurchaseOrder(preview.id, preview.__updatePayload));
@@ -570,15 +847,40 @@ export default function PurchaseOrdersPage({
   }
 
   return <>
-    <PageCard className="shadow-dashboard" title="Purchase orders" description={`${visibleOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => setCreating(true)} className={createPoButtonClass}><Plus size={15} />Create PO</button>}>
+    <PageCard className="shadow-dashboard" title="Purchase orders" description={`${visibleOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => { setPoSelection(null); setCreating(true); }} className={createPoButtonClass}><Plus size={15} />Create PO</button>}>
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
       {detailError && <div className="p-4"><ErrorMessage>{detailError}</ErrorMessage></div>}
+      {recommendationError && <div className="px-4 pb-3"><ErrorMessage>{recommendationError}</ErrorMessage></div>}
       {notice && <div className="px-4 pb-4"><p role="status" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">{notice}</p></div>}
       {activePoStatuses && <div className="px-4 pb-3">
         <button type="button" onClick={() => navigate?.('Purchase orders')} className="inline-flex items-center gap-2 rounded-full border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:bg-hover">
           Filtered: {query.status}<span className="text-black/50 underline">Clear</span>
         </button>
       </div>}
+      {visibleRecommendations.length > 0 && <section className="border-y border-subtle bg-white/70 px-4 py-4">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Recommended suppliers</h3>
+          <p className="text-[10px] text-muted">Procurement recommendations sent to the Committee · click a supplier to see the quotation, reason and response</p>
+        </div>
+        <div className="grid gap-2 lg:grid-cols-2">
+          {visibleRecommendations.map((entry) => <button key={`${entry.rfqId}-${entry.supplierId}`} type="button"
+            onClick={() => setRecommendationDetail(entry)}
+            aria-label={`View recommended supplier ${entry.recommendedSupplier} for ${entry.reference}`}
+            className="flex w-full items-center justify-between gap-3 rounded-lg border border-brand bg-white px-3 py-3 text-left transition hover:border-black hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1">
+            <span className="min-w-0">
+              <span className="block break-words text-xs font-extrabold text-black">{entry.recommendedSupplier}</span>
+              <span className="mt-0.5 block break-words text-[10px] text-muted">
+                {entry.reference}{entry.requisitionReference ? ` · ${entry.requisitionReference}` : ''}
+                {entry.purchaseOrderReference ? ` · ${entry.purchaseOrderReference}` : ''}
+              </span>
+            </span>
+            <span className="shrink-0 text-right">
+              <span className="block whitespace-nowrap text-[11px] font-bold text-black">{formatRwf(entry.quotationAmount)}</span>
+              <span className="mt-0.5 block text-[10px] text-muted">{recommendationDecisionLabel(entry.decision)}</span>
+            </span>
+          </button>)}
+        </div>
+      </section>}
       {visibleOrders.length ? <div className="overflow-x-auto">
         <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-xs">
           <colgroup>
@@ -659,12 +961,19 @@ export default function PurchaseOrdersPage({
       </div> : <EmptyState>{requestId ? 'No purchase orders for this request yet.' : 'No purchase orders are ready.'}</EmptyState>}
     </PageCard>
 
-    {creating && <OrderForm rfqs={scopedRfqs} requisition={requisition} initialRfqId={initialRfqId} onClose={() => setCreating(false)} onSubmit={onCreate}
+    {creating && <OrderForm rfqs={scopedRfqs} recommendations={visibleRecommendations} requisition={requisition}
+      initialRfqId={initialRfqId} initialSupplierId={initialSupplierId}
+      initialItems={poSelection?.items || linkedRecommendation?.items || []}
+      onLoadQuotes={onLoadQuotes}
+      onClose={() => { setCreating(false); setPoSelection(null); }} onSubmit={onCreate}
       onSendIntent={async (preview) => { setNotice(''); await prepareSupplierRequest(preview); }} />}
     {receiving && <ReceiptForm order={receiving} items={items} onClose={() => setReceiving(null)} onSubmit={onReceive} />}
     {sendOrder?.__sendToSuppliers && <SupplierSelectionModal order={sendOrder} suppliers={suppliers} onSend={saveAndSend} onClose={closeSendModal} />}
     {sendOrder && !sendOrder.__sendToSuppliers && <SendForApprovalModal order={sendOrder} loadApprovers={loadApprovers} onSend={saveAndSend} onClose={closeSendModal} />}
 
+    {recommendationDetail && <RecommendedSupplierDetail entry={recommendationDetail} canCreate={canCreate}
+      onClose={() => setRecommendationDetail(null)} onViewPurchaseOrder={viewRecommendedPurchaseOrder}
+      onCreatePurchaseOrder={createRecommendedPurchaseOrder} />}
     {detailLoading && <Modal title="Opening purchase order" onClose={closeDetail}><div className="py-8 text-center text-xs text-muted">Loading official form…</div></Modal>}
     {!detailLoading && detailMode === 'view' && detail && <Modal title={`Official purchase order · ${detail.reference}`} size="xl" onClose={closeDetail}>
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -692,6 +1001,25 @@ export default function PurchaseOrdersPage({
           <div><dt className="text-[10px] text-muted">Decision</dt><dd className="font-bold">{detail.approval.decidedAt ? dateTimeLabel(detail.approval.decidedAt) : '—'}</dd></div>
           {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-muted">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
         </dl>
+      </section>}
+      {(canCreate || canApprove) && <section className="no-print mb-4 rounded-lg border border-brand bg-white p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Official signatures</h3>
+            <p className="mt-1 text-[10px] text-muted">Uploaded images appear on the Prepared by and Approved by lines of the purchase order.</p>
+          </div>
+          <button type="button" onClick={() => { void saveSignatures(); }} disabled={signatureBusy}
+            className="rounded-lg bg-brand px-3 py-2 text-[11px] font-bold text-black disabled:opacity-50">
+            {signatureBusy ? 'Saving…' : 'Save signatures'}
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {canCreate && <SignatureUpload label="Prepared by" value={signatureDraft.preparedBySignature}
+            onChange={(value) => setSignatureDraft((current) => ({ ...current, preparedBySignature: value }))} />}
+          {canApprove && <SignatureUpload label="Approved by" value={signatureDraft.approvedBySignature}
+            onChange={(value) => setSignatureDraft((current) => ({ ...current, approvedBySignature: value }))} />}
+        </div>
+        {signatureError && <ErrorMessage>{signatureError}</ErrorMessage>}
       </section>}
       <div className="max-h-[65vh] overflow-auto rounded-lg border border-brand bg-white p-3">
         <PurchaseOrderDocument order={detail} />

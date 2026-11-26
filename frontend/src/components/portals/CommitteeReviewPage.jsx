@@ -33,8 +33,8 @@ export default function CommitteeReviewPage({ token }) {
     try {
       const result = await api(`/committee-review/${encodeURIComponent(token)}`);
       setReview(result.review);
-      setResponderName(result.review.recipientName || '');
       const submitted = result.review.overallDecision || result.review.decisions?.[0] || null;
+      setResponderName(submitted?.responderName || result.review.recipientName || '');
       setDecision(submitted?.decision || '');
       setReason(submitted?.reason || '');
     } catch (exception) {
@@ -73,6 +73,9 @@ export default function CommitteeReviewPage({ token }) {
       await load();
     } catch (exception) {
       setError(exception.message || 'Your decision could not be submitted.');
+      // A duplicate submission (409) means a decision is already stored, so
+      // refresh to show the submitted state instead of leaving an editable form.
+      await load();
     } finally {
       setBusy(false);
     }
@@ -113,10 +116,19 @@ export default function CommitteeReviewPage({ token }) {
             <strong className="block text-sm font-extrabold uppercase tracking-wide text-emerald-800">Message from Procurement</strong>
             <p className="mt-2 whitespace-pre-wrap text-base font-bold leading-relaxed text-slate-900">{review.message}</p>
           </div>}
-          {review.recommendation && <div className="mt-5 rounded-xl border-2 border-brand/30 bg-brand-light/40 p-5">
-            <strong className="block text-sm font-extrabold uppercase tracking-wide text-brand">Procurement recommendation</strong>
-            <p className="mt-2 text-base font-extrabold text-slate-900">{review.recommendation.supplierName}</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{review.recommendation.reason}</p>
+          {review.recommendation && <div className="mt-5 rounded-xl border-2 border-brand bg-brand-light/60 p-6 shadow-sm">
+            <span className="inline-flex rounded-full bg-brand px-3 py-1 text-[10px] font-extrabold uppercase tracking-widest text-white">
+              Procurement recommendation
+            </span>
+            <p className="mt-3 text-xl font-extrabold leading-snug text-slate-900 sm:text-2xl">
+              Recommended supplier: {review.recommendation.supplierName}
+            </p>
+            <div className="mt-3 rounded-lg border border-brand/20 bg-white/80 p-4">
+              <strong className="block text-xs font-extrabold uppercase tracking-wide text-brand">Reason for recommendation</strong>
+              <p className="mt-2 whitespace-pre-wrap text-sm font-semibold leading-relaxed text-slate-900">
+                {review.recommendation.reason || 'No reason was provided by Procurement.'}
+              </p>
+            </div>
           </div>}
         </section>
 
@@ -209,6 +221,7 @@ export default function CommitteeReviewPage({ token }) {
             </label>
 
             {responded ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs">
+              <p className="mb-2 text-muted">Submitted by <strong className="text-slate-800">{submittedDecision?.responderName || review.recipientName}</strong>{submittedDecision?.decidedAt ? ` · ${dateTimeLabel(submittedDecision.decidedAt)}` : ''}</p>
               <span className="font-bold">Your decision: </span>
               <span className={submittedDecision?.decision === 'Rejected' ? 'font-bold text-red-700' : 'font-bold text-emerald-700'}>
                 {submittedDecision?.decision === 'Rejected' ? 'Deny' : submittedDecision?.decision === 'Accepted' ? 'Accept' : '—'}
@@ -234,7 +247,7 @@ export default function CommitteeReviewPage({ token }) {
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
                 <span className="text-[11px] text-muted">Once submitted, this link cannot be used to change your decision.</span>
                 <button type="submit" disabled={busy || !(review.responses || []).length}
-                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50">
+                  className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-black hover:bg-brand/90 disabled:opacity-50">
                   {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                   {busy ? 'Submitting…' : 'Submit decision'}
                 </button>

@@ -20,7 +20,7 @@
   /* Match interactive states and primary surfaces to the selected green. */
   --pims-interaction-green: var(--pims-reference);
   --pims-interaction-green-rgb: 124 179 66;
-  --pims-interaction-green-text: #456921;
+  --pims-interaction-green-text: #000000;
   --pims-interaction-tint: rgb(var(--pims-interaction-green-rgb) / 0.12);
   --pims-interaction-tint-strong: rgb(var(--pims-interaction-green-rgb) / 0.18);
   --pims-interaction-row-tint: rgb(var(--pims-interaction-green-rgb) / 0.07);
@@ -339,17 +339,25 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid var(--pims-border); border-bottom: 1px solid var(--pims-border); }
 .official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid var(--pims-border); }
 
-.official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
-.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
+.official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 10px; }
+.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--pims-border); }
 .official-po-field-wide { grid-column: 1 / -1; }
 .official-po-field .official-value { border-bottom: 1px solid var(--pims-border); }
+.official-po-notice { margin: 4px 0 10px; font-size: 9pt; line-height: 1.4; }
+.official-po-notice p { margin: 2px 0 0; }
 .official-po-table { margin-top: 4px; }
 .official-po-totals { margin-top: 14px; margin-left: auto; width: 75%; }
 .official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
 .official-po-totals .official-po-words { display: block; }
 .official-po-totals .official-po-words .official-value { margin-top: 3px; font-weight: 700; }
-.official-po-approval { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 22px; }
-.official-po-approval > div { display: flex; flex-direction: column; gap: 4px; }
+.official-po-terms { margin: 14px 0 0; font-size: 8.5pt; }
+.official-po-approval { margin-top: 20px; }
+.official-po-signoff { margin: 0 0 12px; font-weight: 800; }
+.official-po-signature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.official-po-signature-line { display: flex; min-height: 58px; flex-direction: column; gap: 3px; }
+.official-po-signature-image { display: flex; min-height: 30px; align-items: flex-end; }
+.official-po-signature-image img { max-height: 30px; max-width: 100%; object-fit: contain; }
+.official-po-signature-date { font-size: 8pt; color: var(--pims-ink); }
 
 @media print {
   /* When an official form modal is open, only its print copy reaches the PDF. */
@@ -366,4 +374,11 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   .official-document th, .official-document td { border: 1px solid var(--pims-border); }
   .official-document tr, .official-document .official-purpose, .official-document .official-approval-grid > div { break-inside: avoid; page-break-inside: avoid; }
   .official-title { break-after: avoid; page-break-after: avoid; }
+}
+
+#root button,
+#root button *,
+#root [role='button'],
+#root [role='button'] * {
+  color: #000000 !important;
 }

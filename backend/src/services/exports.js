@@ -376,6 +376,7 @@ const RECORD_QUERIES = {
         p.supplier_contact AS supplierContact, p.supplier_address AS supplierAddress,
         p.subtotal, p.vat_rate AS vatRate, p.vat_amount AS vatAmount,
         p.amount_in_words AS amountInWords,
+        p.prepared_signature AS preparedSignature, p.approved_signature AS approvedSignature,
         p.approved_at AS approvedAt, p.created_at AS createdAt,
         s.name AS supplier, s.contact_name AS contactName, s.phone AS supplierPhone,
         s.email AS supplierEmail, s.address AS registeredAddress,
@@ -664,6 +665,29 @@ function drawOfficialField(doc, label, value, x, y, width) {
   doc.moveTo(x, y + 29).lineTo(x + width - 8, y + 29).strokeColor(THEME.border).stroke();
 }
 
+function signatureBuffer(value) {
+  const match = typeof value === 'string' ? value.match(/^data:image\/[a-z]+;base64,([\s\S]+)$/i) : null;
+  if (!match) return null;
+  try {
+    const buffer = Buffer.from(match[1], 'base64');
+    return buffer.length ? buffer : null;
+  } catch { return null; }
+}
+
+function drawSignatureField(doc, label, value, signature, x, y, width) {
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text(label, x, y, { width, lineBreak: false });
+  const image = signatureBuffer(signature);
+  if (image) {
+    try {
+      doc.image(image, x + 2, y + 13, { fit: [width - 12, 18], align: 'left', valign: 'bottom' });
+    } catch { /* a corrupt cached signature must not block the document */ }
+  }
+  doc.moveTo(x, y + 33).lineTo(x + width - 8, y + 33).strokeColor(THEME.border).stroke();
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+    .text(documentValue(value), x, y + 36, { width, lineBreak: false, ellipsis: true });
+}
+
 function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, rowHeight = 22 }) {
   const margin = 40;
   const width = doc.page.width - 80;
@@ -793,7 +817,16 @@ function drawPurchaseOrderDocument(doc, record) {
   drawOfficialField(doc, 'Date:', documentDate(row.createdAt), secondColumnX, y, columnWidth);
   y += 38;
   drawOfficialField(doc, 'Date of Delivery:', documentDate(row.deliveryDate), 40, y, columnWidth);
-  y += 40;
+  drawOfficialField(doc, 'Payment Modalities:', '100%', secondColumnX, y, columnWidth);
+  y += 34;
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+    .text('Gentlemen:', 40, y, { width: doc.page.width - 80, lineBreak: false });
+  y += 13;
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+    .text('Please furnish this office the following articles subject to the terms and conditions contained herein.', 40, y, {
+      width: doc.page.width - 80, lineBreak: false, ellipsis: true
+    });
+  y += 22;
 
   const itemRows = record.items.map((item, index) => ({
     number: String(index + 1),
@@ -848,13 +881,13 @@ function drawPurchaseOrderDocument(doc, record) {
     .text('Currency: Rwandan Francs (RWF)', 40, y, { width: doc.page.width - 80, lineBreak: false });
   y += 26;
 
-  y = ensureSpace(doc, y, 60, pageStart);
+  y = ensureSpace(doc, y, 80, pageStart);
   const approved = Boolean(row.approvedAt && row.approvedBy);
-  drawOfficialField(doc, 'Prepared By:', row.preparedBy, 40, y, columnWidth);
-  drawOfficialField(
+  drawSignatureField(doc, 'Prepared By:', row.preparedBy, row.preparedSignature, 40, y, columnWidth);
+  drawSignatureField(
     doc, 'Approved By:',
     approved ? `${row.approvedBy} - ${documentDate(row.approvedAt)}` : '',
-    secondColumnX, y, columnWidth
+    row.approvedSignature, secondColumnX, y, columnWidth
   );
 }
 

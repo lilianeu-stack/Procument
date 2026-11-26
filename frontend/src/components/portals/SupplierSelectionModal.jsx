@@ -9,6 +9,7 @@ import { dateLabel } from '../../utils/format.js';
 import { formatRwf } from '../../utils/purchaseCalculations.js';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TODAY = new Date().toISOString().slice(0, 10);
 
 function isInactive(supplier) {
   const status = String(supplier?.status || '').toLowerCase();
@@ -92,6 +93,10 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
   async function confirmSend() {
     if (!confirmed) { setError('Confirm that the selected suppliers should receive this request.'); return; }
     if (!onSend) { setError('Sending supplier requests is not available.'); return; }
+    if (deadline && deadline < TODAY) {
+      setError('Submission deadline cannot be in the past. Choose today or a later date.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -221,7 +226,7 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
 
       <section className="grid gap-3 sm:grid-cols-2">
         <label className="block text-xs font-bold">Submission deadline (optional)
-          <input type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} className="field mt-1" />
+          <input type="date" min={TODAY} value={deadline} onChange={(event) => setDeadline(event.target.value)} className="field mt-1" />
         </label>
         <label className="flex items-start gap-2 text-xs font-semibold">
           <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4" />

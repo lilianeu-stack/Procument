@@ -233,11 +233,14 @@ router.get('/rfqs/:id/committee-reviews', allowRoles(...managers), async (req, r
     const [[rfq]] = await pool.execute('SELECT id, reference FROM rfqs WHERE id = ?', [req.params.id]);
     if (!rfq) return res.status(404).json({ message: 'RFQ not found.' });
     const [reviews] = await pool.execute(
-      `SELECT id, recipient_name AS recipientName, recipient_email AS recipientEmail,
-          status, sent_at AS sentAt, opened_at AS openedAt, submitted_at AS submittedAt
-         FROM rfq_committee_reviews
-        WHERE rfq_id = ?
-        ORDER BY id DESC`,
+      `SELECT r.id, r.recipient_name AS recipientName, r.recipient_email AS recipientEmail,
+          r.recommended_supplier_id AS recommendedSupplierId, r.reason AS recommendationReason,
+          s.name AS recommendedSupplier,
+          r.status, r.sent_at AS sentAt, r.opened_at AS openedAt, r.submitted_at AS submittedAt
+         FROM rfq_committee_reviews r
+         LEFT JOIN suppliers s ON s.id = r.recommended_supplier_id
+        WHERE r.rfq_id = ?
+        ORDER BY r.id DESC`,
       [req.params.id]
     );
     const [decisions] = await pool.execute(
@@ -261,6 +264,70 @@ router.get('/rfqs/:id/committee-reviews', allowRoles(...managers), async (req, r
         ...review,
         decisions: decisionsByReview.get(review.id) || []
       }))
+    });
+  } catch (error) { return next(error); }
+});
+
+// Procurement's recommended suppliers are surfaced in the Purchase orders
+// workspace so a recommendation can be opened and turned into a PO directly.
+router.get('/committee-recommendations', allowRoles(...managers), async (req, res, next) => {
+  try {
+    const [recommendations] = await pool.query(
+      `SELECT r.id AS reviewId, r.rfq_id AS rfqId, r.report_snapshot AS snapshot,
+          r.recommended_supplier_id AS supplierId, r.reason AS recommendationReason,
+          r.recipient_name AS recipientName, r.recipient_email AS recipientEmail,
+          r.status, r.sent_at AS sentAt, r.submitted_at AS submittedAt,
+          f.reference, q.title, f.requisition_id AS requisitionId,
+          q.reference AS requisitionReference, d.name AS department,
+          s.name AS supplier, s.contact_name AS supplierContact,
+          s.phone AS supplierPhone, s.email AS supplierEmail, s.address AS supplierAddress,
+          qt.id AS quotationId, qt.amount AS quotationAmount,
+          qt.delivery_days AS deliveryDays, qt.notes AS quotationNotes,
+          (SELECT dc.decision FROM rfq_committee_decisions dc
+            WHERE dc.review_id = r.id ORDER BY dc.id DESC LIMIT 1) AS decision,
+          (SELECT dc.reason FROM rfq_committee_decisions dc
+            WHERE dc.review_id = r.id ORDER BY dc.id DESC LIMIT 1) AS decisionReason,
+          (SELECT dc.responder_name FROM rfq_committee_decisions dc
+            WHERE dc.review_id = r.id ORDER BY dc.id DESC LIMIT 1) AS responderName,
+          (SELECT po.id FROM purchase_orders po
+            WHERE po.rfq_id = f.id ORDER BY po.id DESC LIMIT 1) AS purchaseOrderId,
+          (SELECT po.reference FROM purchase_orders po
+            WHERE po.rfq_id = f.id ORDER BY po.id DESC LIMIT 1) AS purchaseOrderReference
+         FROM rfq_committee_reviews r
+         JOIN rfqs f ON f.id = r.rfq_id
+         JOIN requisitions q ON q.id = f.requisition_id
+         LEFT JOIN departments d ON d.id = q.department_id
+         LEFT JOIN suppliers s ON s.id = r.recommended_supplier_id
+         LEFT JOIN quotations qt ON qt.id = (
+           SELECT qt2.id FROM quotations qt2
+            WHERE qt2.rfq_id = f.id AND qt2.supplier_id = r.recommended_supplier_id
+            ORDER BY qt2.id DESC LIMIT 1
+         )
+        WHERE r.recommended_supplier_id IS NOT NULL
+        ORDER BY r.id DESC`
+    );
+    return res.json({
+      recommendations: recommendations.map((row) => {
+        let snapshot = {};
+        if (typeof row.snapshot === 'object' && row.snapshot !== null) snapshot = row.snapshot;
+        else {
+          try { snapshot = row.snapshot ? JSON.parse(row.snapshot) : {}; }
+          catch { snapshot = {}; }
+        }
+        const quotedItems = (snapshot.suppliers || [])
+          .find((entry) => Number(entry.supplierId) === Number(row.supplierId))?.items || [];
+        return {
+          ...row,
+          supplierId: Number(row.supplierId),
+          quotationId: row.quotationId ? Number(row.quotationId) : null,
+          quotationAmount: row.quotationAmount === null ? null : Number(row.quotationAmount),
+          deliveryDays: row.deliveryDays === null ? null : Number(row.deliveryDays),
+          purchaseOrderId: row.purchaseOrderId ? Number(row.purchaseOrderId) : null,
+          recommendedSupplier: row.supplier || 'Supplier',
+          reason: row.recommendationReason || '',
+          items: quotedItems
+        };
+      })
     });
   } catch (error) { return next(error); }
 });

@@ -440,7 +440,7 @@ protectedRouter.post('/purchase-orders/:id/send-to-suppliers', allowRoles(...pro
 
     const [poItems] = await connection.execute(
       `SELECT poi.id AS purchaseOrderItemId, poi.item_name AS itemName, poi.description,
-         poi.quantity, poi.unit
+         poi.quantity, poi.unit, poi.unit_price AS unitPrice
         FROM purchase_order_items poi WHERE poi.purchase_order_id = ? ORDER BY poi.id`,
       [purchaseOrderId]
     );
@@ -474,12 +474,17 @@ protectedRouter.post('/purchase-orders/:id/send-to-suppliers', allowRoles(...pro
       );
       const responseId = Number(responseResult.insertId);
       for (const [index, item] of poItems.entries()) {
+        // The price already recorded on the purchase order is shown to the
+        // supplier as a starting point; they can change it before submitting.
+        const initialUnitPrice = Number(item.unitPrice) || 0;
+        const initialLineTotal = roundMoney(initialUnitPrice * Number(item.quantity));
         await connection.execute(
           `INSERT INTO purchase_order_pricing_response_items
              (response_id, purchase_order_item_id, item_no, item_name, description, quantity, unit, unit_price, line_total)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [responseId, item.purchaseOrderItemId, index + 1, item.itemName,
-            item.description || null, item.quantity, item.unit || 'unit']
+            item.description || null, item.quantity, item.unit || 'unit',
+            initialUnitPrice, initialLineTotal]
         );
       }
       await writeAudit(connection, req.user.id, 'pricing_request_sent', 'purchase_order', purchaseOrderId, {
@@ -578,7 +583,21 @@ protectedRouter.post('/purchase-orders/:id/send-to-suppliers', allowRoles(...pro
     });
   } catch (error) {
     if (connection) await connection.rollback().catch(() => {});
-    if (error.status) return res.status(error.status).json({ message: error.message });
+    if (error.status) {
+      if (error.status === 400) {
+        // Client-side diagnostics for a rejected supplier invitation. The
+        // response body already carries this message, but keeping it in the
+        // container logs makes a failed modal submission traceable.
+        console.warn('[send-to-suppliers] rejected:', {
+          purchaseOrderId: req.params.id,
+          reason: error.message,
+          supplierIds: req.body?.supplierIds,
+          submissionDeadline: req.body?.submissionDeadline,
+          messageLength: String(req.body?.message ?? '').length
+        });
+      }
+      return res.status(error.status).json({ message: error.message });
+    }
     return next(error);
   } finally {
     connection?.release();
@@ -1025,24 +1044,29 @@ publicRouter.get('/supplier-pricing/:token', async (req, res, next) => {
         unit: row.unit,
         description: row.description
       })),
-      response: isSubmitted ? {
+      // The supplier's own line prices are available before submission so the
+      // form opens with the price already recorded on the purchase order.
+      // Another supplier's figures are never part of this token-gated view.
+      response: {
         status: response.status,
-        subtotal: response.subtotal,
-        vatRate: response.vatRate,
-        vatAmount: response.vatAmount,
-        otherCharges: response.otherCharges,
-        total: response.total,
-        quotationValidity: response.quotationValidity,
-        deliveryLeadTime: response.deliveryLeadTime,
-        comments: response.comments,
-        technicalRemarks: response.technicalRemarks,
-        submittedAt: response.submittedAt,
+        ...(isSubmitted ? {
+          subtotal: response.subtotal,
+          vatRate: response.vatRate,
+          vatAmount: response.vatAmount,
+          otherCharges: response.otherCharges,
+          total: response.total,
+          quotationValidity: response.quotationValidity,
+          deliveryLeadTime: response.deliveryLeadTime,
+          comments: response.comments,
+          technicalRemarks: response.technicalRemarks,
+          submittedAt: response.submittedAt
+        } : {}),
         items: rows.map((row) => ({
           purchaseOrderItemId: row.purchaseOrderItemId,
           unitPrice: row.unitPrice,
           lineTotal: row.lineTotal
         }))
-      } : null
+      }
     });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });

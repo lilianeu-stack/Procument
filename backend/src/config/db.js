@@ -69,6 +69,15 @@ async function columnExists(table, column) {
   return Boolean(rows[0]?.total);
 }
 
+async function tableExists(table) {
+  const [rows] = await pool.query(
+    `SELECT COUNT(*) AS total FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [table]
+  );
+  return Boolean(rows[0]?.total);
+}
+
 async function constraintExists(table, constraint) {
   const [rows] = await pool.query(
     `SELECT COUNT(*) AS total FROM information_schema.TABLE_CONSTRAINTS
@@ -198,13 +207,21 @@ export async function applySchemaMigrations() {
 
     // Registered supplier address used by the official purchase-order form.
     { table: 'suppliers', column: 'address', ddl: 'ALTER TABLE suppliers ADD COLUMN address VARCHAR(255) NULL AFTER phone' },
+    { table: 'suppliers', column: 'city', ddl: 'ALTER TABLE suppliers ADD COLUMN city VARCHAR(60) NULL AFTER address' },
+    { table: 'suppliers', column: 'district', ddl: 'ALTER TABLE suppliers ADD COLUMN district VARCHAR(60) NULL AFTER city' },
+    { table: 'suppliers', column: 'sector', ddl: 'ALTER TABLE suppliers ADD COLUMN sector VARCHAR(60) NULL AFTER district' },
+    { table: 'suppliers', column: 'cell', ddl: 'ALTER TABLE suppliers ADD COLUMN cell VARCHAR(60) NULL AFTER sector' },
 
     // Official purchase-order document fields. Existing rows receive safe
     // defaults and keep their historical status, reference and amounts.
     { table: 'purchase_orders', column: 'type', ddl: "ALTER TABLE purchase_orders ADD COLUMN type VARCHAR(50) NOT NULL DEFAULT 'Standard' AFTER supplier_id" },
     { table: 'purchase_orders', column: 'supplier_contact', ddl: 'ALTER TABLE purchase_orders ADD COLUMN supplier_contact VARCHAR(150) NULL AFTER type' },
     { table: 'purchase_orders', column: 'supplier_address', ddl: 'ALTER TABLE purchase_orders ADD COLUMN supplier_address VARCHAR(255) NULL AFTER supplier_contact' },
-    { table: 'purchase_orders', column: 'subtotal', ddl: 'ALTER TABLE purchase_orders ADD COLUMN subtotal DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER supplier_address' },
+    // Uploaded signature images are stored as processed WebP data URLs so the
+    // official document can print them without a second authenticated request.
+    { table: 'purchase_orders', column: 'prepared_signature', ddl: 'ALTER TABLE purchase_orders ADD COLUMN prepared_signature MEDIUMTEXT NULL AFTER supplier_address' },
+    { table: 'purchase_orders', column: 'approved_signature', ddl: 'ALTER TABLE purchase_orders ADD COLUMN approved_signature MEDIUMTEXT NULL AFTER prepared_signature' },
+    { table: 'purchase_orders', column: 'subtotal', ddl: 'ALTER TABLE purchase_orders ADD COLUMN subtotal DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER approved_signature' },
     { table: 'purchase_orders', column: 'vat_rate', ddl: 'ALTER TABLE purchase_orders ADD COLUMN vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER subtotal' },
     { table: 'purchase_orders', column: 'vat_amount', ddl: 'ALTER TABLE purchase_orders ADD COLUMN vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER vat_rate' },
     { table: 'purchase_orders', column: 'amount_in_words', ddl: 'ALTER TABLE purchase_orders ADD COLUMN amount_in_words VARCHAR(500) NULL AFTER vat_amount' },
@@ -270,15 +287,21 @@ export async function applySchemaMigrations() {
     { table: 'notifications', column: 'updated_at', ddl: 'ALTER TABLE notifications ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'notifications', column: 'category', ddl: "ALTER TABLE notifications ADD COLUMN category VARCHAR(40) NOT NULL DEFAULT 'general' AFTER link" },
     { table: 'audit_logs', column: 'previous_status', ddl: 'ALTER TABLE audit_logs ADD COLUMN previous_status VARCHAR(80) NULL AFTER details' },
-    { table: 'audit_logs', column: 'new_status', ddl: 'ALTER TABLE audit_logs ADD COLUMN new_status VARCHAR(80) NULL AFTER previous_status' }
+    { table: 'audit_logs', column: 'new_status', ddl: 'ALTER TABLE audit_logs ADD COLUMN new_status VARCHAR(80) NULL AFTER previous_status' },
+    // Recommendation details captured when a committee form is emailed. Older
+    // installations need these columns; fresh tables create them directly.
+    { table: 'rfq_committee_reviews', column: 'recommended_supplier_id', ddl: 'ALTER TABLE rfq_committee_reviews ADD COLUMN recommended_supplier_id INT UNSIGNED NULL AFTER recipient_email' },
+    { table: 'rfq_committee_reviews', column: 'reason', ddl: 'ALTER TABLE rfq_committee_reviews ADD COLUMN reason TEXT NULL AFTER recommended_supplier_id' }
   ];
   for (const migration of additions) {
+    if (!(await tableExists(migration.table))) continue;
     if (!(await columnExists(migration.table, migration.column))) await pool.query(migration.ddl);
   }
   await pool.query("UPDATE inventory_movements SET direction = 'Out' WHERE movement_type = 'Issue'");
   await pool.query("UPDATE inventory_movements SET reference_no = CONCAT('LEGACY-', id) WHERE reference_no IS NULL");
 
   const foreignKeys = [
+    { table: 'rfq_committee_reviews', name: 'fk_rfq_committee_review_supplier', ddl: 'ALTER TABLE rfq_committee_reviews ADD CONSTRAINT fk_rfq_committee_review_supplier FOREIGN KEY (recommended_supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL' },
     { table: 'departments', name: 'fk_departments_parent', ddl: 'ALTER TABLE departments ADD CONSTRAINT fk_departments_parent FOREIGN KEY (parent_id) REFERENCES departments(id) ON DELETE RESTRICT' },
     { table: 'items', name: 'fk_items_department', ddl: 'ALTER TABLE items ADD CONSTRAINT fk_items_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
     { table: 'requisitions', name: 'fk_req_supervisor', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE SET NULL' },
@@ -288,6 +311,7 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', name: 'fk_movement_store_request', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE SET NULL' }
   ];
   for (const key of foreignKeys) {
+    if (!(await tableExists(key.table))) continue;
     if (!(await constraintExists(key.table, key.name))) await pool.query(key.ddl);
   }
 
@@ -427,6 +451,8 @@ export async function applySchemaMigrations() {
       created_by INT UNSIGNED NULL,
       recipient_name VARCHAR(200) NOT NULL,
       recipient_email VARCHAR(190) NOT NULL,
+      recommended_supplier_id INT UNSIGNED NULL,
+      reason TEXT NULL,
       report_snapshot JSON NOT NULL,
       status VARCHAR(30) NOT NULL DEFAULT 'Pending',
       sent_at DATETIME NULL,
@@ -438,6 +464,7 @@ export async function applySchemaMigrations() {
       CONSTRAINT fk_rfq_committee_review_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
       CONSTRAINT fk_rfq_committee_review_member FOREIGN KEY (committee_member_id) REFERENCES procurement_committee_members(id) ON DELETE SET NULL,
       CONSTRAINT fk_rfq_committee_review_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_rfq_committee_review_supplier FOREIGN KEY (recommended_supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
       INDEX idx_rfq_committee_review_rfq (rfq_id, status)
     )`,
     `CREATE TABLE IF NOT EXISTS rfq_committee_decisions (

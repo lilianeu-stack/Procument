@@ -21,6 +21,103 @@ test('procurement workflow keeps only the request summary and Create RFQ action'
   assert.match(workflow, /Total/);
 });
 
+test('Purchase orders surfaces Procurement-recommended suppliers with clickable details', () => {
+  const app = source('../src/App.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
+  const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
+
+  assert.match(app, /onLoadCommitteeRecommendations: \(\) => api\('\/committee-recommendations'\)/);
+  assert.match(pageContent, /suppliers=\{data\.suppliers\}/);
+  assert.match(pageContent, /onLoadCommitteeRecommendations=\{actions\.onLoadCommitteeRecommendations\}/);
+  assert.match(pageContent, /sendPurchaseOrderToSuppliers=\{actions\.sendPurchaseOrderToSuppliers\}/);
+  assert.match(purchaseOrders, /Recommended suppliers/);
+  assert.match(purchaseOrders, /click a supplier to see the quotation, reason and response/);
+  assert.match(purchaseOrders, /View recommended supplier \$\{entry\.recommendedSupplier\}/);
+  assert.match(purchaseOrders, /RecommendedSupplierDetail/);
+  assert.match(purchaseOrders, /Reason for recommendation/);
+  assert.match(purchaseOrders, /Committee response/);
+  assert.match(purchaseOrders, /View purchase order \{entry\.purchaseOrderReference/);
+  assert.match(purchaseOrders, /Create purchase order/);
+  assert.match(purchaseOrders, /supplierId: Number\(selectedRfq\.__supplierId\)/);
+});
+
+test('official purchase order follows the supplied template and requires image signatures', () => {
+  const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
+  const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
+  const approvalPage = source('../src/components/portals/PurchaseOrderApprovalPage.jsx');
+  const app = source('../src/App.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
+
+  assert.match(documentSource, /Supplier Contact:/);
+  assert.match(documentSource, /Payment Modalities:/);
+  assert.match(documentSource, /Please furnish this office the following articles/);
+  assert.match(documentSource, /Item No\./);
+  assert.match(documentSource, /Total Amount in Words: Rwandan Francs/);
+  assert.match(documentSource, /failure to make the full delivery/);
+  assert.match(documentSource, /Sincerely Yours,/);
+  assert.match(documentSource, /SignatureLine/);
+  assert.match(documentSource, /order\.preparedSignature/);
+  assert.match(documentSource, /order\.approvedSignature/);
+  assert.match(purchaseOrders, /SignatureUpload/);
+  assert.match(purchaseOrders, /Upload the Prepared by signature image\./);
+  assert.match(purchaseOrders, /Upload the Approved by signature image\./);
+  assert.match(purchaseOrders, /approvedBySignature: approvedSignature/);
+  assert.match(purchaseOrders, /<SignatureUpload label="Approved by"/);
+  assert.match(purchaseOrders, /Official signatures/);
+  assert.match(purchaseOrders, /Supplier Email/);
+  assert.match(purchaseOrders, /Supplier Phone/);
+  assert.match(purchaseOrders, /rfq\?\.selectedSupplierEmail/);
+  assert.match(purchaseOrders, /rfq\?\.selectedSupplierPhone/);
+  assert.match(purchaseOrders, /supplierEmail: entry\.supplierEmail/);
+  assert.match(purchaseOrders, /supplierPhone: entry\.supplierPhone/);
+  assert.match(purchaseOrders, /onSaveSignatures/);
+  assert.match(approvalPage, /Upload the Approved by signature image before approving\./);
+  assert.match(approvalPage, /signature: approvedSignature/);
+  assert.match(app, /savePurchaseOrderSignatures: \(id, form\) => mutate\(`\/purchase-orders\/\$\{id\}\/signatures`, form, 'PATCH'\)/);
+  assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
+});
+
+test('create purchase order uses supplier-entered quotation lines without a financial summary', () => {
+  const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
+
+  assert.ok(!purchaseOrders.includes('Financial Summary'));
+  assert.ok(purchaseOrders.includes('function supplierQuoteLines(items)'));
+  assert.ok(purchaseOrders.includes('setPoSelection({ rfqId: entry.rfqId, supplierId: entry.supplierId, items: entry.items || [] })'));
+  assert.ok(purchaseOrders.includes('initialItems={poSelection?.items || linkedRecommendation?.items || []}'));
+  assert.ok(purchaseOrders.includes('onLoadQuotes={onLoadQuotes}'));
+  assert.ok(pageContent.includes('onLoadQuotes={actions.onLoadQuotes}'));
+});
+
+test('supplier pricing request blocks a past submission deadline before sending', () => {
+  const modal = source('../src/components/portals/SupplierSelectionModal.jsx');
+
+  assert.match(modal, /const TODAY = new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/);
+  assert.match(modal, /deadline && deadline < TODAY/);
+  assert.match(modal, /min=\{TODAY\}/);
+});
+
+test('supplier pricing form opens with prefilled prices and only a comments input', () => {
+  const pricing = source('../src/components/portals/SupplierPricingPage.jsx');
+
+  // Prices already set on the purchase order seed the editable form and totals.
+  assert.match(pricing, /const quoted = new Map\(\(response\?\.items \|\| \[\]\)/);
+  assert.match(pricing, /const price = quoted\.get\(id\)\?\.unitPrice/);
+  assert.match(pricing, /return \{ items: prices, comments: response\?\.comments \|\| '' \};/);
+  assert.match(pricing, /calculateSupplierTotals\(quotedItems, vatRate, 0\)/);
+
+  // Only a single Comments card remains; the extra quotation fields are gone.
+  assert.match(pricing, /<PageCard title="Comments" description="Add any notes for Procurement about your prices\.">/);
+  assert.match(pricing, /<label className="block text-xs font-bold">Comments/);
+  for (const removed of [
+    'Currency', 'Other charges', 'Delivery lead time', 'Quotation validity period',
+    'Your Quotation', 'Your subtotal', 'Pricing comments',
+    'Technical / commercial remarks', 'validity period and your delivery lead time'
+  ]) {
+    assert.ok(!pricing.includes(removed), `supplier pricing form still renders ${removed}`);
+  }
+});
+
 test('RFQ form has only start/deadline dates and a searchable multi-supplier dropdown', () => {
   const rfqs = source('../src/pages/RfqsPage.jsx');
   const app = source('../src/App.jsx');
@@ -40,6 +137,10 @@ test('RFQ form has only start/deadline dates and a searchable multi-supplier dro
   assert.match(rfqs, /value="awaiting">Awaiting response/);
   assert.match(rfqs, /View responses \(\$\{rfq\.responses\.length\}\)/);
   assert.match(rfqs, /Send to Committee/);
+  assert.match(rfqs, /View Commit Results/);
+  assert.match(rfqs, /bg-accent-tint px-3 py-2 text-xs font-bold text-accent-text/);
+  assert.match(rfqs, /disabled=\{!selectedRfq \|\| committeeBusy\}/);
+  assert.match(rfqs, /function viewCommitteeResults\(\)[\s\S]*?viewQuotes\(selectedRfq\)/);
   assert.match(rfqs, /onSendToCommittee\(payload\)/);
   assert.match(rfqs, /Select all RFQs with supplier responses shown/);
   assert.match(rfqs, /Select \$\{rfq\.reference\} for Procurement Committee/);
@@ -50,11 +151,8 @@ test('RFQ form has only start/deadline dates and a searchable multi-supplier dro
   assert.match(pageContent, /onSendToCommittee=\{actions\.onSendRfqToCommittee\}/);
   assert.match(pageContent, /onPreviewCommittee=\{actions\.onPreviewCommittee\}/);
   assert.match(pageContent, /onLoadCommitteeReviews=\{actions\.onLoadCommitteeReviews\}/);
-  assert.match(rfqs, /Create a PO for supplier/);
-  assert.match(rfqs, /selectedRfq\.status !== 'Awarded'/);
-  assert.match(rfqs, /selectedRfqHasPurchaseOrder/);
-  assert.match(pageContent, /purchaseOrders=\{data\.purchaseOrders\}/);
-  assert.match(pageContent, /onCreatePO=\{actions\.onCreatePO\}/);
+  assert.doesNotMatch(rfqs, /Create a PO for supplier/);
+  assert.doesNotMatch(rfqs, /selectedRfqHasPurchaseOrder/);
   assert.match(purchaseOrders, /export function OrderForm/);
   assert.match(rfqs, /Invitation sent to suppliers/);
   assert.match(rfqs, /quote\.supplierEmail/);
@@ -87,11 +185,15 @@ test('Send to Committee previews recipient content and stores one decision per l
   assert.match(form, /\/committee-review\/\$\{encodeURIComponent\(token\)\}/);
   assert.match(form, /\/committee-review\/\$\{encodeURIComponent\(token\)\}\/decisions/);
   assert.match(form, /Message from Procurement/);
+  assert.match(form, /Recommended supplier:/);
+  assert.match(form, /Reason for recommendation/);
   assert.match(form, /Supplier response total/);
   assert.match(form, /name="committee-decision"/);
   assert.match(form, /Reason for this decision/);
   assert.match(form, /Your submitted decision/);
+  assert.match(form, /Submitted by/);
   assert.match(form, /one decision per link/);
+  assert.match(rfqs, /Submitted by/);
   assert.match(rfqs, /Resend link/);
   assert.match(app, /onResendCommitteeReview/);
   assert.match(app, /CommitteeReviewPage/);
@@ -114,6 +216,9 @@ test('add supplier form does not ask for a contact person', () => {
   assert.match(suppliers, /Supplier name/);
   assert.match(suppliers, /Email/);
   assert.match(suppliers, /Phone/);
+  assert.match(suppliers, /\['city', 'district', 'sector', 'cell'\]/);
+  assert.match(suppliers, /address: legacyAddress/);
+  assert.match(suppliers, /'Address'/);
   assert.doesNotMatch(suppliers, /Contact person/);
   assert.doesNotMatch(suppliers, /contactName: ''/);
 });

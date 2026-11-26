@@ -93,11 +93,10 @@ export default function PageContent({
   } else if (page === 'RFQs') {
     content = <RfqsPage
       rfqs={data.rfqs} requisitions={data.requisitions} suppliers={data.suppliers}
-      quotations={data.quotations} purchaseOrders={data.purchaseOrders} user={data.user} query={query}
+      quotations={data.quotations} user={data.user} query={query}
       initialRequisitionId={query.requisition} autoOpenCreate={Boolean(query.requisition)}
       committeeMembers={data.committeeMembers}
       onCreate={actions.onCreateRFQ} onLoadQuotes={actions.onLoadQuotes}
-      onCreatePO={actions.onCreatePO}
       onSendToCommittee={actions.onSendRfqToCommittee}
       onPreviewCommittee={actions.onPreviewCommittee}
       onLoadCommitteeReviews={actions.onLoadCommitteeReviews}
@@ -112,12 +111,17 @@ export default function PageContent({
       onCloseRFQ={actions.onCloseRFQ} navigate={navigate} portalApi={portalApi}
     />;
   } else if (page === 'Purchase orders') {
-    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items} user={data.user} query={query} navigate={navigate}
+    content = <PurchaseOrdersPage orders={data.purchaseOrders} rfqs={data.rfqs} items={data.items}
+      suppliers={data.suppliers} user={data.user} query={query} navigate={navigate}
       onCreate={actions.onCreatePO} onDecision={actions.onPODecision} onReceive={actions.onReceivePO}
       getPurchaseOrder={getPurchaseOrder} updatePurchaseOrder={updatePurchaseOrder}
+      onSaveSignatures={actions.savePurchaseOrderSignatures}
       loadApprovers={actions.getPurchaseOrderApprovers}
+      onLoadCommitteeRecommendations={actions.onLoadCommitteeRecommendations}
+      onLoadQuotes={actions.onLoadQuotes}
       onSendForApproval={actions.sendPurchaseOrderForApproval}
-      onRevokeApproval={actions.revokePurchaseOrderApproval} />;
+      onRevokeApproval={actions.revokePurchaseOrderApproval}
+      sendPurchaseOrderToSuppliers={actions.sendPurchaseOrderToSuppliers} />;
   } else if (page === 'Goods receipts') {
     content = <GoodsReceiptsPage receipts={data.goodsReceipts} />;
   } else if (page === 'Invoices') {

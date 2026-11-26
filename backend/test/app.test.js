@@ -4,6 +4,7 @@ import net from 'node:net';
 import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import sharp from 'sharp';
 import app from '../src/app.js';
 import pool, { applySchemaMigrations } from '../src/config/db.js';
 import { amountInWords } from '../src/utils/money.js';
@@ -30,6 +31,13 @@ const createdPricingResponseIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
+}
+
+async function imageSignature() {
+  const buffer = await sharp({
+    create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
+  }).png().toBuffer();
+  return `data:image/png;base64,${buffer.toString('base64')}`;
 }
 
 async function request(path, { method = 'GET', user, body } = {}) {
@@ -1751,7 +1759,11 @@ async function createAwardedPurchaseOrder(suffix, options = {}) {
 
   const purchaseOrder = await request('/purchase-orders', {
     method: 'POST', user: users.procurement,
-    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate(), type }
+    body: {
+      rfqId: rfq.data.id, deliveryDate: futureBusinessDate(), type,
+      preparedBySignature: await imageSignature(),
+      approvedBySignature: await imageSignature()
+    }
   });
   assert.equal(purchaseOrder.response.status, 201, purchaseOrder.data.message);
   createdPurchaseOrderIds.push(purchaseOrder.data.id);
@@ -1912,7 +1924,10 @@ test('purchase orders stay linked to their original department request', async (
 
   const purchaseOrder = await request('/purchase-orders', {
     method: 'POST', user: users.procurement,
-    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate() }
+    body: {
+      rfqId: rfq.data.id, deliveryDate: futureBusinessDate(),
+      preparedBySignature: await imageSignature(), approvedBySignature: await imageSignature()
+    }
   });
   assert.equal(purchaseOrder.response.status, 201, purchaseOrder.data.message);
   createdPurchaseOrderIds.push(purchaseOrder.data.id);
@@ -2552,14 +2567,26 @@ test('purchase order send-for-approval uses secure links, real SMTP, recipient-o
     assert.equal(unauthorizedDecision.response.status, 403);
     assert.equal(relay.messages.length, 1, 'an invalid or unauthorized decision must not notify anyone');
 
-    const approved = await request(`${publicPath}/decision`, {
+    const missingSignature = await request(`${publicPath}/decision`, {
       method: 'POST', user: approver,
       body: { decision: 'Approved', comment: 'Amounts verified against the awarded quotation.' }
+    });
+    assert.equal(missingSignature.response.status, 400);
+    assert.match(missingSignature.data.message, /signature image before approving/i);
+
+    const approvalSignature = await imageSignature();
+    const approved = await request(`${publicPath}/decision`, {
+      method: 'POST', user: approver,
+      body: {
+        decision: 'Approved', comment: 'Amounts verified against the awarded quotation.',
+        signature: approvalSignature
+      }
     });
     assert.equal(approved.response.status, 200, approved.data.message);
     assert.equal(approved.data.approval.status, 'Approved');
     assert.equal(approved.data.approval.purchaseOrder.status, 'Approved');
     assert.equal(approved.data.approval.purchaseOrder.approvedBy, approver.name);
+    assert.match(approved.data.approval.purchaseOrder.approvedSignature, /^data:image\/webp;base64,/);
     assert.equal(approved.data.approval.decisionComment, 'Amounts verified against the awarded quotation.');
     assert.equal(approved.data.emailDelivery.ok, true);
     assert.equal(relay.messages.length, 2);
@@ -2940,7 +2967,14 @@ test('supplier pricing requests keep original purchase orders, isolate private l
       assert.equal(document.pricingRequest.supplier.name, suppliers[index].name);
       assert.equal(document.pricingRequest.supplier.email, suppliers[index].email);
       assert.equal(document.pricingRequest.isSubmitted, false);
-      assert.equal(document.response, null);
+      // The supplier's own line prices are seeded from the purchase order so
+      // the form opens with unit prices and totals already filled in.
+      assert.ok(document.response, 'the supplier view includes its seeded prices');
+      assert.equal(document.response.items.length, 1);
+      assert.equal(Number(document.response.items[0].purchaseOrderItemId), poItemId);
+      assert.equal(Number(document.response.items[0].unitPrice), Number(originalLine.unitPrice));
+      assert.equal(Number(document.response.items[0].lineTotal),
+        Math.round((Number(originalLine.unitPrice) * Number(originalLine.quantity) + Number.EPSILON) * 100) / 100);
       assert.equal(document.items.length, 1);
       assert.equal(document.items[0].description, 'Official form line');
       assert.equal(Number(document.items[0].quantity), Number(originalLine.quantity));
@@ -2949,7 +2983,9 @@ test('supplier pricing requests keep original purchase orders, isolate private l
       const other = suppliers.find((entry) => entry.id !== suppliers[index].id);
       assert.ok(!json.includes(other.name));
       assert.ok(!json.includes(other.email));
-      for (const secret of ['token_hash', 'tokenHash', 'unit_price', 'amount_in_words', String(original.total)]) {
+      // Line prices and line totals are intentionally shown to the supplier.
+      // Raw tokens, column names and the written-out amount stay private.
+      for (const secret of ['token_hash', 'tokenHash', 'unit_price', 'amount_in_words']) {
         assert.ok(!json.includes(secret), `private pricing view must not expose ${secret}`);
       }
     }

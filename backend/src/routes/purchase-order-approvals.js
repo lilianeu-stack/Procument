@@ -7,8 +7,13 @@ import {
   emailFailureMessage, expireApprovalIfNeeded, findApprovalByToken,
   notifySenderOfDecision, recordPurchaseOrderDecision, transaction
 } from './workflows.js';
+import { normalizeSignature } from '../utils/signature.js';
 
 const router = Router();
+
+function httpError(status, message) {
+  return Object.assign(new Error(message), { status });
+}
 
 function invalidDecision(decision, comment) {
   if (!['Approved', 'Rejected'].includes(decision)) {
@@ -57,6 +62,19 @@ router.post('/purchase-order-approvals/:token/decision', optionalAuthenticate, a
     await expireApprovalIfNeeded(connection, approval);
     assertApprovalLinkUsable(approval);
     assertApprovalRecipient(req.user, approval);
+    if (decision === 'Approved' && !req.body.signature) {
+      throw httpError(400, 'Upload the Approved by signature image before approving.');
+    }
+
+    const approvedSignature = decision === 'Approved'
+      ? await normalizeSignature(req.body.signature, 'Approved by')
+      : null;
+    if (approvedSignature) {
+      await connection.execute(
+        'UPDATE purchase_orders SET approved_signature = ? WHERE id = ?',
+        [approvedSignature, approval.purchaseOrderId]
+      );
+    }
 
     await recordPurchaseOrderDecision(connection, {
       id: approval.purchaseOrderId,

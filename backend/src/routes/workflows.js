@@ -14,6 +14,7 @@ import {
 import { getSettings } from '../services/settings.js';
 import { emailConfigStatus } from '../utils/email-config.js';
 import { amountInWords, calculatePurchaseTotals, roundMoney } from '../utils/money.js';
+import { normalizeSignature } from '../utils/signature.js';
 import {
   createPurchaseOrderApprovalToken, hashPurchaseOrderApprovalToken,
   isValidPurchaseOrderApprovalToken
@@ -176,6 +177,7 @@ export async function loadPurchaseOrder(executor, id) {
       p.delivery_date AS deliveryDate,
       p.supplier_id AS supplierId, p.supplier_contact AS supplierContact,
       p.supplier_address AS supplierAddress,
+      p.prepared_signature AS preparedSignature, p.approved_signature AS approvedSignature,
       p.subtotal, p.vat_rate AS vatRate, p.vat_amount AS vatAmount,
       p.amount_in_words AS amountInWords, p.total,
       p.approved_at AS approvedAt, p.created_at AS createdAt, p.updated_at AS updatedAt,
@@ -256,6 +258,8 @@ export async function loadPurchaseOrder(executor, id) {
     supplierId: order.supplierId,
     supplierContact: order.supplierContact,
     supplierAddress: order.supplierAddress,
+    preparedSignature: order.preparedSignature || null,
+    approvedSignature: order.approvedSignature || null,
     preparedBy: order.preparedBy,
     approvedBy: order.approvedBy || null,
     approvedAt: order.approvedAt || null,
@@ -1137,8 +1141,15 @@ router.get('/purchase-orders', async (req, res, next) => {
         p.subtotal, p.vat_rate AS vatRate, p.vat_amount AS vatAmount,
         p.amount_in_words AS amountInWords, p.total,
         p.approved_at AS approvedAt, p.created_at AS createdAt, p.updated_at AS updatedAt,
+        p.supplier_id AS supplierId,
         s.name AS supplier, r.reference AS requisition, r.id AS requisitionId,
         f.reference AS rfq, f.id AS rfqId,
+        (SELECT cr.recommended_supplier_id FROM rfq_committee_reviews cr
+          WHERE cr.rfq_id = f.id AND cr.recommended_supplier_id IS NOT NULL
+          ORDER BY cr.id DESC LIMIT 1) AS recommendedSupplierId,
+        (SELECT rs.name FROM rfq_committee_reviews cr
+          JOIN suppliers rs ON rs.id = cr.recommended_supplier_id
+          WHERE cr.rfq_id = f.id ORDER BY cr.id DESC LIMIT 1) AS recommendedSupplier,
         (SELECT GROUP_CONCAT(CONCAT(poi.item_name, ' × ', poi.quantity, ' @ ', FORMAT(poi.unit_price, 2)) SEPARATOR ', ')
          FROM purchase_order_items poi WHERE poi.purchase_order_id = p.id) AS items
        FROM purchase_orders p JOIN suppliers s ON s.id = p.supplier_id
@@ -1176,30 +1187,78 @@ router.get('/purchase-orders', async (req, res, next) => {
 router.post('/purchase-orders', allowRoles(...procurement), async (req, res, next) => {
   const rfqId = Number(req.body.rfqId);
   if (!Number.isInteger(rfqId)) return res.status(400).json({ message: 'Choose an awarded RFQ.' });
+  // Procurement may create the PO directly from its committee-recommended
+  // supplier. Without an explicit supplier the awarded quotation stays authoritative.
+  const supplierId = req.body.supplierId === undefined || req.body.supplierId === null || req.body.supplierId === ''
+    ? null
+    : Number(req.body.supplierId);
+  if (supplierId !== null && !Number.isInteger(supplierId)) {
+    return res.status(400).json({ message: 'Choose a valid recommended supplier.' });
+  }
   const type = text(req.body.type, 50) || 'Standard';
   let deliveryDate;
+  let preparedSignature = null;
+  let approvedSignature = null;
   try {
     deliveryDate = businessDate(req.body.deliveryDate, 'Delivery date', { allowPast: false });
+    preparedSignature = await normalizeSignature(req.body.preparedBySignature, 'Prepared by');
+    approvedSignature = await normalizeSignature(req.body.approvedBySignature, 'Approved by');
   } catch (error) {
     return res.status(error.status || 400).json({ message: error.message });
   }
+  if (!preparedSignature) {
+    return res.status(400).json({ message: 'Upload the Prepared by signature image.' });
+  }
+  if (!approvedSignature) {
+    return res.status(400).json({ message: 'Upload the Approved by signature image.' });
+  }
   return transaction(async (connection) => {
-    const [[rfq]] = await connection.execute(
-      `SELECT f.id, f.reference, f.requisition_id, f.selected_quotation_id,
-        q.supplier_id, q.amount,
-        s.name AS supplier_name, s.contact_name AS supplier_contact_name,
-        s.phone AS supplier_phone, s.email AS supplier_email, s.address AS supplier_address
-       FROM rfqs f
-       JOIN quotations q ON q.id = f.selected_quotation_id
-       JOIN suppliers s ON s.id = q.supplier_id
-       WHERE f.id = ? AND f.status = 'Awarded' FOR UPDATE`,
-      [rfqId]
-    );
+    if (supplierId !== null) {
+      const [[recommendation]] = await connection.execute(
+        'SELECT id FROM rfq_committee_reviews WHERE rfq_id = ? AND recommended_supplier_id = ? LIMIT 1',
+        [rfqId, supplierId]
+      );
+      if (!recommendation) {
+        throw httpError(409, 'That supplier is not Procurement’s recommendation for this RFQ.');
+      }
+    }
+    const [[rfq]] = supplierId !== null
+      ? await connection.execute(
+        `SELECT f.id, f.reference, f.requisition_id, q.id AS selected_quotation_id,
+          q.supplier_id, q.amount,
+          s.name AS supplier_name, s.contact_name AS supplier_contact_name,
+          s.phone AS supplier_phone, s.email AS supplier_email, s.address AS supplier_address
+         FROM rfqs f
+         JOIN quotations q ON q.rfq_id = f.id AND q.supplier_id = ?
+         JOIN suppliers s ON s.id = q.supplier_id
+        WHERE f.id = ?
+        ORDER BY q.id DESC LIMIT 1 FOR UPDATE`,
+        [supplierId, rfqId]
+      )
+      : await connection.execute(
+        `SELECT f.id, f.reference, f.requisition_id, f.selected_quotation_id,
+          q.supplier_id, q.amount,
+          s.name AS supplier_name, s.contact_name AS supplier_contact_name,
+          s.phone AS supplier_phone, s.email AS supplier_email, s.address AS supplier_address
+         FROM rfqs f
+         JOIN quotations q ON q.id = f.selected_quotation_id
+         JOIN suppliers s ON s.id = q.supplier_id
+        WHERE f.id = ? AND f.status = 'Awarded' FOR UPDATE`,
+        [rfqId]
+      );
     if (!rfq) {
-      throw httpError(409, 'Only an awarded RFQ can be converted to a purchase order.');
+      throw httpError(409, supplierId !== null
+        ? 'The recommended supplier has no quotation for this RFQ.'
+        : 'Only an awarded RFQ can be converted to a purchase order.');
     }
     const [[existing]] = await connection.execute('SELECT id FROM purchase_orders WHERE rfq_id = ?', [rfqId]);
     if (existing) throw httpError(409, 'A purchase order already exists for this RFQ.');
+    if (supplierId !== null) {
+      await connection.execute(
+        "UPDATE rfqs SET selected_quotation_id = ?, status = 'Awarded' WHERE id = ?",
+        [rfq.selected_quotation_id, rfqId]
+      );
+    }
 
     const [requestLines] = await connection.execute(
       `SELECT item_name AS itemName, description, quantity, unit,
@@ -1250,11 +1309,11 @@ router.post('/purchase-orders', allowRoles(...procurement), async (req, res, nex
     const [result] = await connection.execute(
       `INSERT INTO purchase_orders
        (reference, rfq_id, quotation_id, supplier_id, type, supplier_contact, supplier_address,
-        subtotal, vat_rate, vat_amount, amount_in_words, total, delivery_date,
-        supplier_pricing_status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Required', ?)`,
+        prepared_signature, approved_signature, subtotal, vat_rate, vat_amount, amount_in_words,
+        total, delivery_date, supplier_pricing_status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Required', ?)`,
       [poReference, rfqId, rfq.selected_quotation_id, rfq.supplier_id, type,
-        supplierContact, supplierAddress, totals.subtotal, totals.vatRate,
+        supplierContact, supplierAddress, preparedSignature, approvedSignature, totals.subtotal, totals.vatRate,
         totals.vatAmount, totals.amountInWords, totals.total, deliveryDate, req.user.id]
     );
     for (const line of lines) {
@@ -1268,7 +1327,7 @@ router.post('/purchase-orders', allowRoles(...procurement), async (req, res, nex
     }
     await writeAudit(
       connection, req.user.id, 'created', 'purchase_order', result.insertId,
-      { reference: poReference, type, subtotal: totals.subtotal, vatAmount: totals.vatAmount, total: totals.total },
+      { reference: poReference, type, supplier: rfq.supplier_name, subtotal: totals.subtotal, vatAmount: totals.vatAmount, total: totals.total },
       { newStatus: 'Pending approval' }
     );
     await createNotification(
@@ -1611,6 +1670,49 @@ router.patch('/purchase-orders/:id', allowRoles(...procurement), async (req, res
     const purchaseOrder = await loadPurchaseOrder(connection, id);
     return { body: { message: 'Purchase order updated.', purchaseOrder, ...purchaseOrder } };
   }, res, next);
+});
+
+// Signature images belong to the official document, not to the financial
+// editing flow. Procurement signs the prepared block; approvers sign the
+// approved block; administrators may complete either one.
+router.patch('/purchase-orders/:id/signatures', allowRoles('admin', 'procurement', 'approver'), async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id < 1) return res.status(400).json({ message: 'Invalid purchase order identifier.' });
+  const updates = {};
+  try {
+    if (Object.prototype.hasOwnProperty.call(req.body, 'preparedBySignature')) {
+      if (!procurement.includes(req.user.role)) {
+        return res.status(403).json({ message: 'Only Procurement may upload the prepared-by signature.' });
+      }
+      updates.prepared_signature = await normalizeSignature(req.body.preparedBySignature, 'Prepared by');
+    }
+    if (Object.prototype.hasOwnProperty.call(req.body, 'approvedBySignature')) {
+      if (!approvers.includes(req.user.role)) {
+        return res.status(403).json({ message: 'Only an approver may upload the approved-by signature.' });
+      }
+      updates.approved_signature = await normalizeSignature(req.body.approvedBySignature, 'Approved by');
+    }
+  } catch (error) {
+    return res.status(error.status || 400).json({ message: error.message });
+  }
+  const columns = Object.keys(updates);
+  if (!columns.length) {
+    return res.status(400).json({ message: 'Choose a signature image to upload.' });
+  }
+  try {
+    const [[order]] = await pool.execute('SELECT reference FROM purchase_orders WHERE id = ?', [id]);
+    if (!order) return res.status(404).json({ message: 'Purchase order not found.' });
+    await pool.execute(
+      `UPDATE purchase_orders SET ${columns.map((column) => `${column} = ?`).join(', ')} WHERE id = ?`,
+      [...columns.map((column) => updates[column]), id]
+    );
+    await writeAudit(pool, req.user.id, 'signature_uploaded', 'purchase_order', id, {
+      reference: order.reference,
+      signatures: columns.map((column) => (column === 'prepared_signature' ? 'preparedBy' : 'approvedBy'))
+    });
+    const purchaseOrder = await loadPurchaseOrder(pool, id);
+    return res.json({ message: 'Signature saved.', purchaseOrder, ...purchaseOrder });
+  } catch (error) { return next(error); }
 });
 
 router.patch('/purchase-orders/:id/decision', allowRoles(...approvers), async (req, res, next) => {

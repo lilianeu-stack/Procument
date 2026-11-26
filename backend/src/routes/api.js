@@ -28,6 +28,35 @@ const procurementRoles = ['admin', 'procurement'];
 const approverRoles = ['admin', 'approver'];
 const storeRoles = ['admin', 'storekeeper'];
 const COMMITTEE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SUPPLIER_ADDRESS_FIELDS = ['city', 'district', 'sector', 'cell'];
+
+function supplierAddressValues(body, existing = {}) {
+  const fields = {};
+  for (const field of SUPPLIER_ADDRESS_FIELDS) {
+    const raw = body[field] === undefined ? existing[field] : body[field];
+    if (raw !== undefined && raw !== null && typeof raw !== 'string') {
+      return { error: `${field[0].toUpperCase()}${field.slice(1)} must be text.` };
+    }
+    const value = String(raw || '').trim();
+    if (value.length > 60) {
+      return { error: `${field[0].toUpperCase()}${field.slice(1)} must be 60 characters or fewer.` };
+    }
+    fields[field] = value || null;
+  }
+
+  const parts = SUPPLIER_ADDRESS_FIELDS.map((field) => fields[field]).filter(Boolean);
+  const rawAddress = body.address === undefined ? existing.address : body.address;
+  if (rawAddress !== undefined && rawAddress !== null && typeof rawAddress !== 'string') {
+    return { error: 'Address must be text.' };
+  }
+  const legacyAddress = String(rawAddress || '').trim();
+  if (legacyAddress.length > 255) return { error: 'Address must be 255 characters or fewer.' };
+
+  return {
+    ...fields,
+    address: parts.length ? parts.join(', ') : legacyAddress || null
+  };
+}
 
 router.post('/auth/login', async (req, res, next) => {
   try {
@@ -867,7 +896,9 @@ router.get('/inventory/movements', allowRoles(...storeRoles, ...procurementRoles
 router.get('/suppliers', async (_req, res, next) => {
   try {
     const [suppliers] = await pool.query(
-      'SELECT id, name, contact_name AS contactName, email, phone, rating, status FROM suppliers ORDER BY name'
+      `SELECT id, name, contact_name AS contactName, email, phone, address,
+        city, district, sector, cell, rating, status
+       FROM suppliers ORDER BY name`
     );
     return res.json({ suppliers });
   } catch (error) {
@@ -878,10 +909,15 @@ router.get('/suppliers', async (_req, res, next) => {
 router.post('/suppliers', allowRoles(...procurementRoles), async (req, res, next) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ message: 'Supplier name is required.' });
+  const address = supplierAddressValues(req.body);
+  if (address.error) return res.status(400).json({ message: address.error });
   try {
     const [result] = await pool.execute(
-      'INSERT INTO suppliers (name, contact_name, email, phone) VALUES (?, ?, ?, ?)',
-      [name, req.body.contactName || null, req.body.email || null, req.body.phone || null]
+      `INSERT INTO suppliers
+        (name, contact_name, email, phone, address, city, district, sector, cell)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, req.body.contactName || null, req.body.email || null, req.body.phone || null,
+        address.address, address.city, address.district, address.sector, address.cell]
     );
     await pool.execute(
       'INSERT INTO audit_logs (user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?)',
@@ -904,15 +940,23 @@ router.patch('/suppliers/:id', allowRoles(...procurementRoles), async (req, res,
   try {
     await connection.beginTransaction();
     const [existing] = await connection.execute(
-      'SELECT id, name FROM suppliers WHERE id = ? LIMIT 1 FOR UPDATE', [id]
+      `SELECT id, name, address, city, district, sector, cell
+       FROM suppliers WHERE id = ? LIMIT 1 FOR UPDATE`, [id]
     );
     if (!existing.length) {
       await connection.rollback();
       return res.status(404).json({ message: 'Supplier not found.' });
     }
+    const address = supplierAddressValues(req.body, existing[0]);
+    if (address.error) {
+      await connection.rollback();
+      return res.status(400).json({ message: address.error });
+    }
     await connection.execute(
-      'UPDATE suppliers SET name = ?, email = ?, phone = ? WHERE id = ?',
-      [name, email, phone, id]
+      `UPDATE suppliers
+       SET name = ?, email = ?, phone = ?, address = ?, city = ?, district = ?, sector = ?, cell = ?
+       WHERE id = ?`,
+      [name, email, phone, address.address, address.city, address.district, address.sector, address.cell, id]
     );
     await writeAudit(connection, req.user.id, 'updated', 'supplier', String(id), {
       name: existing[0].name, updatedName: name

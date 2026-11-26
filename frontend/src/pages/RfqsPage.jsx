@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Archive, Check, CheckCircle2, ChevronDown, Clock3, FileEdit, FileText,
-  RefreshCw, Search, Send, ShoppingCart, X as XIcon
+  RefreshCw, Search, Send, X as XIcon
 } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
 import CommitteeReviewModal from './CommitteeReviewModal.jsx';
-import { OrderForm } from './PurchaseOrdersPage.jsx';
 import { currency, dateTimeLabel } from '../utils/format.js';
 import { toDateTimeInputValue, toUtcDateTimeInputValue } from '../utils/dates.js';
 
@@ -205,9 +204,9 @@ const SUMMARY_CARDS = [
 ];
 
 export default function RfqsPage({
-  rfqs = [], requisitions = [], suppliers = [], quotations = [], purchaseOrders = [], user = {}, query = {},
+  rfqs = [], requisitions = [], suppliers = [], quotations = [], user = {}, query = {},
   committeeMembers = [], initialRequisitionId, autoOpenCreate = false,
-  onCreate, onCreatePO, onLoadQuotes, onQuote, onAward, onLoadEmailDeliveries,
+  onCreate, onLoadQuotes, onQuote, onAward, onLoadEmailDeliveries,
   onRetryFailedEmails, onResendRfqEmail, onSendToCommittee, onPreviewCommittee,
   onLoadCommitteeReviews, onResendCommitteeReview, getRfqStats
 }) {
@@ -217,7 +216,6 @@ export default function RfqsPage({
   const [committeeReviews, setCommitteeReviews] = useState([]);
   const [createOpen, setCreateOpen] = useState(autoOpenCreate || Boolean(query.requisition));
   const [quoteOpen, setQuoteOpen] = useState(false);
-  const [poRfq, setPoRfq] = useState(null);
   const [activeRfq, setActiveRfq] = useState(null);
   const [detailRfq, setDetailRfq] = useState(null);
   const [responseFilter, setResponseFilter] = useState('all');
@@ -390,8 +388,6 @@ export default function RfqsPage({
   const selectedRfq = selectedRfqIds.length === 1
     ? rfqs.find((rfq) => String(rfq.id) === selectedRfqIds[0])
     : null;
-  const selectedRfqHasPurchaseOrder = selectedRfq &&
-    purchaseOrders.some((order) => Number(order.rfqId) === Number(selectedRfq.id));
   const loadedResponseDetails = String(responseDetails?.rfq?.id) === String(detailRfq?.id) ? responseDetails : null;
 
   function toggleRfqSelection(rfqId) {
@@ -414,6 +410,11 @@ export default function RfqsPage({
     setError('');
     setNotice('');
     setReviewOpen(true);
+  }
+
+  function viewCommitteeResults() {
+    if (!selectedRfq) return;
+    viewQuotes(selectedRfq);
   }
 
   async function sendCommitteeReview(payload) {
@@ -475,14 +476,14 @@ export default function RfqsPage({
         action={<div className="flex flex-wrap justify-end gap-2">
           {canSendToCommittee && <button type="button" onClick={openCommitteeReview}
             disabled={!selectedRfqIds.length || committeeBusy}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-bold text-black hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
             <Send size={14} />{committeeBusy ? 'Sending…' : `Send to Committee${selectedRfqIds.length ? ` (${selectedRfqIds.length})` : ''}`}
           </button>}
-          {canSendToCommittee && <button type="button" onClick={() => setPoRfq(selectedRfq)}
-            disabled={!selectedRfq || selectedRfq.status !== 'Awarded' || selectedRfqHasPurchaseOrder || committeeBusy}
-            title={!selectedRfq ? 'Select exactly one awarded RFQ' : selectedRfq.status !== 'Awarded' ? 'The RFQ must be awarded to a supplier first' : selectedRfqHasPurchaseOrder ? 'A purchase order already exists for this RFQ' : 'Create a purchase order for the awarded supplier'}
-            className="inline-flex items-center gap-2 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-brand disabled:cursor-not-allowed disabled:opacity-50">
-            <ShoppingCart size={14} />Create a PO for supplier
+          {canSendToCommittee && <button type="button" onClick={viewCommitteeResults}
+            disabled={!selectedRfq || committeeBusy}
+            title={!selectedRfq ? 'Select exactly one RFQ to view committee results' : 'View committee results for the selected RFQ'}
+            className="inline-flex items-center gap-2 rounded-lg border border-accent-border bg-accent-tint px-3 py-2 text-xs font-bold text-accent-text hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
+            <CheckCircle2 size={14} />View Commit Results
           </button>}
         </div>}>
       {visibleRfqs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>
@@ -526,7 +527,7 @@ export default function RfqsPage({
 
     {detailRfq && <Modal title={`RFQ details and supplier responses · ${detailRfq.reference}`} size="xl" onClose={() => setDetailRfq(null)}>
       {canEvaluate && ['Sent', 'Evaluating'].includes(detailRfq.status) && <div className="mb-4 flex justify-end">
-        <button onClick={() => { setActiveRfq(detailRfq); setQuoteOpen(true); }} className="rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">Record quote</button>
+        <button onClick={() => { setActiveRfq(detailRfq); setQuoteOpen(true); }} className="rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">Record quote</button>
       </div>}
         {responsesLoading ? <div role="status" className="p-5 text-sm text-muted">Loading RFQ and supplier response details…</div> :
           loadedResponseDetails ? <>
@@ -605,9 +606,9 @@ export default function RfqsPage({
               </div> : <EmptyState>No supplier responses have been received for this RFQ.</EmptyState>}
             </div>
 
-            {committeeReviews.length > 0 && <div className="border-t border-slate-100 px-5 py-4">
+            {(committeeReviews.length > 0 || canSendToCommittee) && <div className="border-t border-slate-100 px-5 py-4">
               <h3 className="text-xs font-extrabold uppercase tracking-wide">Committee decisions received ({committeeReviews.length})</h3>
-              <div className="mt-3 space-y-3">
+              {committeeReviews.length ? <div className="mt-3 space-y-3">
                 {committeeReviews.map((review) => <article key={review.id} className="rounded-xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-xs font-extrabold">{review.recipientName} · {review.recipientEmail}</h4>
@@ -633,17 +634,18 @@ export default function RfqsPage({
                             {decision.decision === 'Rejected' ? 'Deny' : decision.decision}
                           </span>
                         </div>
+                        <p className="mt-1 text-muted">Submitted by <strong className="text-slate-800">{decision.responderName || review.recipientName}</strong>{decision.decidedAt ? ` · ${dateTimeLabel(decision.decidedAt)}` : ''}</p>
                         {decision.reason && <p className="mt-1 whitespace-pre-wrap text-muted">Reason: {decision.reason}</p>}
                       </li>)}
                     </ul> : <p className="mt-2 text-xs text-muted">No decisions have been submitted from this link yet.</p>}
                 </article>)}
-              </div>
+              </div> : <p className="mt-3 text-xs text-muted">No committee results are available for this RFQ yet.</p>}
             </div>}
           </> : <EmptyState>RFQ details could not be loaded.</EmptyState>}
     </Modal>}
 
     {activeRfq && <div className="mt-5"><PageCard title={`Email delivery · ${activeRfq.reference}`} description=" SMTP acceptance is shown as Accepted by Email Provider, never as Delivered"
-      action={summary?.Failed > 0 && <button disabled={emailBusy} onClick={retryFailed} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50"><RefreshCw size={13} />Retry failed emails</button>}>
+      action={summary?.Failed > 0 && <button disabled={emailBusy} onClick={retryFailed} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black disabled:opacity-50"><RefreshCw size={13} />Retry failed emails</button>}>
       {emailLoading && <div className="p-5 text-sm text-muted">Loading delivery status…</div>}
       {!emailLoading && !emailData && <EmptyState>Select “Email status” on an RFQ to see individual delivery records.</EmptyState>}
       {!emailLoading && summary && <>
@@ -670,12 +672,6 @@ export default function RfqsPage({
       onClose={() => setReviewOpen(false)}
       onPreview={onPreviewCommittee}
       onSend={sendCommitteeReview}
-    />}
-    {poRfq && <OrderForm
-      rfqs={[poRfq]}
-      initialRfqId={poRfq.id}
-      onClose={() => setPoRfq(null)}
-      onSubmit={onCreatePO}
     />}
     {createOpen && <RFQForm requisitions={requisitions} suppliers={suppliers} initialRequisitionId={initialRequisitionId || query.requisition} onClose={() => setCreateOpen(false)} onSubmit={createRfq} />}
     {quoteOpen && activeRfq && <QuoteForm rfq={activeRfq} suppliers={suppliers} onClose={() => setQuoteOpen(false)} onSubmit={onQuote} />}

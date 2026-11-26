@@ -66,7 +66,7 @@ function CommitteeMemberForm({ member, onClose, onSubmit }) {
         <button type="button" disabled={busy} onClick={onClose}
           className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
         <button type="submit" disabled={busy}
-          className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
           {busy ? 'Saving…' : member ? 'Save changes' : 'Add member'}
         </button>
       </div>
@@ -112,7 +112,7 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
       title="Procurement Committee"
       description={`${members.length} committee contact${members.length === 1 ? '' : 's'}`}
       action={<button type="button" onClick={() => setShowForm(true)}
-        className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">
+        className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">
         <Plus size={14} />Add member
       </button>}
     >
@@ -164,7 +164,7 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
           <button type="button" disabled={deleteBusy} onClick={() => setDeletingMember(null)}
             className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
           <button type="button" disabled={deleteBusy} onClick={deleteMember}
-            className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+            className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
             {deleteBusy ? 'Deleting…' : 'Delete member'}
           </button>
         </div>

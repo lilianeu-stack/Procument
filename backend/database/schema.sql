@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS suppliers (
   email VARCHAR(190) NULL,
   phone VARCHAR(50) NULL,
   address VARCHAR(255) NULL,
+  city VARCHAR(60) NULL,
+  district VARCHAR(60) NULL,
+  sector VARCHAR(60) NULL,
+  cell VARCHAR(60) NULL,
   rating DECIMAL(2,1) NOT NULL DEFAULT 0,
   status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -289,6 +293,8 @@ CREATE TABLE IF NOT EXISTS rfq_committee_reviews (
   created_by INT UNSIGNED NULL,
   recipient_name VARCHAR(200) NOT NULL,
   recipient_email VARCHAR(190) NOT NULL,
+  recommended_supplier_id INT UNSIGNED NULL,
+  reason TEXT NULL,
   report_snapshot JSON NOT NULL,
   status VARCHAR(30) NOT NULL DEFAULT 'Pending',
   sent_at DATETIME NULL,
@@ -300,6 +306,7 @@ CREATE TABLE IF NOT EXISTS rfq_committee_reviews (
   CONSTRAINT fk_rfq_committee_review_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
   CONSTRAINT fk_rfq_committee_review_member FOREIGN KEY (committee_member_id) REFERENCES procurement_committee_members(id) ON DELETE SET NULL,
   CONSTRAINT fk_rfq_committee_review_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_rfq_committee_review_supplier FOREIGN KEY (recommended_supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
   INDEX idx_rfq_committee_review_rfq (rfq_id, status)
 );
 
@@ -359,6 +366,8 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   type VARCHAR(50) NOT NULL DEFAULT 'Standard',
   supplier_contact VARCHAR(150) NULL,
   supplier_address VARCHAR(255) NULL,
+  prepared_signature MEDIUMTEXT NULL,
+  approved_signature MEDIUMTEXT NULL,
   subtotal DECIMAL(12,2) NOT NULL DEFAULT 0,
   vat_rate DECIMAL(5,2) NOT NULL DEFAULT 0,
   vat_amount DECIMAL(12,2) NOT NULL DEFAULT 0,

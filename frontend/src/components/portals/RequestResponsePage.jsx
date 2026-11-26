@@ -179,7 +179,7 @@ export default function RequestResponsePage({ token }) {
               {error && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</div>}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-[10px] text-muted">{comment.length}/5000 characters</span>
-                <button type="submit" disabled={busy || !comment.trim()} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50">
+                <button type="submit" disabled={busy || !comment.trim()} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-xs font-bold text-black hover:bg-brand/90 disabled:opacity-50">
                   {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                   {busy ? 'Submitting…' : 'Submit comment'}
                 </button>

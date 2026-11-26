@@ -143,7 +143,7 @@ export default function SupplierRfqPage({ token }) {
             <label className="block text-xs font-bold">Overall comment<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="field mt-1 h-auto py-2" placeholder="Add any comment that should reach Procurement…" /></label>
             <p className="mt-3 text-xs text-muted">Your response, item prices, and comments are visible to Procurement only. Other invited suppliers cannot see them.</p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-              <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-xs font-bold text-white hover:bg-brand/90 disabled:opacity-50">
+              <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-xs font-bold text-black hover:bg-brand/90 disabled:opacity-50">
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
                 {busy ? 'Submitting…' : 'Submit response'}
               </button>

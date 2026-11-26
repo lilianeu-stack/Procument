@@ -136,7 +136,7 @@ function DepartmentForm({ initial, parentId, parentName, onClose, onSubmit }) {
       <ErrorMessage>{error}</ErrorMessage>
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
         <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold">Cancel</button>
-        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save changes' : `Add ${kind}`}</button>
+        <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">{busy ? 'Saving…' : editing ? 'Save changes' : `Add ${kind}`}</button>
       </div>
     </form>
   </Modal>;
@@ -150,7 +150,7 @@ function ConfirmDialog({ title, message, confirmLabel = 'Confirm Delete', onClos
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p>}
       <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
         <button type="button" disabled={busy} onClick={onClose} aria-label="Cancel deletion" className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-50">Cancel</button>
-        <button type="button" disabled={busy || disabled} onClick={onConfirm} aria-label={confirmLabel} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-60">
+        <button type="button" disabled={busy || disabled} onClick={onConfirm} aria-label={confirmLabel} className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-black disabled:cursor-not-allowed disabled:opacity-60">
           {busy && <LoaderCircle size={14} className="animate-spin" />}{busy ? 'Working…' : confirmLabel}
         </button>
       </div>
@@ -548,7 +548,7 @@ export function UsersPage({
               <td className="px-4 py-3 text-muted">All subdepartments</td>
               <td className="px-4 py-3 font-bold">{activeAccountCount}</td>
               <td className="px-4 py-3 text-muted">Accounts across every subdepartment</td>
-              <td className="px-4 py-3 text-right"><button onClick={(event) => { event.stopPropagation(); openDepartment('all'); }} className="rounded-lg bg-brand px-3 py-1.5 font-bold text-white">Manage users</button></td>
+              <td className="px-4 py-3 text-right"><button onClick={(event) => { event.stopPropagation(); openDepartment('all'); }} className="rounded-lg bg-brand px-3 py-1.5 font-bold text-black">Manage users</button></td>
             </tr>
             {topLevelDepartments.map((department) => {
               const children = subdepartments.filter((item) => item.parentId === department.id);
@@ -566,7 +566,7 @@ export function UsersPage({
                 <td className="px-4 py-3 font-bold">{childUsers}</td>
                 <td className="px-4 py-3 text-muted">{department.description || 'No description provided.'}</td>
                 <td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">
-                  <button onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 font-bold text-white">View subdepartments</button>
+                  <button onClick={(event) => { event.stopPropagation(); openDepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 font-bold text-black">View subdepartments</button>
                   <button disabled={busy || dialogBusy} onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setReassignTo(''); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 font-bold text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
                   <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} className="rounded-lg border px-2.5 py-1.5 font-bold"><Pencil size={14} /></button>
                 </div></td>
@@ -581,7 +581,7 @@ export function UsersPage({
       description="Create a subdepartment inside this department, then add users inside that subdepartment."
       action={<div className="flex flex-wrap gap-2">
         <button onClick={resetView} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold"><ChevronLeft size={14} />Back to Departments</button>
-        <button onClick={() => { setCreatingSubdepartmentIn(parentOfSelected); setDialog('department'); }} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white"><Plus size={14} />Add subdepartment</button>
+        <button onClick={() => { setCreatingSubdepartmentIn(parentOfSelected); setDialog('department'); }} className="flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"><Plus size={14} />Add subdepartment</button>
       </div>}
     >
       <div className="overflow-x-auto p-5">
@@ -607,7 +607,7 @@ export function UsersPage({
               <td className="px-4 py-3 font-bold">{department.activeUserCount ?? department.userCount ?? 0}</td>
               <td className="px-4 py-3 text-muted">{department.description || 'No description provided.'}</td>
               <td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">
-                <button onClick={(event) => { event.stopPropagation(); openSubdepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 font-bold text-white">Manage users</button>
+                <button onClick={(event) => { event.stopPropagation(); openSubdepartment(department.id); }} className="rounded-lg bg-slate-900 px-3 py-1.5 font-bold text-black">Manage users</button>
                 <button disabled={busy || dialogBusy} onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForDelete(department); setReassignTo(''); setDialog('delete-department'); }} aria-label={`Delete ${department.name}`} className="rounded-lg border px-2.5 py-1.5 font-bold text-red-600 disabled:opacity-50"><Trash2 size={14} /></button>
                 <button onClick={(event) => { event.stopPropagation(); setSelectedDepartmentForEdit(department); setDialog('department'); }} aria-label={`Edit ${department.name}`} className="rounded-lg border px-2.5 py-1.5 font-bold"><Pencil size={14} /></button>
               </div></td>

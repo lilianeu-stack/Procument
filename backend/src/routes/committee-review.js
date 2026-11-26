@@ -172,13 +172,16 @@ async function persistDecisions(connection, res, review, decisions, responderNam
     const [managers] = await connection.execute(
       "SELECT id FROM users WHERE active = TRUE AND role IN ('admin', 'procurement')"
     );
-    const outcome = decisions[0]?.decision === 'Rejected' ? 'denied' : 'accepted';
+    const submittedDecision = decisions[0];
+    const outcome = submittedDecision?.decision === 'Rejected' ? 'Denied' : 'Accepted';
+    const responder = responderName || review.recipientName;
+    const reason = String(submittedDecision?.reason || '').trim().slice(0, 180);
     for (const manager of managers) {
       await createNotification(
         connection,
         manager.id,
         'Committee decision received',
-        `${review.recipientName} ${outcome} the recommendation for ${review.reference}.`,
+        `${responder} ${outcome} the recommendation for ${review.reference}${reason ? `: ${reason}` : ''}.`,
         `#/admin/RFQs?rfq=${review.rfqId}`,
         'email'
       );

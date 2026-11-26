@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto';
 import net from 'node:net';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import sharp from 'sharp';
 import app from '../src/app.js';
 import pool, { applySchemaMigrations } from '../src/config/db.js';
 
@@ -28,6 +29,13 @@ const createdCommitteeMemberIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
+}
+
+async function imageSignature() {
+  const buffer = await sharp({
+    create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
+  }).png().toBuffer();
+  return `data:image/png;base64,${buffer.toString('base64')}`;
 }
 
 async function request(path, { method = 'GET', user, body } = {}) {
@@ -704,10 +712,38 @@ test('procurement can edit and safely remove suppliers', async () => {
   const suffix = Date.now();
   const created = await request('/suppliers', {
     method: 'POST', user: admin,
-    body: { name: `QA Editable Supplier ${suffix}`, email: `qa.supplier.${suffix}@example.test`, phone: '12345' }
+    body: {
+      name: `QA Editable Supplier ${suffix}`,
+      email: `qa.supplier.${suffix}@example.test`,
+      phone: '12345',
+      city: 'Kigali',
+      district: 'Gasabo',
+      sector: 'Kimihurura',
+      cell: 'Kamutwa'
+    }
   });
   assert.equal(created.response.status, 201, created.data.message);
   createdSupplierIds.push(created.data.id);
+
+  const listed = await request('/suppliers', { user: admin });
+  assert.equal(listed.response.status, 200, listed.data.message);
+  const listedSupplier = listed.data.suppliers.find((supplier) => supplier.id === created.data.id);
+  assert.deepEqual(
+    {
+      city: listedSupplier.city,
+      district: listedSupplier.district,
+      sector: listedSupplier.sector,
+      cell: listedSupplier.cell,
+      address: listedSupplier.address
+    },
+    {
+      city: 'Kigali',
+      district: 'Gasabo',
+      sector: 'Kimihurura',
+      cell: 'Kamutwa',
+      address: 'Kigali, Gasabo, Kimihurura, Kamutwa'
+    }
+  );
 
   const denied = await request(`/suppliers/${created.data.id}`, {
     method: 'PATCH', user: users.requesterA,
@@ -722,15 +758,43 @@ test('procurement can edit and safely remove suppliers', async () => {
 
   const updated = await request(`/suppliers/${created.data.id}`, {
     method: 'PATCH', user: users.procurement,
-    body: { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890' }
+    body: {
+      name: 'QA Updated Supplier',
+      email: 'updated@example.test',
+      phone: '67890',
+      city: 'Huye',
+      district: 'Ngoma',
+      sector: 'Tumba',
+      cell: 'Matyazo'
+    }
   });
   assert.equal(updated.response.status, 200, updated.data.message);
   const [rowsAfterUpdate] = await pool.execute(
-    'SELECT name, email, phone, status FROM suppliers WHERE id = ?', [created.data.id]
+    'SELECT name, email, phone, address, city, district, sector, cell, status FROM suppliers WHERE id = ?', [created.data.id]
   );
   assert.deepEqual(
-    { name: rowsAfterUpdate[0].name, email: rowsAfterUpdate[0].email, phone: rowsAfterUpdate[0].phone, status: rowsAfterUpdate[0].status },
-    { name: 'QA Updated Supplier', email: 'updated@example.test', phone: '67890', status: 'Active' }
+    {
+      name: rowsAfterUpdate[0].name,
+      email: rowsAfterUpdate[0].email,
+      phone: rowsAfterUpdate[0].phone,
+      address: rowsAfterUpdate[0].address,
+      city: rowsAfterUpdate[0].city,
+      district: rowsAfterUpdate[0].district,
+      sector: rowsAfterUpdate[0].sector,
+      cell: rowsAfterUpdate[0].cell,
+      status: rowsAfterUpdate[0].status
+    },
+    {
+      name: 'QA Updated Supplier',
+      email: 'updated@example.test',
+      phone: '67890',
+      address: 'Huye, Ngoma, Tumba, Matyazo',
+      city: 'Huye',
+      district: 'Ngoma',
+      sector: 'Tumba',
+      cell: 'Matyazo',
+      status: 'Active'
+    }
   );
 
   const removed = await request(`/suppliers/${created.data.id}`, {
@@ -1707,7 +1771,10 @@ test('purchase orders stay linked to their original department request', async (
 
   const purchaseOrder = await request('/purchase-orders', {
     method: 'POST', user: users.procurement,
-    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate() }
+    body: {
+      rfqId: rfq.data.id, deliveryDate: futureBusinessDate(),
+      preparedBySignature: await imageSignature(), approvedBySignature: await imageSignature()
+    }
   });
   assert.equal(purchaseOrder.response.status, 201, purchaseOrder.data.message);
   createdPurchaseOrderIds.push(purchaseOrder.data.id);
@@ -2110,6 +2177,11 @@ test('supplier RFQ email delivery, secure links, statuses and retry use the real
     assert.ok(committeeReviewList.data.reviews[0].submittedAt);
     assert.ok(committeeReviewList.data.reviews[0].decisions.some((decision) =>
       decision.decision === 'Rejected' && decision.reason === 'QA committee denial reason'));
+    const decisionNotice = await request('/notifications', { user: users.procurement });
+    assert.ok(decisionNotice.data.notifications.some((notice) =>
+      notice.title === 'Committee decision received' &&
+      notice.body.includes('QA Committee Reviewer') &&
+      notice.body.includes('QA committee denial reason')));
     const messagesAfterCommittee = relay.messages.length;
 
     const singleDeliveries = await request(`/rfqs/${singleRfq.data.id}/email-deliveries`, { user: users.procurement });
@@ -2251,4 +2323,181 @@ test('a sent request form can be resent with the current public response link', 
       else process.env[name] = savedEnv[name];
     }
   }
+});
+
+test('a Procurement-recommended supplier appears in purchase orders and opens a PO', async () => {
+  const stamp = Date.now();
+  const supplierResponse = await request('/suppliers', {
+    method: 'POST', user: admin,
+    body: { name: `QA Recommended Supplier ${stamp}`, email: `qa.recommended.${stamp}@example.test`, contactName: 'QA Contact', phone: '+250700000111' }
+  });
+  assert.equal(supplierResponse.response.status, 201, supplierResponse.data.message);
+  const supplierId = Number(supplierResponse.data.id);
+  createdSupplierIds.push(supplierId);
+  await pool.execute('UPDATE suppliers SET address = ? WHERE id = ?', ['QA Recommended Address', supplierId]);
+
+  const department = await createDepartment(`QA Recommendation Dept ${stamp}`);
+  const supervisor = await createUser('QA Recommendation Supervisor', `qa.rec.supervisor.${stamp}@example.org`, 'supervisor', department.id);
+  const requester = await createUser('QA Recommendation Requester', `qa.rec.requester.${stamp}@example.org`, 'requestor', department.id);
+  const created = await submitRequest(requester, 'PORECOMMEND');
+  assert.equal(created.response.status, 201, created.data.message);
+  assert.equal((await request(`/portal/supervisor/requisitions/${created.data.id}/decision`, {
+    method: 'POST', user: supervisor, body: { decision: 'Approve' }
+  })).response.status, 200);
+  assert.equal((await request(`/portal/supervisor/requisitions/${created.data.id}/forward`, {
+    method: 'POST', user: supervisor, body: {}
+  })).response.status, 200);
+
+  const rfq = await request('/rfqs', {
+    method: 'POST', user: users.procurement,
+    body: { requisitionId: created.data.id, supplierIds: [supplierId], startDate: todayIsoDate(), dueDate: futureBusinessDate() }
+  });
+  assert.equal(rfq.response.status, 201, rfq.data.message);
+  createdRfqIds.push(rfq.data.id);
+
+  const [quoteRows] = await pool.execute(
+    `INSERT INTO quotations (rfq_id, supplier_id, amount, delivery_days, quality_score, rating_score, notes, submitted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())`,
+    [rfq.data.id, supplierId, 250, 4, 5, 5, 'Best value for the school']
+  );
+  const quotationId = Number(quoteRows.insertId);
+  const [[requestLine]] = await pool.execute('SELECT id FROM requisition_items WHERE requisition_id = ? ORDER BY id LIMIT 1', [created.data.id]);
+  await pool.execute(
+    `INSERT INTO quotation_items
+      (quotation_id, requisition_item_id, item_name, description, quantity, unit, unit_price, line_total, comment)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [quotationId, requestLine.id, 'QA item PORECOMMEND', 'Recommended line', 2, 'unit', 125, 250, 'Included in quotation']
+  );
+
+  const committeeMember = await request('/procurement-committee', {
+    method: 'POST', user: admin,
+    body: { firstName: 'QA', lastName: `Recommendation ${stamp}`, email: `qa.rec.member.${stamp}@example.test`, phone: '+250700000222' }
+  });
+  assert.equal(committeeMember.response.status, 201, committeeMember.data.message);
+  createdCommitteeMemberIds.push(committeeMember.data.id);
+
+  const snapshot = {
+    suppliers: [{
+      supplierId,
+      name: `QA Recommended Supplier ${stamp}`,
+      items: [{
+        quotationItemId: 0,
+        itemName: 'QA item PORECOMMEND',
+        description: 'Recommended line',
+        quantity: 2,
+        unit: 'unit',
+        unitPrice: 125,
+        lineTotal: 250,
+        comment: 'Included in quotation'
+      }]
+    }]
+  };
+  await pool.execute(
+    `INSERT INTO rfq_committee_reviews
+      (rfq_id, token, committee_member_id, created_by, recipient_name, recipient_email,
+       recommended_supplier_id, reason, report_snapshot, status, sent_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sent', UTC_TIMESTAMP())`,
+    [rfq.data.id, randomBytes(32).toString('hex'), committeeMember.data.id, users.procurement.id,
+      'QA Recommendation Member', `qa.rec.member.${stamp}@example.test`, supplierId,
+      'Lowest quoted price with the shortest delivery time', JSON.stringify(snapshot)]
+  );
+
+  const recommendationList = await request('/committee-recommendations', { user: users.procurement });
+  assert.equal(recommendationList.response.status, 200, recommendationList.data.message);
+  const recommendation = recommendationList.data.recommendations.find((entry) => Number(entry.rfqId) === Number(rfq.data.id));
+  assert.ok(recommendation, 'the recommended supplier must appear in the Purchase orders recommendations feed');
+  assert.equal(Number(recommendation.supplierId), supplierId);
+  assert.equal(recommendation.recommendedSupplier, `QA Recommended Supplier ${stamp}`);
+  assert.equal(recommendation.reason, 'Lowest quoted price with the shortest delivery time');
+  assert.equal(Number(recommendation.quotationAmount), 250);
+  assert.ok(recommendation.items.some((item) => item.itemName === 'QA item PORECOMMEND'));
+  assert.equal(recommendation.purchaseOrderId, null);
+  assert.equal((await request('/committee-recommendations', { user: requester })).response.status, 403);
+
+  const missingSignature = await request('/purchase-orders', {
+    method: 'POST', user: users.procurement,
+    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate() }
+  });
+  assert.equal(missingSignature.response.status, 400);
+  assert.match(missingSignature.data.message, /prepared by signature image/i);
+
+  const missingApprovedSignature = await request('/purchase-orders', {
+    method: 'POST', user: users.procurement,
+    body: { rfqId: rfq.data.id, deliveryDate: futureBusinessDate(), preparedBySignature: await imageSignature() }
+  });
+  assert.equal(missingApprovedSignature.response.status, 400);
+  assert.match(missingApprovedSignature.data.message, /approved by signature image/i);
+
+  const invalidSupplier = await request('/purchase-orders', {
+    method: 'POST', user: users.procurement,
+    body: {
+      rfqId: rfq.data.id, supplierId: supplierId + 1000, deliveryDate: futureBusinessDate(),
+      preparedBySignature: await imageSignature(), approvedBySignature: await imageSignature()
+    }
+  });
+  assert.equal(invalidSupplier.response.status, 409);
+  assert.match(invalidSupplier.data.message, /not Procurement/i);
+
+  const purchaseOrder = await request('/purchase-orders', {
+    method: 'POST', user: users.procurement,
+    body: {
+      rfqId: rfq.data.id, supplierId, deliveryDate: futureBusinessDate(), type: 'Standard',
+      preparedBySignature: await imageSignature(), approvedBySignature: await imageSignature()
+    }
+  });
+  assert.equal(purchaseOrder.response.status, 201, purchaseOrder.data.message);
+  createdPurchaseOrderIds.push(purchaseOrder.data.id);
+
+  const [[awarded]] = await pool.execute('SELECT status, selected_quotation_id FROM rfqs WHERE id = ?', [rfq.data.id]);
+  assert.equal(awarded.status, 'Awarded');
+  assert.equal(Number(awarded.selected_quotation_id), quotationId);
+
+  const orders = await request('/purchase-orders', { user: admin });
+  assert.equal(orders.response.status, 200);
+  const listed = orders.data.purchaseOrders.find((order) => Number(order.id) === purchaseOrder.data.id);
+  assert.ok(listed);
+  assert.equal(Number(listed.supplierId), supplierId);
+  assert.equal(Number(listed.recommendedSupplierId), supplierId);
+  assert.equal(listed.recommendedSupplier, `QA Recommended Supplier ${stamp}`);
+
+  const refreshedRecommendation = await request('/committee-recommendations', { user: users.procurement });
+  const linked = refreshedRecommendation.data.recommendations.find((entry) => Number(entry.rfqId) === Number(rfq.data.id));
+  assert.equal(Number(linked.purchaseOrderId), Number(purchaseOrder.data.id));
+  assert.equal(linked.purchaseOrderReference, purchaseOrder.data.reference);
+
+  const detail = await request(`/purchase-orders/${purchaseOrder.data.id}`, { user: admin });
+  assert.equal(detail.response.status, 200);
+  assert.equal(detail.data.purchaseOrder.reference, purchaseOrder.data.reference);
+  assert.equal(detail.data.purchaseOrder.supplier, `QA Recommended Supplier ${stamp}`);
+  assert.ok(detail.data.purchaseOrder.items.length > 0, 'the recommended supplier PO must open with item details');
+  assert.match(detail.data.purchaseOrder.preparedSignature, /^data:image\/webp;base64,/);
+  assert.match(detail.data.purchaseOrder.approvedSignature, /^data:image\/webp;base64,/);
+
+  const signature = await imageSignature();
+  const signaturePath = `/purchase-orders/${purchaseOrder.data.id}/signatures`;
+  const forbiddenSignature = await request(signaturePath, {
+    method: 'PATCH', user: requester, body: { preparedBySignature: signature }
+  });
+  assert.equal(forbiddenSignature.response.status, 403);
+
+  const preparedUpload = await request(signaturePath, {
+    method: 'PATCH', user: users.procurement, body: { preparedBySignature: signature }
+  });
+  assert.equal(preparedUpload.response.status, 200, preparedUpload.data.message);
+  assert.match(preparedUpload.data.purchaseOrder.preparedSignature, /^data:image\/webp;base64,/);
+
+  const approvedUpload = await request(signaturePath, {
+    method: 'PATCH', user: admin, body: { approvedBySignature: signature }
+  });
+  assert.equal(approvedUpload.response.status, 200, approvedUpload.data.message);
+  assert.match(approvedUpload.data.purchaseOrder.approvedSignature, /^data:image\/webp;base64,/);
+
+  const signedDetail = await request(`/purchase-orders/${purchaseOrder.data.id}`, { user: admin });
+  assert.match(signedDetail.data.purchaseOrder.preparedSignature, /^data:image\/webp;base64,/);
+  assert.match(signedDetail.data.purchaseOrder.approvedSignature, /^data:image\/webp;base64,/);
+
+  const invalidSignature = await request(signaturePath, {
+    method: 'PATCH', user: users.procurement, body: { preparedBySignature: 'data:image/png;base64,not-an-image' }
+  });
+  assert.equal(invalidSignature.response.status, 400);
 });

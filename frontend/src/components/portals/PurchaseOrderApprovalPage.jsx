@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import PrintButton from '../ui/PrintButton.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
+import SignatureUpload from '../ui/SignatureUpload.jsx';
 import PurchaseOrderDocument from '../documents/PurchaseOrderDocument.jsx';
 import SupplierPricingAwardSummary from '../documents/SupplierPricingAwardSummary.jsx';
 import { api } from '../../services/api.js';
@@ -29,6 +30,7 @@ export default function PurchaseOrderApprovalPage({ token }) {
   const [login, setLogin] = useState({ email: '', password: '' });
   const [pendingDecision, setPendingDecision] = useState('');
   const [comment, setComment] = useState('');
+  const [approvedSignature, setApprovedSignature] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -37,6 +39,7 @@ export default function PurchaseOrderApprovalPage({ token }) {
     try {
       const response = await api(`/purchase-order-approvals/${encodeURIComponent(token)}`);
       setApproval(response.approval);
+      setApprovedSignature(response.approval?.purchaseOrder?.approvedSignature || '');
     } catch (exception) {
       if ([401, 403].includes(exception.status)) {
         setNeedsLogin(true);
@@ -71,15 +74,21 @@ export default function PurchaseOrderApprovalPage({ token }) {
     const decision = pendingDecision;
     if (!decision) return;
     if (decision === 'Rejected' && !comment.trim()) { setError('A rejection reason is required.'); return; }
+    if (decision === 'Approved' && !approvedSignature) { setError('Upload the Approved by signature image before approving.'); return; }
     setBusy(true); setError(''); setNotice(''); setEmailWarning('');
     try {
       const result = await api(`/purchase-order-approvals/${encodeURIComponent(token)}/decision`, {
         method: 'POST',
-        body: JSON.stringify({ decision, comment: comment.trim() })
+        body: JSON.stringify({
+          decision,
+          comment: comment.trim(),
+          ...(decision === 'Approved' ? { signature: approvedSignature } : {})
+        })
       });
       setApproval(result.approval);
       setPendingDecision('');
       setComment('');
+      setApprovedSignature(result.approval?.purchaseOrder?.approvedSignature || approvedSignature);
       setNotice(result.message || 'Your decision has been recorded.');
       if (result.emailDelivery && !result.emailDelivery.ok) {
         setEmailWarning(result.emailDelivery.error?.message || result.emailDelivery.reason || 'The sender could not be notified by email.');
@@ -181,6 +190,10 @@ export default function PurchaseOrderApprovalPage({ token }) {
                   placeholder={pendingDecision === 'Approved' ? 'Add an optional comment…' : 'Explain why this purchase order is being rejected…'}
                   className="field mt-1 h-auto py-2" />
               </label>
+              {pendingDecision === 'Approved' && <div>
+                <SignatureUpload label="Approved by" value={approvedSignature} onChange={setApprovedSignature} disabled={busy} />
+                <p className="mt-1 text-[10px] text-muted">Your uploaded image is printed on the Approved by line of the official purchase order.</p>
+              </div>}
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={decide} disabled={busy}
                   className={`inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-bold text-black disabled:opacity-60 ${pendingDecision === 'Approved' ? 'bg-brand' : 'bg-brand'}`}>

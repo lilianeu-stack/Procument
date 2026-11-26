@@ -590,3 +590,8 @@
     animation: none;
   }
 }
+
+.login-shell,
+.login-shell * {
+  color: #000000 !important;
+}

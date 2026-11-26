@@ -190,7 +190,7 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
         <span className="text-[11px] text-muted">Each recipient gets their own private review link.</span>
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
-          <button type="submit" disabled={busy || loading || !report?.length} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          <button type="submit" disabled={busy || loading || !report?.length} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
             {busy ? 'Sending…' : <Check size={14} />}
             {busy ? 'Sending emails…' : `Send to Committee${selectedMembers.length ? ` (${selectedMembers.length})` : ''}`}
           </button>

@@ -4,7 +4,7 @@ import {
   amountInWords, calculatePurchaseTotals, formatRwf, roundMoney
 } from '../../utils/purchaseCalculations.js';
 
-// See MaterialRequestDocument: the second copy is for printing only.
+// The second copy is rendered into the document body for printing only.
 function OfficialSheet({ children, label }) {
   const sheet = () => <article className="official-document purchase-order-document" aria-label={label}>
     {children}
@@ -21,6 +21,18 @@ function Field({ label, value, wide = false }) {
   return <div className={`official-po-field${wide ? ' official-po-field-wide' : ''}`}>
     <span className="official-label">{label}</span>
     <span className="official-value">{value || ''}</span>
+  </div>;
+}
+
+function SignatureLine({ label, name, date, signature }) {
+  return <div className="official-po-signature-line">
+    <span className="official-label">{label}</span>
+    <span className="official-po-signature-image">
+      {signature ? <img src={signature} alt={`${label} signature`} /> : null}
+    </span>
+    <span className="official-signature-line" />
+    <span className="official-value">{name || ''}</span>
+    <span className="official-value official-po-signature-date">{date || ''}</span>
   </div>;
 }
 
@@ -57,8 +69,14 @@ export default function PurchaseOrderDocument({ order = {} }) {
       <Field label="Type:" value={order.type || 'Standard'} />
       <Field label="Address:" value={order.supplierAddress || '—'} />
       <Field label="Date:" value={dateLabel(order.createdAt || order.date) || '—'} />
-      <Field label="Date of Delivery:" value={dateLabel(order.deliveryDate) || '—'} wide />
+      <Field label="Date of Delivery:" value={dateLabel(order.deliveryDate) || '—'} />
+      <Field label="Payment Modalities:" value={order.paymentTerms || '100%'} />
     </div>
+
+    <section className="official-po-notice">
+      <strong>Gentlemen:</strong>
+      <p>Please furnish this office the following articles subject to the terms and conditions contained herein:</p>
+    </section>
 
     <table className="official-table official-po-table">
       <colgroup>
@@ -106,18 +124,21 @@ export default function PurchaseOrderDocument({ order = {} }) {
       </div>
     </div>
 
-    <div className="official-po-approval">
-      <div>
-        <span className="official-label">Prepared By:</span>
-        <span className="official-value">{order.preparedBy || ''}</span>
-        <span className="official-signature-line" />
+    <p className="official-po-terms">
+      In case of failure to make the full delivery within the time specified and specification above.
+    </p>
+
+    <section className="official-po-approval">
+      <p className="official-po-signoff">Sincerely Yours,</p>
+      <div className="official-po-signature-grid">
+        <SignatureLine label="Prepared By:" name={order.preparedBy} signature={order.preparedSignature} />
+        <SignatureLine
+          label="Approved By:"
+          name={approved ? (order.approvedBy || '') : ''}
+          date={approved && order.approvedAt ? dateLabel(order.approvedAt) : ''}
+          signature={order.approvedSignature}
+        />
       </div>
-      <div>
-        <span className="official-label">Approved By:</span>
-        <span className="official-value">{approved ? (order.approvedBy || '') : ''}</span>
-        <span className="official-value">{approved && order.approvedAt ? dateLabel(order.approvedAt) : ''}</span>
-        <span className="official-signature-line" />
-      </div>
-    </div>
+    </section>
   </OfficialSheet>;
 }
