@@ -938,22 +938,29 @@ async function validateConversation(req, otherId) {
   return rows[0];
 }
 
-async function messageRows(connection, where, params) {
+async function messageRows(connection, where, params, viewerId) {
   const [rows] = await connection.execute(
     `SELECT m.id, m.body, m.created_at AS createdAt, m.sender_id AS senderId,
       sender.name AS senderName, sender.profile_photo AS senderPhoto,
       m.recipient_id AS recipientId, recipient.name AS recipientName,
       recipient.profile_photo AS recipientPhoto,
       m.requisition_id AS requisitionId, rr.reference AS requisitionReference, m.is_announcement AS isAnnouncement,
+      CASE WHEN m.sender_id = ? THEN TRUE ELSE COALESCE(mr.is_read, FALSE) END AS isRead,
       (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = m.id) AS attachmentCount
      FROM messages m
      JOIN users sender ON sender.id = m.sender_id
      LEFT JOIN users recipient ON recipient.id = m.recipient_id
      LEFT JOIN requisitions rr ON rr.id = m.requisition_id
+     LEFT JOIN message_recipients mr ON mr.message_id = m.id AND mr.user_id = ?
      WHERE ${where} ORDER BY m.created_at DESC, m.id DESC`,
-    params
+    [viewerId, viewerId, ...params]
   );
-  return rows.map((row) => ({ ...row, isAnnouncement: Boolean(row.isAnnouncement), attachmentCount: Number(row.attachmentCount) || 0 }));
+  return rows.map((row) => ({
+    ...row,
+    isAnnouncement: Boolean(row.isAnnouncement),
+    isRead: Boolean(row.isRead),
+    attachmentCount: Number(row.attachmentCount) || 0
+  }));
 }
 
 router.get('/messages/conversations', allowRoles('supervisor', 'requestor'), async (req, res, next) => {
@@ -1006,17 +1013,14 @@ router.get('/messages/thread', allowRoles('supervisor', 'requestor'), async (req
     const department = await assignedDepartment(req, res);
     if (!department) return;
     const participant = await validateConversation(req, req.query.userId);
+    // Loading a conversation never changes read state. Read state changes only
+    // when the reader opens one message through PATCH /messages/:id/read, so
+    // sibling messages and other recipients stay unread.
     const messages = await messageRows(pool,
       `m.department_id = ? AND m.is_announcement = FALSE
        AND ((m.sender_id = ? AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = ?))`,
-      [department.id, req.user.id, participant.id, participant.id, req.user.id]
-    );
-    await pool.execute(
-      `UPDATE message_recipients mr JOIN messages m ON m.id = mr.message_id
-         SET mr.is_read = TRUE, mr.read_at = NOW()
-       WHERE mr.user_id = ? AND m.sender_id = ? AND m.department_id = ?
-         AND m.recipient_id = ? AND m.is_announcement = FALSE`,
-      [req.user.id, participant.id, department.id, req.user.id]
+      [department.id, req.user.id, participant.id, participant.id, req.user.id],
+      req.user.id
     );
     return res.json({ participant, messages, department });
   } catch (error) { return next(error); }
@@ -1068,11 +1072,11 @@ router.post('/messages', allowRoles('supervisor', 'requestor'), async (req, res,
       await writeAudit(connection, req.user.id, isAnnouncement ? 'department_announcement' : 'message_sent',
         'message', messageId, { departmentId: department.id, recipientCount: recipients.length, requisitionId });
       const link = isAnnouncement
-        ? '#/requester/Messages'
-        : `#/${req.user.role === 'requestor' ? 'supervisor/Department%20Messages' : 'requester/Messages'}?userId=${req.user.id}&request=${requisitionId || ''}`;
+        ? `#/requester/Messages?message=${messageId}`
+        : `#/${req.user.role === 'requestor' ? 'supervisor/Department%20Messages' : 'requester/Messages'}?userId=${req.user.id}&request=${requisitionId || ''}&message=${messageId}`;
       for (const userId of recipients) {
         await createNotification(connection, userId, isAnnouncement ? 'Department announcement' : 'New message',
-          `${req.user.name}: ${body || 'A document was attached.'}`, link);
+          `${req.user.name}: ${body || 'A document was attached.'}`, link, 'message');
       }
       return { status: 201, body: { id: messageId, message: isAnnouncement ? 'Announcement sent to your Department.' : 'Message sent.' } };
     }, res, next);
@@ -1089,6 +1093,12 @@ router.patch('/messages/:id/read', allowRoles('supervisor', 'requestor'), async 
       [messageId, req.user.id]
     );
     if (!result.affectedRows) return res.status(404).json({ message: 'Message not found.' });
+    await pool.execute(
+      `UPDATE notifications SET is_read = TRUE
+        WHERE user_id = ? AND is_read = FALSE AND category = 'message'
+          AND link LIKE CONCAT('%message=', ?)`,
+      [req.user.id, messageId]
+    );
     return res.json({ message: 'Message marked as read.' });
   } catch (error) { return next(error); }
 });

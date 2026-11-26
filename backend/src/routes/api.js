@@ -58,6 +58,44 @@ function supplierAddressValues(body, existing = {}) {
   };
 }
 
+// Sidebar badge keys are the real page names used by the front-end navigation.
+// Counts are returned only for pages the current role can actually open.
+const SIDEBAR_PAGES = {
+  receivedRequests: 'Requests Received from Departments',
+  rfqs: 'RFQs',
+  emailInbox: 'Email Inbox',
+  purchaseOrders: 'Purchase orders',
+  supervisorApprovals: 'Approvals',
+  supervisorRequests: 'Procurement Requests',
+  requesterRequests: 'My Procurement Requests',
+  messages: 'Messages',
+  departmentMessages: 'Department Messages',
+  notifications: 'Notifications',
+  stockNotifications: 'Notification',
+  binCard: 'Bin Card'
+};
+
+function sidebarPagesForRole(role) {
+  if (role === 'admin' || role === 'procurement') {
+    return [
+      SIDEBAR_PAGES.receivedRequests, SIDEBAR_PAGES.rfqs,
+      SIDEBAR_PAGES.emailInbox, SIDEBAR_PAGES.purchaseOrders
+    ];
+  }
+  if (['approver', 'finance', 'committee'].includes(role)) return [SIDEBAR_PAGES.rfqs];
+  if (role === 'supervisor') {
+    return [
+      SIDEBAR_PAGES.supervisorApprovals, SIDEBAR_PAGES.supervisorRequests,
+      SIDEBAR_PAGES.departmentMessages, SIDEBAR_PAGES.notifications
+    ];
+  }
+  if (role === 'requestor') {
+    return [SIDEBAR_PAGES.requesterRequests, SIDEBAR_PAGES.messages, SIDEBAR_PAGES.notifications];
+  }
+  if (role === 'storekeeper') return [SIDEBAR_PAGES.stockNotifications, SIDEBAR_PAGES.binCard];
+  return [];
+}
+
 router.post('/auth/login', async (req, res, next) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
@@ -111,6 +149,72 @@ router.use(authenticate);
 
 router.get('/auth/me', (req, res) => res.json({ user: req.user }));
 
+// One grouped request supplies every sidebar badge. Message counts come from
+// per-recipient read state; notification counts come from the notification rows
+// addressed to this user (or broadcast to everyone). Message notifications are
+// excluded from the generic Notifications count because the message badge
+// already represents the same unread conversation/announcement.
+router.get('/sidebar-counts', async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const [[messageRow]] = await pool.execute(
+      `SELECT COUNT(*) AS total
+         FROM message_recipients mr
+         JOIN messages m ON m.id = mr.message_id
+        WHERE mr.user_id = ? AND mr.is_read = FALSE AND m.sender_id <> ?`,
+      [userId, userId]
+    );
+    const [[notificationRow]] = await pool.execute(
+      `SELECT
+         COALESCE(SUM(CASE WHEN n.category <> 'message'
+           AND n.link NOT LIKE '#/requester/Messages%'
+           AND n.link NOT LIKE '#/supervisor/Department%20Messages%'
+           AND n.link NOT LIKE '#/supervisor/Department Messages%'
+         THEN 1 ELSE 0 END), 0) AS general,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Requests%' THEN 1 ELSE 0 END), 0) AS receivedRequests,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/RFQs%' THEN 1 ELSE 0 END), 0) AS rfqs,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Email%20Inbox%'
+           OR n.link LIKE '#/admin/Email Inbox%' THEN 1 ELSE 0 END), 0) AS emailInbox,
+         COALESCE(SUM(CASE WHEN n.link LIKE '/purchase-orders/%'
+           OR n.link LIKE '#/admin/Purchase%20orders%' THEN 1 ELSE 0 END), 0) AS purchaseOrders,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/supervisor/Approvals%' THEN 1 ELSE 0 END), 0) AS approvals,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/supervisor/Procurement%20Requests%'
+           OR n.link LIKE '#/supervisor/Procurement Requests%' THEN 1 ELSE 0 END), 0) AS supervisorRequests,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/My%20Procurement%20Requests%'
+           OR n.link LIKE '#/requester/My Procurement Requests%' THEN 1 ELSE 0 END), 0) AS requesterRequests,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/Messages%request=%' THEN 1 ELSE 0 END), 0) AS requesterRequestMessages,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Bin%20Card%' THEN 1 ELSE 0 END), 0) AS binCard
+       FROM notifications n
+       WHERE n.is_read = FALSE AND (n.user_id = ? OR n.user_id IS NULL)`,
+      [userId]
+    );
+    const [[emailRow]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM google_email_messages WHERE unread = TRUE'
+    );
+
+    const unreadMessages = Number(messageRow?.total) || 0;
+    const generalNotifications = Number(notificationRow?.general) || 0;
+    const allCounts = {
+      [SIDEBAR_PAGES.messages]: unreadMessages,
+      [SIDEBAR_PAGES.departmentMessages]: unreadMessages,
+      [SIDEBAR_PAGES.notifications]: generalNotifications,
+      [SIDEBAR_PAGES.stockNotifications]: generalNotifications,
+      [SIDEBAR_PAGES.receivedRequests]: Number(notificationRow?.receivedRequests) || 0,
+      [SIDEBAR_PAGES.rfqs]: Number(notificationRow?.rfqs) || 0,
+      [SIDEBAR_PAGES.emailInbox]: Number(emailRow?.total) || 0,
+      [SIDEBAR_PAGES.purchaseOrders]: Number(notificationRow?.purchaseOrders) || 0,
+      [SIDEBAR_PAGES.supervisorApprovals]: Number(notificationRow?.approvals) || 0,
+      [SIDEBAR_PAGES.supervisorRequests]: Number(notificationRow?.supervisorRequests) || 0,
+      [SIDEBAR_PAGES.requesterRequests]: (Number(notificationRow?.requesterRequests) || 0)
+        + (Number(notificationRow?.requesterRequestMessages) || 0),
+      [SIDEBAR_PAGES.binCard]: Number(notificationRow?.binCard) || 0
+    };
+    const counts = {};
+    for (const page of sidebarPagesForRole(req.user.role)) counts[page] = allCounts[page] || 0;
+    return res.json({ counts });
+  } catch (error) { return next(error); }
+});
+
 // Personal Profile is available to every authenticated account. It is mounted
 // before the portal allow-lists below so each role can manage only itself.
 router.use('/profile', profile);
@@ -122,7 +226,8 @@ router.use((req, res, next) => {
   if (req.user.role === 'storekeeper') {
     const allowed = req.path === '/auth/me'
       || req.path === '/notifications' || req.path.startsWith('/notifications/')
-      || req.path === '/portal/stockkeeper' || req.path.startsWith('/portal/stockkeeper/');
+      || req.path === '/portal/stockkeeper' || req.path.startsWith('/portal/stockkeeper/')
+      || req.path === '/exports' || req.path.startsWith('/exports/');
     if (allowed) return next();
     return res.status(403).json({ message: 'This area is not available in your portal.' });
   }

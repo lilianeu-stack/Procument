@@ -128,13 +128,13 @@ function ItemTable({ lines, onChange, onAdd, onRemove }) {
   return <div className="space-y-3">
     <div className="overflow-x-auto rounded-lg border border-brand">
       <table className="w-full min-w-[760px] text-left text-xs">
-        <thead className="bg-white text-[10px] uppercase text-muted">
+        <thead className="bg-white text-[10px] uppercase text-black">
           <tr>{['Item No.', 'Quantity', 'Unit', 'Description', 'Unit Price', 'Total Price', ''].map((heading) =>
             <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}</tr>
         </thead>
         <tbody className="divide-y">
           {lines.map((line, index) => <tr key={line.id || `line-${index}`} className="align-top">
-            <td className="px-3 py-3 font-bold text-muted">{index + 1}</td>
+            <td className="px-3 py-3 font-bold text-black">{index + 1}</td>
             <td className="px-3 py-3"><input required type="number" min="1" step="1" value={line.quantity}
               onChange={(event) => onChange(index, 'quantity', event.target.value)} className="field mt-0 w-20" /></td>
             <td className="px-3 py-3"><input required value={line.unit}
@@ -149,7 +149,7 @@ function ItemTable({ lines, onChange, onAdd, onRemove }) {
               onChange={(event) => onChange(index, 'unitPrice', event.target.value)} className="field mt-0 w-28" /></td>
             <td className="whitespace-nowrap px-3 py-4 font-bold">{formatRwf((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}</td>
             <td className="px-3 py-3"><button type="button" onClick={() => onRemove(index)} aria-label={`Remove line ${index + 1}`}
-              className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-white hover:text-black">
+              className="inline-flex items-center gap-1 rounded-lg p-2 text-black hover:bg-white hover:text-black">
               <Trash2 size={14} /><span className="text-[10px] font-bold">Remove</span>
             </button></td>
           </tr>)}
@@ -346,10 +346,10 @@ export function OrderForm({
             </select>
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value="Assigned when saved" className="field bg-white text-muted" />
+            <input readOnly value="Assigned when saved" className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-white text-muted" />
+            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
@@ -360,12 +360,12 @@ export function OrderForm({
       <section className="rounded-lg border border-brand bg-white p-4">
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Registered supplier information</h3>
         <dl className="grid gap-3 text-xs sm:grid-cols-4">
-          <div><dt className="text-[10px] text-muted">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
-          <div><dt className="text-[10px] text-muted">Supplier Email</dt><dd className="break-all font-bold">{supplier.email}</dd></div>
-          <div><dt className="text-[10px] text-muted">Supplier Phone</dt><dd className="font-bold">{supplier.phone}</dd></div>
-          <div><dt className="text-[10px] text-muted">Address</dt><dd className="font-bold">{supplier.address}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier Email</dt><dd className="break-all font-bold">{supplier.email}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier Phone</dt><dd className="font-bold">{supplier.phone}</dd></div>
+          <div><dt className="text-[10px] text-black">Address</dt><dd className="font-bold">{supplier.address}</dd></div>
         </dl>
-        <p className="mt-2 text-[10px] text-muted">Registered details come from the awarded or Procurement-recommended supplier quotation and are printed on the official purchase order.</p>
+        <p className="mt-2 text-[10px] text-black">Registered details come from the awarded or Procurement-recommended supplier quotation and are printed on the official purchase order.</p>
       </section>
 
       <section className="grid gap-5 sm:grid-cols-2">
@@ -377,14 +377,14 @@ export function OrderForm({
           <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Approved by signature</h3>
           <SignatureUpload label="Approved by" value={approvedSignature} onChange={setApprovedSignature} />
         </div>
-        <p className="sm:col-span-2 text-[10px] text-muted">Both signature images are required before the official purchase order can be saved.</p>
+        <p className="sm:col-span-2 text-[10px] text-black">Both signature images are required before the official purchase order can be saved.</p>
       </section>
 
       <section>
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
         <ItemTable lines={lines} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
-        <p className="mt-2 text-[10px] text-muted">Items, quantities, descriptions and prices are the lines the selected supplier entered in its quotation. Requisition estimates are used only when a supplier did not provide itemised lines.</p>
+        <p className="mt-2 text-[10px] text-black">Items, quantities, descriptions and prices are the lines the selected supplier entered in its quotation. Requisition estimates are used only when a supplier did not provide itemised lines.</p>
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
@@ -456,10 +456,10 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order details</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-bold">Supplier
-            <input readOnly value={order.supplier || '—'} className="field bg-white text-muted" />
+            <input readOnly value={order.supplier || '—'} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value={order.reference || '—'} className="field bg-white text-muted" />
+            <input readOnly value={order.reference || '—'} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Supplier Contact
             <input value={form.supplierContact} onChange={(event) => setForm({ ...form, supplierContact: event.target.value })} className="field" />
@@ -473,13 +473,13 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
             <input value={form.supplierAddress} onChange={(event) => setForm({ ...form, supplierAddress: event.target.value })} className="field" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-white text-muted" />
+            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
           </label>
         </div>
-        <p className="mt-2 text-[10px] text-muted">VAT is fixed at {vatRate}% by the configured business settings and cannot be edited here.</p>
+        <p className="mt-2 text-[10px] text-black">VAT is fixed at {vatRate}% by the configured business settings and cannot be edited here.</p>
       </section>
 
       <section>
@@ -526,41 +526,41 @@ function RecommendedSupplierDetail({ entry, canCreate, onClose, onViewPurchaseOr
       <section className="rounded-lg border-2 border-brand bg-brand-light/40 p-4">
         <span className="inline-flex rounded-full bg-brand px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-widest text-black">Procurement recommendation</span>
         <p className="mt-3 text-lg font-extrabold text-black">{entry.recommendedSupplier}</p>
-        <strong className="mt-3 block text-[10px] font-extrabold uppercase tracking-wide text-muted">Reason for recommendation</strong>
+        <strong className="mt-3 block text-[10px] font-extrabold uppercase tracking-wide text-black">Reason for recommendation</strong>
         <p className="mt-1 whitespace-pre-wrap font-semibold leading-relaxed text-black">{entry.reason || 'No reason was recorded for this recommendation.'}</p>
       </section>
 
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div><dt className="text-[10px] font-bold uppercase text-muted">RFQ</dt><dd className="font-bold">{entry.reference || '—'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Requisition</dt><dd className="font-bold">{entry.requisitionReference || '—'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Department</dt><dd className="font-bold">{entry.department || '—'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Recommended by</dt><dd className="font-bold">{entry.recipientName || 'Procurement'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Sent</dt><dd className="font-bold">{dateTimeLabel(entry.sentAt)}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Committee response</dt><dd className="font-bold">{recommendationDecisionLabel(entry.decision)}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Submitted by</dt><dd className="font-bold">{entry.responderName || '—'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-muted">Decision reason</dt><dd className="whitespace-pre-wrap font-bold">{entry.decisionReason || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">RFQ</dt><dd className="font-bold">{entry.reference || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Requisition</dt><dd className="font-bold">{entry.requisitionReference || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Department</dt><dd className="font-bold">{entry.department || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Recommended by</dt><dd className="font-bold">{entry.recipientName || 'Procurement'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Sent</dt><dd className="font-bold">{dateTimeLabel(entry.sentAt)}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Committee response</dt><dd className="font-bold">{recommendationDecisionLabel(entry.decision)}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Submitted by</dt><dd className="font-bold">{entry.responderName || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Decision reason</dt><dd className="whitespace-pre-wrap font-bold">{entry.decisionReason || '—'}</dd></div>
       </dl>
 
       <section className="rounded-lg border border-brand bg-white p-4">
         <h3 className="mb-3 text-[10px] font-extrabold uppercase tracking-wide">Registered supplier details</h3>
         <dl className="grid gap-3 sm:grid-cols-2">
-          <div><dt className="text-muted">Contact</dt><dd className="font-bold">{entry.supplierContact || '—'}</dd></div>
-          <div><dt className="text-muted">Phone</dt><dd className="font-bold">{entry.supplierPhone || '—'}</dd></div>
-          <div><dt className="text-muted">Email</dt><dd className="font-bold break-words">{entry.supplierEmail || '—'}</dd></div>
-          <div><dt className="text-muted">Address</dt><dd className="font-bold">{entry.supplierAddress || '—'}</dd></div>
+          <div><dt className="text-black">Contact</dt><dd className="font-bold">{entry.supplierContact || '—'}</dd></div>
+          <div><dt className="text-black">Phone</dt><dd className="font-bold">{entry.supplierPhone || '—'}</dd></div>
+          <div><dt className="text-black">Email</dt><dd className="font-bold break-words">{entry.supplierEmail || '—'}</dd></div>
+          <div><dt className="text-black">Address</dt><dd className="font-bold">{entry.supplierAddress || '—'}</dd></div>
         </dl>
       </section>
 
       <section className="rounded-lg border border-brand bg-white p-4">
         <h3 className="mb-3 text-[10px] font-extrabold uppercase tracking-wide">Quotation details</h3>
         <dl className="mb-3 grid gap-3 sm:grid-cols-3">
-          <div><dt className="text-muted">Total quoted amount</dt><dd className="font-extrabold">{formatRwf(entry.quotationAmount)}</dd></div>
-          <div><dt className="text-muted">Delivery days</dt><dd className="font-bold">{entry.deliveryDays ?? '—'}</dd></div>
-          <div><dt className="text-muted">Supplier notes</dt><dd className="whitespace-pre-wrap font-bold">{entry.quotationNotes || '—'}</dd></div>
+          <div><dt className="text-black">Total quoted amount</dt><dd className="font-extrabold">{formatRwf(entry.quotationAmount)}</dd></div>
+          <div><dt className="text-black">Delivery days</dt><dd className="font-bold">{entry.deliveryDays ?? '—'}</dd></div>
+          <div><dt className="text-black">Supplier notes</dt><dd className="whitespace-pre-wrap font-bold">{entry.quotationNotes || '—'}</dd></div>
         </dl>
         {quotedItems.length ? <div className="overflow-x-auto rounded border border-subtle">
           <table className="w-full min-w-[640px] text-left text-[11px]">
-            <thead className="bg-hover text-[10px] uppercase text-muted">
+            <thead className="bg-hover text-[10px] uppercase text-black">
               <tr>{['Item', 'Description', 'Qty', 'Unit price', 'Line total', 'Comment'].map((heading) =>
                 <th key={heading} className="whitespace-nowrap px-2 py-2 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -575,7 +575,7 @@ function RecommendedSupplierDetail({ entry, canCreate, onClose, onViewPurchaseOr
               </tr>)}
             </tbody>
           </table>
-        </div> : <p className="text-muted">No itemised quotation was recorded.</p>}
+        </div> : <p className="text-black">No itemised quotation was recorded.</p>}
       </section>
 
       <div className="flex flex-wrap justify-end gap-2 border-t border-subtle pt-4">
@@ -854,13 +854,13 @@ export default function PurchaseOrdersPage({
       {notice && <div className="px-4 pb-4"><p role="status" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">{notice}</p></div>}
       {activePoStatuses && <div className="px-4 pb-3">
         <button type="button" onClick={() => navigate?.('Purchase orders')} className="inline-flex items-center gap-2 rounded-full border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:bg-hover">
-          Filtered: {query.status}<span className="text-black/50 underline">Clear</span>
+          Filtered: {query.status}<span className="text-black underline">Clear</span>
         </button>
       </div>}
       {visibleRecommendations.length > 0 && <section className="border-y border-subtle bg-white/70 px-4 py-4">
         <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Recommended suppliers</h3>
-          <p className="text-[10px] text-muted">Procurement recommendations sent to the Committee · click a supplier to see the quotation, reason and response</p>
+          <p className="text-[10px] text-black">Procurement recommendations sent to the Committee · click a supplier to see the quotation, reason and response</p>
         </div>
         <div className="grid gap-2 lg:grid-cols-2">
           {visibleRecommendations.map((entry) => <button key={`${entry.rfqId}-${entry.supplierId}`} type="button"
@@ -869,14 +869,14 @@ export default function PurchaseOrdersPage({
             className="flex w-full items-center justify-between gap-3 rounded-lg border border-brand bg-white px-3 py-3 text-left transition hover:border-black hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-1">
             <span className="min-w-0">
               <span className="block break-words text-xs font-extrabold text-black">{entry.recommendedSupplier}</span>
-              <span className="mt-0.5 block break-words text-[10px] text-muted">
+              <span className="mt-0.5 block break-words text-[10px] text-black">
                 {entry.reference}{entry.requisitionReference ? ` · ${entry.requisitionReference}` : ''}
                 {entry.purchaseOrderReference ? ` · ${entry.purchaseOrderReference}` : ''}
               </span>
             </span>
             <span className="shrink-0 text-right">
               <span className="block whitespace-nowrap text-[11px] font-bold text-black">{formatRwf(entry.quotationAmount)}</span>
-              <span className="mt-0.5 block text-[10px] text-muted">{recommendationDecisionLabel(entry.decision)}</span>
+              <span className="mt-0.5 block text-[10px] text-black">{recommendationDecisionLabel(entry.decision)}</span>
             </span>
           </button>)}
         </div>
@@ -894,7 +894,7 @@ export default function PurchaseOrdersPage({
             <col style={{ width: '12%' }} />
             <col style={{ width: '12%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr className="border-b border-subtle">
               {['PO', 'Supplier / registered contact', 'Requisition', 'Type', 'Items', 'Total', 'Delivery', 'Status', 'Actions']
                 .map((cell) => <th key={cell} scope="col" className="whitespace-nowrap px-3 py-3.5 font-extrabold">{cell}</th>)}
@@ -905,24 +905,24 @@ export default function PurchaseOrdersPage({
               <td className="break-words px-3 py-4 font-extrabold leading-5 text-black">{order.reference}</td>
               <td className="px-3 py-4">
                 <div className="break-words font-bold leading-5 text-black">{order.supplier || '—'}</div>
-                <div className="mt-1 break-words text-[10px] leading-4 text-muted">
+                <div className="mt-1 break-words text-[10px] leading-4 text-black">
                   {order.supplierContact || 'No contact recorded'}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}
                 </div>
               </td>
-              <td className="break-words px-3 py-4 font-medium text-muted">{order.requisition || '—'}</td>
+              <td className="break-words px-3 py-4 font-medium text-black">{order.requisition || '—'}</td>
               <td className="px-3 py-4">
                 <span className="inline-flex rounded-md border border-brand bg-white px-2 py-1 text-[10px] font-semibold text-black">
                   {order.type || 'Standard'}
                 </span>
               </td>
-              <td className="whitespace-pre-line break-words px-3 py-4 text-[11px] leading-5 text-muted">{order.items || '—'}</td>
+              <td className="whitespace-pre-line break-words px-3 py-4 text-[11px] leading-5 text-black">{order.items || '—'}</td>
               <td className="whitespace-nowrap px-3 py-4 text-right font-extrabold tabular-nums text-black">{currency(order.total)}</td>
-              <td className="whitespace-nowrap px-3 py-4 tabular-nums text-muted">{dateLabel(order.deliveryDate) || '—'}</td>
+              <td className="whitespace-nowrap px-3 py-4 tabular-nums text-black">{dateLabel(order.deliveryDate) || '—'}</td>
               <td className="px-3 py-4">
                 <StatusBadge value={order.status} className="max-w-full whitespace-normal text-[10px] leading-tight" />
                 {order.supplierPricingStatus && order.supplierPricingStatus !== 'Not requested'
-                  && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">Supplier pricing · {order.supplierPricingStatus}</div>}
-                {order.approval && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">
+                  && <div className="mt-1.5 break-words text-[10px] leading-4 text-black">Supplier pricing · {order.supplierPricingStatus}</div>}
+                {order.approval && <div className="mt-1.5 break-words text-[10px] leading-4 text-black">
                   {order.approval.status === 'Pending' ? `Sent to ${order.approval.recipientName}` : `Approval ${order.approval.status}`}
                   {order.approval.decisionComment ? ` · “${order.approval.decisionComment}”` : ''}
                 </div>}
@@ -974,7 +974,7 @@ export default function PurchaseOrdersPage({
     {recommendationDetail && <RecommendedSupplierDetail entry={recommendationDetail} canCreate={canCreate}
       onClose={() => setRecommendationDetail(null)} onViewPurchaseOrder={viewRecommendedPurchaseOrder}
       onCreatePurchaseOrder={createRecommendedPurchaseOrder} />}
-    {detailLoading && <Modal title="Opening purchase order" onClose={closeDetail}><div className="py-8 text-center text-xs text-muted">Loading official form…</div></Modal>}
+    {detailLoading && <Modal title="Opening purchase order" onClose={closeDetail}><div className="py-8 text-center text-xs text-black">Loading official form…</div></Modal>}
     {!detailLoading && detailMode === 'view' && detail && <Modal title={`Official purchase order · ${detail.reference}`} size="xl" onClose={closeDetail}>
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2">
@@ -995,18 +995,18 @@ export default function PurchaseOrdersPage({
           {detail.approval.status === 'Pending' && canCreate && <button type="button" onClick={() => revokeApproval(detail)} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black">Revoke link</button>}
         </div>
         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div><dt className="text-[10px] text-muted">Recipient</dt><dd className="font-bold">{detail.approval.recipientName || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Sender</dt><dd className="font-bold">{detail.approval.senderName || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Sent</dt><dd className="font-bold">{dateTimeLabel(detail.approval.sentAt)}</dd></div>
-          <div><dt className="text-[10px] text-muted">Decision</dt><dd className="font-bold">{detail.approval.decidedAt ? dateTimeLabel(detail.approval.decidedAt) : '—'}</dd></div>
-          {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-muted">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
+          <div><dt className="text-[10px] text-black">Recipient</dt><dd className="font-bold">{detail.approval.recipientName || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Sender</dt><dd className="font-bold">{detail.approval.senderName || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Sent</dt><dd className="font-bold">{dateTimeLabel(detail.approval.sentAt)}</dd></div>
+          <div><dt className="text-[10px] text-black">Decision</dt><dd className="font-bold">{detail.approval.decidedAt ? dateTimeLabel(detail.approval.decidedAt) : '—'}</dd></div>
+          {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-black">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
         </dl>
       </section>}
       {(canCreate || canApprove) && <section className="no-print mb-4 rounded-lg border border-brand bg-white p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Official signatures</h3>
-            <p className="mt-1 text-[10px] text-muted">Uploaded images appear on the Prepared by and Approved by lines of the purchase order.</p>
+            <p className="mt-1 text-[10px] text-black">Uploaded images appear on the Prepared by and Approved by lines of the purchase order.</p>
           </div>
           <button type="button" onClick={() => { void saveSignatures(); }} disabled={signatureBusy}
             className="rounded-lg bg-brand px-3 py-2 text-[11px] font-bold text-black disabled:opacity-50">

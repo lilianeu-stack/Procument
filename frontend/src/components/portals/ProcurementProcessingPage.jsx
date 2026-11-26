@@ -52,18 +52,18 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
 
   return <div className="space-y-5">
     <div className="no-print flex flex-wrap items-center justify-between gap-3">
-      <button type="button" onClick={backToDocument} className="inline-flex items-center gap-1.5 text-xs font-bold text-muted hover:text-brand">
+      <button type="button" onClick={backToDocument} className="inline-flex items-center gap-1.5 text-xs font-bold text-black hover:text-black">
         <ArrowLeft size={14} />Back to request document
       </button>
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-[10px] font-extrabold uppercase tracking-[.14em] text-brand">Procurement workflow</span>
+        <span className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Procurement workflow</span>
         {request && <button type="button" onClick={() => setCreateOpen(true)} className={primaryButtonClass()}>
           <Plus size={14} />Create RFQ
         </button>}
       </div>
     </div>
 
-    {notice && <div className="no-print rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">{notice}</div>}
+    {notice && <div className="no-print rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-black">{notice}</div>}
     {loading && !request ? <LoadingState label="Opening procurement workflow…" /> : null}
     {!loading && (error || !request) ? <>
       <ErrorState message={error} onRetry={load} />
@@ -78,12 +78,12 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
         <KeyValue label="Estimated total">{currency(request.financials?.grandTotal ?? request.total)}</KeyValue>
       </div>
       <div className="border-t border-slate-100 px-5 py-3">
-        <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-muted">
+        <h3 className="text-[11px] font-extrabold uppercase tracking-[.12em] text-black">
           Requested items ({(request.items || []).length})
         </h3>
         {(request.items || []).length ? <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+            <thead className="bg-slate-50 text-[10px] uppercase text-black">
               <tr>
                 <th className="px-3 py-2.5">Item</th>
                 <th className="px-3 py-2.5">Description</th>
@@ -96,7 +96,7 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
             <tbody className="divide-y divide-slate-100">
               {request.items.map((item) => <tr key={item.id}>
                 <td className="px-3 py-3 font-bold">{item.itemName}</td>
-                <td className="px-3 py-3 text-muted">{item.description || '—'}</td>
+                <td className="px-3 py-3 text-black">{item.description || '—'}</td>
                 <td className="px-3 py-3 font-semibold">{item.quantity}</td>
                 <td className="px-3 py-3">{item.unit || 'unit'}</td>
                 <td className="px-3 py-3">{currency(item.estimatedUnitCost)}</td>
@@ -105,11 +105,11 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
             </tbody>
           </table>
           <div className="flex justify-end border-t border-slate-100 pt-3 text-sm font-extrabold">
-            <span>Total</span><span className="ml-3 text-brand">{currency(request.financials?.grandTotal ?? request.total)}</span>
+            <span>Total</span><span className="ml-3 text-black">{currency(request.financials?.grandTotal ?? request.total)}</span>
           </div>
-        </div> : <p className="mt-2 text-xs text-muted">No items recorded.</p>}
+        </div> : <p className="mt-2 text-xs text-black">No items recorded.</p>}
       </div>
-      <div className="border-t border-slate-100 px-5 py-3 text-[11px] leading-5 text-muted">
+      <div className="border-t border-slate-100 px-5 py-3 text-[11px] leading-5 text-black">
         Approvals and supporting documents remain available in the original document.
       </div>
     </PageCard> : null}

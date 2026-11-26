@@ -12,7 +12,7 @@ export default function Modal({ title, onClose, children, size = 'sm', dismissib
     <section className={`portal-modal w-full ${SIZES[size] || SIZES.sm} max-h-[92vh] overflow-y-auto rounded-2xl border border-strong bg-white p-5  sm:p-6`}>
       <header className="mb-5 flex items-center justify-between">
         <h2 className="display-font text-lg font-extrabold">{title}</h2>
-        {dismissible && <button onClick={onClose} className="rounded-lg p-2 text-muted transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus" aria-label="Close"><X size={18} /></button>}
+        {dismissible && <button onClick={onClose} className="rounded-lg p-2 text-black transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus" aria-label="Close"><X size={18} /></button>}
       </header>
       {children}
     </section>

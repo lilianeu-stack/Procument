@@ -211,8 +211,8 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
       title={editingId ? 'Edit draft purchase request' : 'Create purchase request'}
       description="Describe what your Department needs, attach supporting documents, then review before saving or submitting for approval."
       actions={<div className="flex items-center gap-2">
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'border border-black bg-white text-black' : 'bg-white text-muted'}`}>1 · Details</span>
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'border border-black bg-white text-black' : 'bg-white text-muted'}`}>2 · Review</span>
+        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'border border-black bg-white text-black' : 'bg-white text-black'}`}>1 · Details</span>
+        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'border border-black bg-white text-black' : 'bg-white text-black'}`}>2 · Review</span>
       </div>}
     />
 
@@ -236,8 +236,8 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           <label className="block text-xs font-bold sm:col-span-2">
             Requesting Department
-            <input readOnly value={department} placeholder="Detected from your profile" className="field mt-1.5 bg-white text-muted" />
-            <span className="mt-1 block text-[10px] font-normal text-muted">Automatically detected from your account. Contact an Administrator if it is incorrect.</span>
+            <input readOnly value={department} placeholder="Detected from your profile" className="field mt-1.5 bg-white text-black" />
+            <span className="mt-1 block text-[10px] font-normal text-black">Automatically detected from your account. Contact an Administrator if it is incorrect.</span>
           </label>
           <label className="block text-xs font-bold sm:col-span-2">
             Title *
@@ -271,7 +271,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
               {PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}
             </select>
           </label>
-          <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-muted sm:col-span-1">
+          <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-black sm:col-span-1">
             <Info size={14} className="mb-1 text-black" />
             Drafts stay with you until submitted. Once submitted, your Department Supervisor receives the request for approval.
           </div>
@@ -287,7 +287,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         {items.length === 0 ? <EmptyState title="No items added" description="Add at least one item to continue." /> :
           <TableScroll minWidth={960}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-white text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-black">
                 <tr>
                   {['Item #', 'Item Description', 'Quantity', 'Unit of Measures', 'Remarks', 'Line total', ''].map((heading) =>
                     <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}
@@ -295,13 +295,13 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
               </thead>
               <tbody className="divide-y">
                 {items.map((item, index) => <tr key={item.id || index} className="align-top">
-                  <td className="px-3 py-4 font-bold text-muted">{index + 1}</td>
+                  <td className="px-3 py-4 font-bold text-black">{index + 1}</td>
                   <td className="min-w-[240px] px-3 py-3">
                     <input required value={item.itemName} onChange={(event) => updateItem(index, 'itemName', event.target.value)}
                       placeholder="Item description *" className="field mt-0" />
                     <input value={item.description} onChange={(event) => updateItem(index, 'description', event.target.value)}
                       placeholder="Specification / detail" className="field mt-1.5" />
-                    <label className="mt-1.5 flex items-center gap-2 text-[10px] font-normal text-muted">
+                    <label className="mt-1.5 flex items-center gap-2 text-[10px] font-normal text-black">
                       Est. unit cost *
                       <input required type="number" min="0" step="0.01" value={item.estimatedUnitCost}
                         onChange={(event) => updateItem(index, 'estimatedUnitCost', event.target.value)}
@@ -324,7 +324,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
                   <td className="whitespace-nowrap px-3 py-4 font-bold">{currency((Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0))}</td>
                   <td className="px-3 py-3">
                     <button type="button" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((_, position) => position !== index))}
-                      aria-label={`Remove item ${index + 1}`} className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-white hover:text-black disabled:opacity-30">
+                      aria-label={`Remove item ${index + 1}`} className="inline-flex items-center gap-1 rounded-lg p-2 text-black hover:bg-white hover:text-black disabled:opacity-30">
                       <Trash2 size={15} /><span className="text-[10px] font-bold">Remove</span>
                     </button>
                   </td>
@@ -346,26 +346,26 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
           <div className="rounded-lg border border-brand bg-white p-4">
             <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Requested by</div>
             <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-muted">Name (Requested by)</dt><dd className="font-bold">{user.name || user.userName || '—'}</dd></div>
-              <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">{draft?.submittedAt ? 'Digitally submitted' : 'Pending submission'}</dd></div>
-              <div><dt className="text-[10px] text-muted">Date</dt><dd className="font-bold">{dateLabel(draft?.submittedAt || draft?.createdAt) || '—'}</dd></div>
+              <div><dt className="text-[10px] text-black">Name (Requested by)</dt><dd className="font-bold">{user.name || user.userName || '—'}</dd></div>
+              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">{draft?.submittedAt ? 'Digitally submitted' : 'Pending submission'}</dd></div>
+              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">{dateLabel(draft?.submittedAt || draft?.createdAt) || '—'}</dd></div>
             </dl>
           </div>
           {draft?.supervisorDecision === 'Approved' && draft?.supervisorDecisionAt ? <div className="rounded-lg border border-brand bg-white p-4">
             <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
             <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-muted">Name (Approved by)</dt><dd className="font-bold">{draft.supervisorName || '—'}</dd></div>
-              <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">Digitally approved</dd></div>
-              <div><dt className="text-[10px] text-muted">Date</dt><dd className="font-bold">{dateLabel(draft.supervisorDecisionAt)}</dd></div>
+              <div><dt className="text-[10px] text-black">Name (Approved by)</dt><dd className="font-bold">{draft.supervisorName || '—'}</dd></div>
+              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">Digitally approved</dd></div>
+              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">{dateLabel(draft.supervisorDecisionAt)}</dd></div>
             </dl>
           </div> : <div className="rounded-lg border border-brand bg-white p-4">
             <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
             <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-muted">Name (Approved by)</dt><dd className="font-bold">—</dd></div>
-              <div><dt className="text-[10px] text-muted">Signature</dt><dd className="font-bold italic">—</dd></div>
-              <div><dt className="text-[10px] text-muted">Date</dt><dd className="font-bold">—</dd></div>
+              <div><dt className="text-[10px] text-black">Name (Approved by)</dt><dd className="font-bold">—</dd></div>
+              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">—</dd></div>
+              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">—</dd></div>
             </dl>
-            <p className="mt-3 text-[10px] leading-4 text-muted">Completed by your Department Supervisor after approval.</p>
+            <p className="mt-3 text-[10px] leading-4 text-black">Completed by your Department Supervisor after approval.</p>
           </div>}
         </div>
       </PageCard>
@@ -398,16 +398,16 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         </dl>
         <TableScroll minWidth={640}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-white text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-black">
               <tr>{['Item', 'Description', 'Quantity', 'Unit cost', 'Remarks', 'Line total'].map((heading) => <th key={heading} className="px-4 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item, index) => <tr key={item.id || index}>
                 <td className="px-4 py-3 font-bold">{item.itemName}</td>
-                <td className="px-4 py-3 text-muted">{item.description || '—'}</td>
+                <td className="px-4 py-3 text-black">{item.description || '—'}</td>
                 <td className="px-4 py-3">{item.quantity} {item.unit}</td>
                 <td className="px-4 py-3">{currency(Number(item.estimatedUnitCost))}</td>
-                <td className="px-4 py-3 text-muted">{item.remarks || '—'}</td>
+                <td className="px-4 py-3 text-black">{item.remarks || '—'}</td>
                 <td className="px-4 py-3 font-bold">{currency(itemTotals([item]))}</td>
               </tr>)}
             </tbody>
@@ -416,8 +416,8 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
         </TableScroll>
         <div className="border-t border-subtle px-5 py-4">
           <div className="mb-2 flex items-center gap-2 text-xs font-bold"><Paperclip size={14} />Attachments ({files.length})</div>
-          {files.length ? <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-[11px] text-muted">• {file.name}</li>)}</ul>
-            : <p className="text-[11px] text-muted">{editingId ? 'Existing attachments are preserved when editing a draft.' : 'No documents attached.'}</p>}
+          {files.length ? <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-[11px] text-black">• {file.name}</li>)}</ul>
+            : <p className="text-[11px] text-black">{editingId ? 'Existing attachments are preserved when editing a draft.' : 'No documents attached.'}</p>}
         </div>
       </PageCard>
       <ErrorState message={error} />
@@ -439,7 +439,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
       </div>
     </div>}
 
-    {step === 1 && <p className="mt-4 flex items-center gap-2 text-[11px] text-muted">
+    {step === 1 && <p className="mt-4 flex items-center gap-2 text-[11px] text-black">
       <Check size={13} className="text-black" />You can save a draft with just one item; full details are required to submit.
     </p>}
   </>;

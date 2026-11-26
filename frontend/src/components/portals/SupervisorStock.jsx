@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Boxes, PackageSearch, X } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import ReportToolbar from '../ui/ReportToolbar.jsx';
 import {
   EmptyState, ErrorState, FilterBar, FilterField, KeyValue, LoadingState,
   PortalBadge, SearchField, TableScroll
 } from './PortalUi.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
+
+const REPORT = {
+  exportKey: 'supervisorStock',
+  title: 'Department stock overview',
+  fields: [{ key: 'updated', label: 'Last updated' }],
+  defaultField: 'updated'
+};
 
 const TABS = [
   { label: 'Available Stock', value: 'Available', tone: 'emerald' },
@@ -19,10 +28,11 @@ function stockTone(status) {
   return 'red';
 }
 
-export default function SupervisorStock({ portalApi, initial = null }) {
+export default function SupervisorStock({ portalApi, initial = null, user = {} }) {
   const [tab, setTab] = useState('Available');
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
+  const [dateFilter, setDateFilter] = useState({});
   const [result, setResult] = useState(initial
     ? { ...initial, items: (initial.items || []).filter((item) => item.stockStatus === 'Available') }
     : null);
@@ -64,14 +74,26 @@ export default function SupervisorStock({ portalApi, initial = null }) {
 
   const items = result?.items || [];
   const categories = result?.categories || [];
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
 
   return <>
+    <ReportToolbar
+      report={REPORT}
+      dateFilter={dateFilter}
+      onDateFilterChange={setDateFilter}
+      params={{ search, category, status: tab }}
+      user={reportUser}
+      department={user.department || ''}
+      scope="department stock items"
+    />
     <PageCard title="Department stock overview"
       description="Read-only view of inventory available to your Department. Stock is managed by Procurement and Store teams.">
       <FilterBar>
         <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           {TABS.map((item) => <button key={item.value} type="button" onClick={() => setTab(item.value)}
-            className={`rounded-lg px-3 py-2 text-[11px] font-bold transition ${tab === item.value ? 'border border-black bg-white text-black' : 'border border-brand bg-white text-muted hover:border-black hover:text-black'}`}>
+            className={`rounded-lg px-3 py-2 text-[11px] font-bold transition ${tab === item.value ? 'border border-black bg-white text-black' : 'border border-brand bg-white text-black hover:border-black hover:text-black'}`}>
             {item.label}
           </button>)}
         </div>
@@ -83,7 +105,7 @@ export default function SupervisorStock({ portalApi, initial = null }) {
           </select>
         </FilterField>
         {(search || category) && <button type="button" onClick={() => { setSearch(''); setCategory(''); }}
-          className="mb-0.5 text-xs font-bold text-muted hover:text-black">Clear filters</button>}
+          className="mb-0.5 text-xs font-bold text-black hover:text-black">Clear filters</button>}
       </FilterBar>
 
       {result?.message && <p className="border-b border-subtle bg-white px-5 py-2 text-[11px] text-black">{result.message}</p>}
@@ -92,7 +114,7 @@ export default function SupervisorStock({ portalApi, initial = null }) {
         <EmptyState title="No items in this view" description="Try another tab or clear the filters." /> :
         <TableScroll minWidth={900}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-white text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-black">
               <tr>{['SKU', 'Item', 'Category', 'Unit', 'On hand', 'Reserved', 'Issued', 'Reorder level', 'Unit cost', 'Status', ''].map((heading) =>
                 <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -129,11 +151,11 @@ export default function SupervisorStock({ portalApi, initial = null }) {
       <aside className="flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white ">
         <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-subtle bg-white px-5 py-4">
           <div>
-            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-muted"><Boxes size={13} />Stock item</div>
+            <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wide text-black"><Boxes size={13} />Stock item</div>
             <h2 className="display-font mt-1 text-lg font-extrabold">{detail.item.name}</h2>
-            <p className="mt-1 text-xs text-muted">{detail.item.sku} · {detail.item.category || 'Uncategorised'}</p>
+            <p className="mt-1 text-xs text-black">{detail.item.sku} · {detail.item.category || 'Uncategorised'}</p>
           </div>
-          <button type="button" onClick={() => setDetail(null)} aria-label="Close details" className="rounded-lg p-2 text-muted hover:bg-white"><X size={18} /></button>
+          <button type="button" onClick={() => setDetail(null)} aria-label="Close details" className="rounded-lg p-2 text-black hover:bg-white"><X size={18} /></button>
         </header>
         <div className="space-y-5 p-5">
           <dl className="grid grid-cols-2 gap-4 rounded-xl border border-brand bg-white p-4">
@@ -149,7 +171,7 @@ export default function SupervisorStock({ portalApi, initial = null }) {
             <h3 className="mb-3 flex items-center gap-2 text-sm font-bold"><PackageSearch size={15} />Stock movements</h3>
             {detail.movements?.length ? <TableScroll minWidth={520}>
               <table className="w-full text-left text-xs">
-                <thead className="bg-white text-[10px] uppercase text-muted">
+                <thead className="bg-white text-[10px] uppercase text-black">
                   <tr>{['Date', 'Type', 'Quantity', 'Source', 'Balance', 'Actor'].map((heading) => <th key={heading} className="whitespace-nowrap px-3 py-2 font-bold">{heading}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y">

@@ -9,6 +9,7 @@ import {
   SearchField, TableScroll, TextLink
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
 import { REQUEST_STATUS_OPTIONS, normalizeStatus } from '../../utils/status.js';
 
 const REPORT = {
@@ -24,7 +25,7 @@ const REPORT = {
   ]
 };
 
-export default function SupervisorRequests({ portalApi, query = {}, navigate, initial = null }) {
+export default function SupervisorRequests({ portalApi, query = {}, navigate, initial = null, user = {} }) {
   const PAGE = 'Procurement Requests';
   const [filters, setFilters] = useState({
     search: query.search || '',
@@ -107,6 +108,9 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
   }
 
   const requisitions = result?.requisitions || [];
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
 
   return <>
     <ReportToolbar
@@ -114,6 +118,9 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
       dateFilter={filters}
       onDateFilterChange={updateDateFilter}
       params={{ search: filters.search, status: filters.status, requesterId: filters.requesterId }}
+      user={reportUser}
+      department={user.department || ''}
+      scope="department requisitions"
     />
     <PageCard title="Department procurement requests"
       description="Every request raised by Requesters in your Department, with approval and procurement status.">
@@ -136,7 +143,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
             search: '', status: '', preset: '', from: '', to: '',
             dateField: REPORT.defaultField, requesterId: '', page: 1
           })}
-            className="mb-0.5 text-xs font-bold text-muted hover:text-black">Clear filters</button>}
+            className="mb-0.5 text-xs font-bold text-black hover:text-black">Clear filters</button>}
       </FilterBar>
 
       <ErrorState message={error} onRetry={load} />
@@ -145,7 +152,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
         <>
           <TableScroll minWidth={1160}>
             <table className="w-full text-left text-xs">
-              <thead className="bg-white text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-black">
                 <tr>{['Reference', 'Requester', 'Title', 'Submission date', 'Estimated cost', 'Priority', 'Approval status', 'Procurement status', 'Actions'].map((heading) =>
                   <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
               </thead>
@@ -156,7 +163,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div className="font-semibold">{request.requester}</div>
-                    <div className="text-[10px] text-muted">{request.requesterEmail}</div>
+                    <div className="text-[10px] text-black">{request.requesterEmail}</div>
                   </td>
                   <td className="min-w-[180px] px-4 py-3">{request.title}</td>
                   <td className="whitespace-nowrap px-4 py-3">{dateLabel(request.submittedAt || request.createdAt)}</td>
@@ -164,9 +171,9 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
                   <td className="whitespace-nowrap px-4 py-3">{request.priority || 'Medium'}</td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div><StatusBadge value={request.status} /></div>
-                    {request.supervisorDecision && <div className="mt-1 text-[10px] text-muted">Decision: {request.supervisorDecision}</div>}
+                    {request.supervisorDecision && <div className="mt-1 text-[10px] text-black">Decision: {request.supervisorDecision}</div>}
                   </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
+                  <td className="whitespace-nowrap px-4 py-3 text-black">
                     {['Forwarded to Procurement', 'Under Procurement Review', 'Procurement Approved', 'Procurement Rejected', 'Processing', 'Completed'].includes(request.status)
                       ? request.status : '—'}
                   </td>
@@ -175,7 +182,7 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
                       <TextLink onClick={() => openRequest(request.id)}><span className="inline-flex items-center gap-1"><Eye size={13} />View</span></TextLink>
                       <button type="button" title="Message Requester"
                         onClick={() => navigate('Department Messages', { userId: request.requesterId, request: request.id })}
-                        className="text-muted hover:text-black"><MessageSquare size={14} /></button>
+                        className="text-black hover:text-black"><MessageSquare size={14} /></button>
                     </div>
                   </td>
                 </tr>)}

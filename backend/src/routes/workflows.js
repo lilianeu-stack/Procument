@@ -648,6 +648,8 @@ router.get('/rfqs/stats', async (_req, res, next) => {
       `SELECT COUNT(*) AS total,
         COALESCE(SUM(f.status = 'Draft'), 0) AS draft,
         COALESCE(SUM(f.status = 'Sent'), 0) AS sent,
+        COALESCE(SUM(f.status = 'Evaluating'), 0) AS evaluating,
+        COALESCE(SUM(f.status = 'Awarded'), 0) AS awarded,
         COALESCE(SUM(f.status = 'Sent' AND COALESCE(qc.responses, 0) = 0), 0) AS awaitingResponses,
         COALESCE(SUM(COALESCE(qc.responses, 0) > 0), 0) AS receivedQuotations,
         COALESCE(SUM(f.status = 'Closed'), 0) AS closed
@@ -661,6 +663,8 @@ router.get('/rfqs/stats', async (_req, res, next) => {
         total: Number(row?.total) || 0,
         draft: Number(row?.draft) || 0,
         sent: Number(row?.sent) || 0,
+        evaluating: Number(row?.evaluating) || 0,
+        awarded: Number(row?.awarded) || 0,
         awaitingResponses: Number(row?.awaitingResponses) || 0,
         receivedQuotations: Number(row?.receivedQuotations) || 0,
         closed: Number(row?.closed) || 0

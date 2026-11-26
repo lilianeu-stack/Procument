@@ -62,15 +62,15 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Purchase order being sent</p>
             <h3 className="display-font mt-1 text-lg font-extrabold">{order.reference || 'New purchase order'}</h3>
-            <p className="mt-1 text-xs text-muted">{order.supplier || 'Supplier not recorded'} · {order.type || 'Standard'}</p>
+            <p className="mt-1 text-xs text-black">{order.supplier || 'Supplier not recorded'} · {order.type || 'Standard'}</p>
           </div>
           <div className="text-right text-xs">
-            <div className="text-muted">Total amount</div>
+            <div className="text-black">Total amount</div>
             <div className="mt-1 font-extrabold text-black">{formatRwf(order.total)}</div>
-            <div className="mt-1 text-[10px] text-muted">Delivery {dateLabel(order.deliveryDate)}</div>
+            <div className="mt-1 text-[10px] text-black">Delivery {dateLabel(order.deliveryDate)}</div>
           </div>
         </div>
-        {!order.id && <p className="mt-3 rounded-md bg-white px-3 py-2 text-[10px] text-muted">
+        {!order.id && <p className="mt-3 rounded-md bg-white px-3 py-2 text-[10px] text-black">
           The current purchase order draft will be saved first, then sent with a secure review link.
         </p>}
       </section>
@@ -102,7 +102,7 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
       </section> : stage === 'compose' ? <>
         <section>
           <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Authorized recipient</h3>
-          {loadingUsers ? <div className="flex items-center gap-2 py-6 text-xs text-muted"><Loader2 size={14} className="animate-spin" />Loading registered reviewers…</div> : <>
+          {loadingUsers ? <div className="flex items-center gap-2 py-6 text-xs text-black"><Loader2 size={14} className="animate-spin" />Loading registered reviewers…</div> : <>
             <label className="block text-xs font-bold">Select a registered user
               <select value={recipientId} onChange={(event) => { setRecipientId(event.target.value); setError(''); }} className="field mt-1">
                 <option value="">Choose an authorized reviewer…</option>
@@ -114,9 +114,9 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
             {recipient && <div className="mt-3 rounded-lg border border-brand bg-white p-4 text-xs">
               <div className="flex items-center gap-2 font-bold text-black"><ShieldCheck size={14} />Authorized Purchase Order reviewer</div>
               <dl className="mt-3 grid gap-2 sm:grid-cols-3">
-                <div><dt className="text-[10px] text-muted">Full name</dt><dd className="font-bold">{recipient.name}</dd></div>
-                <div><dt className="text-[10px] text-muted">Role</dt><dd className="font-bold">{recipient.roleLabel || roleLabel(recipient.role)}</dd></div>
-                <div><dt className="text-[10px] text-muted">Registered email</dt><dd className="font-bold break-all">{recipient.email}</dd></div>
+                <div><dt className="text-[10px] text-black">Full name</dt><dd className="font-bold">{recipient.name}</dd></div>
+                <div><dt className="text-[10px] text-black">Role</dt><dd className="font-bold">{recipient.roleLabel || roleLabel(recipient.role)}</dd></div>
+                <div><dt className="text-[10px] text-black">Registered email</dt><dd className="font-bold break-all">{recipient.email}</dd></div>
               </dl>
             </div>}
           </>}
@@ -142,12 +142,12 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
           <h3 className="flex items-center gap-2 text-sm font-extrabold text-black"><CheckCircle2 size={16} />Confirm before sending</h3>
           <p className="mt-2 leading-5 text-black">A secure, single-purpose approval link will be sent to the registered email address below. Sending does not approve the purchase order.</p>
           <dl className="mt-4 grid gap-2 sm:grid-cols-2">
-            <div><dt className="text-[10px] text-muted">Recipient</dt><dd className="font-bold">{recipient?.name}</dd></div>
-            <div><dt className="text-[10px] text-muted">Role</dt><dd className="font-bold">{recipient?.roleLabel || roleLabel(recipient?.role)}</dd></div>
-            <div className="sm:col-span-2"><dt className="text-[10px] text-muted">Registered email</dt><dd className="font-bold break-all">{recipient?.email}</dd></div>
-            <div><dt className="text-[10px] text-muted">Purchase order</dt><dd className="font-bold">{order.reference || 'Assigned when saved'}</dd></div>
-            <div><dt className="text-[10px] text-muted">Total amount</dt><dd className="font-bold">{formatRwf(order.total)}</dd></div>
-            {message.trim() && <div className="sm:col-span-2"><dt className="text-[10px] text-muted">Message</dt><dd className="mt-1 italic">“{message.trim()}”</dd></div>}
+            <div><dt className="text-[10px] text-black">Recipient</dt><dd className="font-bold">{recipient?.name}</dd></div>
+            <div><dt className="text-[10px] text-black">Role</dt><dd className="font-bold">{recipient?.roleLabel || roleLabel(recipient?.role)}</dd></div>
+            <div className="sm:col-span-2"><dt className="text-[10px] text-black">Registered email</dt><dd className="font-bold break-all">{recipient?.email}</dd></div>
+            <div><dt className="text-[10px] text-black">Purchase order</dt><dd className="font-bold">{order.reference || 'Assigned when saved'}</dd></div>
+            <div><dt className="text-[10px] text-black">Total amount</dt><dd className="font-bold">{formatRwf(order.total)}</dd></div>
+            {message.trim() && <div className="sm:col-span-2"><dt className="text-[10px] text-black">Message</dt><dd className="mt-1 italic">“{message.trim()}”</dd></div>}
           </dl>
         </section>
 
@@ -162,7 +162,7 @@ export default function SendForApprovalModal({ order, loadApprovers, onSend, onC
         </div>
       </>}
 
-      <p className="flex items-center gap-2 text-[10px] text-muted"><Mail size={12} />Only active Administrators and Approvers registered in the system can receive this request.</p>
+      <p className="flex items-center gap-2 text-[10px] text-black"><Mail size={12} />Only active Administrators and Approvers registered in the system can receive this request.</p>
     </div>
   </Modal>;
 }

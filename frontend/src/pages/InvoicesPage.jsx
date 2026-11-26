@@ -58,7 +58,7 @@ export default function InvoicesPage({ invoices, orders, user, onCreate, onDecis
             <col style={{ width: '11%' }} />
             <col style={{ width: '15%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr>{['Invoice', 'Purchase order', 'Supplier', 'Amount', 'Submitted by', 'Submitted', 'Status', 'Actions'].map((cell) =>
               <th key={cell} className="whitespace-nowrap px-4 py-3.5 font-bold">{cell}</th>)}</tr>
           </thead>
@@ -77,7 +77,7 @@ export default function InvoicesPage({ invoices, orders, user, onCreate, onDecis
                   <button type="button" onClick={() => decide(invoice.id, 'Rejected')} className={secondaryActionClass}>Reject</button>
                 </div>}
                 {finance && invoice.status === 'Approved' && <button type="button" onClick={() => decide(invoice.id, 'Paid')} className={approveButtonClass}>Mark paid</button>}
-                {!(finance && ['Pending', 'Approved'].includes(invoice.status)) && <span className="text-[11px] text-muted">—</span>}
+                {!(finance && ['Pending', 'Approved'].includes(invoice.status)) && <span className="text-[11px] text-black">—</span>}
               </td>
             </tr>)}
           </tbody>
@@ -88,7 +88,7 @@ export default function InvoicesPage({ invoices, orders, user, onCreate, onDecis
             <FileText size={22} strokeWidth={1.7} aria-hidden="true" />
           </span>
           <h3 className="mt-4 text-sm font-bold text-black">No invoices submitted yet</h3>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+          <p className="mt-1 max-w-sm text-xs leading-5 text-black">
             Submitted supplier invoices will appear here for review and payment tracking.
           </p>
         </div>

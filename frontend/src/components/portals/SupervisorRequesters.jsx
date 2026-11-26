@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Mail, MessageSquare, Phone } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import ReportToolbar from '../ui/ReportToolbar.jsx';
 import {
   EmptyState, ErrorState, LoadingState, SearchField, TableScroll, secondaryButtonClass
 } from './PortalUi.jsx';
 import { dateLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
 
-export default function SupervisorRequesters({ portalApi, navigate }) {
+const REPORT = {
+  exportKey: 'supervisorRequesters',
+  title: 'Department requesters',
+  fields: [{ key: 'created', label: 'Date added' }],
+  defaultField: 'created'
+};
+
+export default function SupervisorRequesters({ portalApi, navigate, user = {} }) {
   const [search, setSearch] = useState('');
+  const [dateFilter, setDateFilter] = useState({});
   const [requesters, setRequesters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -28,8 +38,21 @@ export default function SupervisorRequesters({ portalApi, navigate }) {
 
   const filtered = requesters.filter((requester) =>
     `${requester.name} ${requester.email}`.toLowerCase().includes(search.toLowerCase()));
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
 
-  return <PageCard title="Requesters in your Department" description="Active Requesters and their request activity."
+  return <>
+    <ReportToolbar
+      report={REPORT}
+      dateFilter={dateFilter}
+      onDateFilterChange={setDateFilter}
+      params={{ search }}
+      user={reportUser}
+      department={user.department || ''}
+      scope="department requesters"
+    />
+    <PageCard title="Requesters in your Department" description="Active Requesters and their request activity."
     action={<button type="button" onClick={() => navigate('Department Messages')} className={secondaryButtonClass()}>
       <MessageSquare size={13} />Open messages
     </button>}>
@@ -41,15 +64,15 @@ export default function SupervisorRequesters({ portalApi, navigate }) {
       <EmptyState title="No Requesters found" description="Try another search, or ask an Administrator to assign Requesters to your Department." /> :
       <TableScroll minWidth={760}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-white text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-black">
             <tr>{['Name', 'Email', 'Phone', 'Requests', 'Joined', 'Actions'].map((heading) =>
               <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-subtle">
             {filtered.map((requester) => <tr key={requester.id} className="hover:bg-white">
               <td className="whitespace-nowrap px-4 py-3 font-bold">{requester.name}</td>
-              <td className="whitespace-nowrap px-4 py-3"><span className="inline-flex items-center gap-1.5"><Mail size={12} className="text-muted" />{requester.email}</span></td>
-              <td className="whitespace-nowrap px-4 py-3"><span className="inline-flex items-center gap-1.5"><Phone size={12} className="text-muted" />{requester.phone || '—'}</span></td>
+              <td className="whitespace-nowrap px-4 py-3"><span className="inline-flex items-center gap-1.5"><Mail size={12} className="text-black" />{requester.email}</span></td>
+              <td className="whitespace-nowrap px-4 py-3"><span className="inline-flex items-center gap-1.5"><Phone size={12} className="text-black" />{requester.phone || '—'}</span></td>
               <td className="whitespace-nowrap px-4 py-3 font-bold">{requester.requestCount ?? 0}</td>
               <td className="whitespace-nowrap px-4 py-3">{dateLabel(requester.createdAt)}</td>
               <td className="whitespace-nowrap px-4 py-3">
@@ -61,5 +84,6 @@ export default function SupervisorRequesters({ portalApi, navigate }) {
           </tbody>
         </table>
       </TableScroll>}
-  </PageCard>;
+    </PageCard>
+  </>;
 }

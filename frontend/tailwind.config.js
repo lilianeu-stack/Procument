@@ -1,4 +1,27 @@
 /** @type {import('tailwindcss').Config} */
+const blackText = 'var(--text-primary)';
+const paletteShades = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+const paletteFamilies = [
+  'slate', 'gray', 'zinc', 'neutral', 'stone',
+  'red', 'orange', 'amber', 'yellow', 'lime',
+  'green', 'emerald', 'teal', 'cyan', 'sky',
+  'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'
+];
+
+// Every text utility resolves through one canonical token. Backgrounds,
+// borders, hover surfaces and focus rings keep their authored colors.
+const blackTextPalette = {
+  inherit: blackText,
+  current: blackText,
+  transparent: blackText,
+  black: blackText,
+  white: blackText,
+  ...Object.fromEntries(paletteFamilies.map((family) => [
+    family,
+    Object.fromEntries(paletteShades.map((shade) => [shade, blackText]))
+  ]))
+};
+
 export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
@@ -21,6 +44,29 @@ export default {
           border: 'var(--pims-interaction-border)',
           focus: 'var(--pims-interaction-focus)',
           ring: 'var(--pims-interaction-ring)'
+        }
+      },
+      // Color-only remap: no text utility can introduce blue, green, grey, red
+      // or white text, while bg-*/border-* utilities remain unchanged.
+      textColor: {
+        ...blackTextPalette,
+        ink: blackText,
+        muted: blackText,
+        canvas: blackText,
+        reference: blackText,
+        success: blackText,
+        hover: blackText,
+        brand: { DEFAULT: blackText, dark: blackText, light: blackText },
+        accent: {
+          DEFAULT: blackText,
+          text: blackText,
+          tint: blackText,
+          strong: blackText,
+          row: blackText,
+          field: blackText,
+          border: blackText,
+          focus: blackText,
+          ring: blackText
         }
       },
       borderColor: {

@@ -66,7 +66,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
             ['Total users', department.userCount ?? '—'],
             ['Active Requesters', department.requesterCount ?? '—']
           ].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2 border-b border-subtle pb-3 last:border-0 last:pb-0">
-            <dt className="font-semibold text-muted">{label}</dt><dd className="max-w-[65%] text-right font-bold">{value}</dd>
+            <dt className="font-semibold text-black">{label}</dt><dd className="max-w-[65%] text-right font-bold">{value}</dd>
           </div>)}
         </dl>
       </PageCard>
@@ -77,7 +77,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
               {extras.requesters.map((requester) => <div key={requester.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                 <div>
                   <div className="text-xs font-bold">{requester.name}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-black">
                     <Mail size={12} />{requester.email}
                     <span>·</span><span>{requester.requestCount || 0} request{(requester.requestCount || 0) === 1 ? '' : 's'}</span>
                   </div>
@@ -103,15 +103,15 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
 
     <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => <button key={card.label} type="button" onClick={() => navigate(card.page)}
-        className="rounded-xl border border-brand bg-white p-5 text-left transition hover:bg-accent-tint hover:border-accent-border hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">
+        className="rounded-xl border border-brand bg-white p-5 text-left transition hover:bg-accent-tint hover:border-accent-border hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-[12px] font-semibold text-muted">{card.label}</span>
+          <span className="text-[12px] font-semibold text-black">{card.label}</span>
           <span className="grid h-9 w-9 place-items-center rounded-lg border border-brand bg-white text-black">
             <card.icon size={17} />
           </span>
         </div>
         <div className="display-font mt-3 text-[26px] font-extrabold">{card.value}</div>
-        <div className="mt-1 text-[11px] text-muted">{card.note}</div>
+        <div className="mt-1 text-[11px] text-black">{card.note}</div>
       </button>)}
     </div>
 
@@ -122,7 +122,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
           !extras.requests.length ? <EmptyState title="No requests yet" description="Department requests will appear here." /> :
             <TableScroll minWidth={620}>
               <table className="w-full text-left text-xs">
-                <thead className="bg-white text-[10px] uppercase text-muted">
+                <thead className="bg-white text-[10px] uppercase text-black">
                   <tr>{['Reference', 'Requester', 'Title', 'Date', 'Cost', 'Status'].map((heading) => <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y">
@@ -155,7 +155,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
             </div>)}
           </dl>
           {extras.stock.length > 0 && <div className="border-t border-subtle px-5 py-3">
-            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-muted"><PackageSearch size={12} />Needs attention</div>
+            <div className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-black"><PackageSearch size={12} />Needs attention</div>
             {extras.stock.filter((item) => item.stockStatus !== 'Available').slice(0, 3).map((item) =>
               <div key={item.id} className="flex items-center justify-between gap-2 py-1.5 text-[11px]">
                 <span className="truncate font-semibold">{item.name}</span>
