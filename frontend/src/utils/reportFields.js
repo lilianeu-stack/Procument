@@ -1,4 +1,4 @@
-import { RECEIVED_REQUESTS_PAGE } from './access.js';
+import { PROCUREMENT_COMMITTEE_PAGE, RECEIVED_REQUESTS_PAGE } from './access.js';
 
 const REQUISITION_FIELDS = [
   { key: 'submitted', label: 'Date submitted' },
@@ -73,6 +73,10 @@ export const PAGE_REPORTS = {
     exportKey: 'users', title: 'User accounts',
     fields: [{ key: 'created', label: 'Date created' }, { key: 'login', label: 'Last login' }],
     defaultField: 'created'
+  },
+  [PROCUREMENT_COMMITTEE_PAGE]: {
+    exportKey: 'committeeMembers', title: 'Procurement Committee members',
+    fields: [{ key: 'created', label: 'Date added' }], defaultField: 'created'
   }
 };
 

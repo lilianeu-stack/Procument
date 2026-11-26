@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowLeft, Check, ChevronRight, Megaphone, Paperclip, Send
+  ArrowLeft, Check, ChevronRight, Eye, Megaphone, Paperclip, Send
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import UserAvatar from '../ui/UserAvatar.jsx';
@@ -14,37 +14,44 @@ import { filesToAttachments } from '../../utils/attachments.js';
 function ConversationRow({ conversation, active, onClick }) {
   return <button type="button" onClick={onClick}
     className={`flex w-full items-center gap-3 border-b border-subtle px-4 py-3 text-left transition ${active ? 'bg-white' : 'hover:bg-white'}`}>
-    <UserAvatar userId={conversation.id} name={conversation.name}
+    <UserAvatar userId={conversation.id} name={conversation.name} photo={conversation.photo}
       size="h-9 w-9" textSize="text-xs" className={active ? 'border border-brand' : 'border border-brand'} />
     <span className="min-w-0 flex-1">
       <span className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-bold text-ink">{conversation.name}</span>
-        {conversation.lastAt && <span className="shrink-0 text-[10px] text-muted">{dateLabel(conversation.lastAt, { month: 'short', day: 'numeric' })}</span>}
+        <span className="truncate text-xs font-bold text-black">{conversation.name}</span>
+        {conversation.lastAt && <span className="shrink-0 text-[10px] text-black">{dateLabel(conversation.lastAt, { month: 'short', day: 'numeric' })}</span>}
       </span>
-      <span className="mt-1 block truncate text-[11px] text-muted">{conversation.lastBody || 'No messages yet'}</span>
+      <span className="mt-1 block truncate text-[11px] text-black">{conversation.lastBody || 'No messages yet'}</span>
       {conversation.lastRequisitionReference && <span className="mt-1 block text-[10px] font-semibold text-black">Re: {conversation.lastRequisitionReference}</span>}
     </span>
     {Number(conversation.unreadCount) > 0 && <span className="grid h-5 min-w-5 shrink-0 place-items-center rounded-full border border-brand bg-white px-1 text-[10px] font-bold text-black">{conversation.unreadCount}</span>}
   </button>;
 }
 
-function MessageBubble({ message, userId }) {
+function MessageBubble({ message, userId, onOpen, opening = false }) {
   const mine = message.senderId === userId;
+  const unread = !mine && !message.isRead;
   return <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-    <div className={`max-w-[85%] rounded-2xl border border-brand px-4 py-3 sm:max-w-[70%] ${mine ? 'rounded-br-sm bg-white text-black' : 'rounded-bl-sm bg-white text-ink'}`}>
+    <div className={`max-w-[85%] rounded-2xl border border-brand px-4 py-3 sm:max-w-[70%] ${mine ? 'rounded-br-sm bg-white text-black' : 'rounded-bl-sm bg-white text-black'}`}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] font-bold">
-        <UserAvatar userId={message.senderId} name={message.senderName} size="h-5 w-5" textSize="text-[8px]" className="border border-brand" />
+        <UserAvatar userId={message.senderId} name={message.senderName} photo={message.senderPhoto} size="h-5 w-5" textSize="text-[8px]" className="border border-brand" />
         <span>{mine ? 'You' : message.senderName || 'Other party'}</span>
-        <span className={mine ? 'text-black' : 'text-muted'}>{dateTimeLabel(message.createdAt)}</span>
+        <span className={mine ? 'text-black' : 'text-black'}>{dateTimeLabel(message.createdAt)}</span>
         {mine && <Check size={11} className="text-black" />}
       </div>
-      <p className="whitespace-pre-wrap break-words text-xs leading-5">{message.body || 'Document attached'}</p>
-      {message.requisitionReference && <div className={`mt-2 rounded px-2 py-1 text-[10px] font-bold ${mine ? 'bg-white' : 'bg-white'}`}>
-        Related request: {message.requisitionReference}
-      </div>}
-      {Number(message.attachmentCount) > 0 && <div className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${mine ? 'text-black' : 'text-muted'}`}>
-        <Paperclip size={11} />{message.attachmentCount} attachment{message.attachmentCount > 1 ? 's' : ''}
-      </div>}
+      {unread ? <button type="button" data-message-id={message.id} aria-label={`Open message ${message.id}`}
+        onClick={() => onOpen(message)} disabled={opening}
+        className="mt-1 inline-flex items-center gap-1.5 text-xs font-bold text-black underline disabled:cursor-wait">
+        <Eye size={13} />{opening ? 'Opening…' : 'Open message'}
+      </button> : <>
+        <p className="whitespace-pre-wrap break-words text-xs leading-5">{message.body || 'Document attached'}</p>
+        {message.requisitionReference && <div className={`mt-2 rounded px-2 py-1 text-[10px] font-bold ${mine ? 'bg-white' : 'bg-white'}`}>
+          Related request: {message.requisitionReference}
+        </div>}
+        {Number(message.attachmentCount) > 0 && <div className={`mt-2 flex items-center gap-1 text-[10px] font-semibold ${mine ? 'text-black' : 'text-black'}`}>
+          <Paperclip size={11} />{message.attachmentCount} attachment{message.attachmentCount > 1 ? 's' : ''}
+        </div>}
+      </>}
     </div>
   </div>;
 }
@@ -60,6 +67,8 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
   const [thread, setThread] = useState(null);
   const [threadLoading, setThreadLoading] = useState(false);
   const [threadError, setThreadError] = useState('');
+  const [openingMessageId, setOpeningMessageId] = useState(null);
+  const openedFromQueryRef = useRef(null);
   const [body, setBody] = useState('');
   const [relatedRequest, setRelatedRequest] = useState(query.request || '');
   const [files, setFiles] = useState([]);
@@ -121,6 +130,34 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
   }, [portalApi, selectedId, loadInbox]);
 
   useEffect(() => { loadThread(); }, [loadThread]);
+
+  const openMessage = useCallback(async (message) => {
+    if (!message || message.senderId === userId || message.isRead || openingMessageId) return;
+    setOpeningMessageId(message.id); setError('');
+    try {
+      await portalApi.markMessageRead(message.id);
+      setThread((current) => current ? {
+        ...current,
+        messages: current.messages.map((item) => Number(item.id) === Number(message.id) ? { ...item, isRead: true } : item)
+      } : current);
+      await loadInbox();
+    } catch (exception) {
+      setError(exception.message || 'Could not open the message.');
+    } finally {
+      setOpeningMessageId(null);
+    }
+  }, [loadInbox, openingMessageId, portalApi, userId]);
+
+  // A notification deep link opens exactly the message it points to. Merely
+  // loading the conversation above never marks any message as read.
+  useEffect(() => {
+    const linkedId = Number(query.message);
+    if (!linkedId || !thread?.messages?.length || openedFromQueryRef.current === linkedId) return;
+    const linked = thread.messages.find((message) => Number(message.id) === linkedId);
+    if (!linked) return;
+    openedFromQueryRef.current = linkedId;
+    void openMessage(linked);
+  }, [openMessage, query.message, thread]);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => Number(conversation.id) === selectedId),
@@ -228,7 +265,8 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
           !selectedId ? <EmptyState title="No conversation selected" description="Pick a contact on the left to read and reply to messages." /> :
             <>
               <div className="flex max-h-[440px] flex-col gap-3 overflow-y-auto bg-white p-4">
-                {thread?.messages?.length ? thread.messages.map((message) => <MessageBubble key={message.id} message={message} userId={userId} />)
+                {thread?.messages?.length ? thread.messages.map((message) => <MessageBubble key={message.id} message={message} userId={userId}
+                  onOpen={openMessage} opening={Number(openingMessageId) === Number(message.id)} />)
                   : <EmptyState title="No messages yet" description="Start the conversation with a message below." />}
               </div>
               <form onSubmit={send} className="space-y-3 border-t border-subtle p-4">
@@ -260,8 +298,8 @@ export default function PortalMessages({ portal, portalApi, query = {}, navigate
       {announcements.length ? <div className="divide-y">
         {announcements.map((announcement) => <div key={announcement.id} className={`flex flex-wrap items-start justify-between gap-3 px-5 py-4 ${announcement.isRead ? '' : 'bg-white'}`}>
           <div className="min-w-0 max-w-3xl">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-muted">
-              <UserAvatar userId={announcement.senderId} name={announcement.senderName} size="h-6 w-6" textSize="text-[8px]" className="border border-brand" />
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-black">
+              <UserAvatar userId={announcement.senderId} name={announcement.senderName} photo={announcement.senderPhoto} size="h-6 w-6" textSize="text-[8px]" className="border border-brand" />
               <span>{announcement.senderName || 'Department Supervisor'}</span>
               <span>·</span><span>{dateTimeLabel(announcement.createdAt)}</span>
               {!announcement.isRead && <PortalBadge tone="indigo">New</PortalBadge>}

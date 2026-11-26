@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Archive, Check, CheckCircle2, ChevronDown, Clock3, FileEdit, FileText,
-  RefreshCw, Search, Send, X as XIcon
+  Plus, RefreshCw, Search, Send, X as XIcon
 } from 'lucide-react';
 import PageCard, { EmptyState, ErrorMessage, FormActions } from '../components/ui/PageCard.jsx';
 import Modal from '../components/ui/Modal.jsx';
+import DownloadButton from '../components/ui/DownloadButton.jsx';
+import ReportToolbar from '../components/ui/ReportToolbar.jsx';
 import CommitteeReviewModal from './CommitteeReviewModal.jsx';
 import { currency, dateTimeLabel } from '../utils/format.js';
 import { toDateTimeInputValue, toUtcDateTimeInputValue } from '../utils/dates.js';
+import { reportForPage } from '../utils/reportFields.js';
+import { roleLabel } from '../utils/access.js';
 
 function newIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -41,7 +45,7 @@ function SupplierMultiSelect({ suppliers, selectedIds, onChange }) {
   return <div ref={containerRef} className="relative">
     <label className="block text-xs font-bold">Suppliers</label>
     <button type="button" onClick={() => setOpen((value) => !value)} className="field mt-1 flex w-full items-center justify-between text-left text-xs font-normal">
-      <span className={selected.length ? 'text-slate-700' : 'text-muted'}>
+      <span className={selected.length ? 'text-black' : 'text-black'}>
         {selected.length ? `${selected.length} supplier${selected.length === 1 ? '' : 's'} selected` : 'Search and select suppliers…'}
       </span>
       <ChevronDown size={14} />
@@ -49,7 +53,7 @@ function SupplierMultiSelect({ suppliers, selectedIds, onChange }) {
     {open && <div className="absolute z-30 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
       <div className="border-b border-slate-100 p-2">
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-2">
-          <Search size={14} className="text-muted" />
+          <Search size={14} className="text-black" />
           <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search suppliers by name or email…" className="w-full py-2 text-xs outline-none" />
         </div>
       </div>
@@ -57,19 +61,19 @@ function SupplierMultiSelect({ suppliers, selectedIds, onChange }) {
         {filtered.length ? filtered.map((supplier) => {
           const checked = selectedIds.includes(supplier.id);
           return <button type="button" key={supplier.id} onClick={() => toggle(supplier.id)} className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-slate-50">
-            <span className={`mt-0.5 grid h-4 w-4 place-items-center rounded border ${checked ? 'border-brand bg-brand text-white' : 'border-slate-300'}`}>
+            <span className={`mt-0.5 grid h-4 w-4 place-items-center rounded border ${checked ? 'border-brand bg-brand text-black' : 'border-slate-300'}`}>
               {checked && <Check size={11} />}
             </span>
             <span>
-              <span className="block text-xs font-bold text-slate-800">{supplier.name}</span>
-              <span className="block text-[11px] text-muted">{supplier.email || 'No email on file'}</span>
+              <span className="block text-xs font-bold text-black">{supplier.name}</span>
+              <span className="block text-[11px] text-black">{supplier.email || 'No email on file'}</span>
             </span>
           </button>;
-        }) : <p className="px-3 py-3 text-xs text-muted">No suppliers found.</p>}
+        }) : <p className="px-3 py-3 text-xs text-black">No suppliers found.</p>}
       </div>
     </div>}
     {selected.length > 0 && <div className="mt-2 flex flex-wrap gap-2">
-      {selected.map((supplier) => <span key={supplier.id} className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-1 text-[11px] font-bold text-brand">
+      {selected.map((supplier) => <span key={supplier.id} className="inline-flex items-center gap-1 rounded-full bg-brand-light px-2 py-1 text-[11px] font-bold text-black">
         {supplier.name}
         <button type="button" onClick={() => toggle(supplier.id)} aria-label={`Remove ${supplier.name}`} className="rounded-full p-0.5 hover:bg-brand/10"><XIcon size={11} /></button>
       </span>)}
@@ -128,13 +132,13 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
     <fieldset>
       <legend className="mb-2 text-xs font-bold">Send date</legend>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-bold text-muted">Start date<input required type="datetime-local" step="60" value={form.startDate} min={nowDateTime} onChange={(event) => setForm({ ...form, startDate: event.target.value })} className="field" /></label>
-        <label className="block text-xs font-bold text-muted">End date (deadline)<input required type="datetime-local" step="60" value={form.dueDate} min={form.startDate || nowDateTime} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} className="field" /></label>
+        <label className="block text-xs font-bold text-black">Start date<input required type="datetime-local" step="60" value={form.startDate} min={nowDateTime} onChange={(event) => setForm({ ...form, startDate: event.target.value })} className="field" /></label>
+        <label className="block text-xs font-bold text-black">End date (deadline)<input required type="datetime-local" step="60" value={form.dueDate} min={form.startDate || nowDateTime} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} className="field" /></label>
       </div>
     </fieldset>
     <SupplierMultiSelect suppliers={suppliers} selectedIds={supplierIds} onChange={setSupplierIds} />
     <label className="block text-xs font-bold">Message to suppliers<textarea rows="3" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Add a message that will be included in the email sent to the selected suppliers…" className="field h-auto py-2" /></label>
-    {busy && <p role="status" className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-bold text-sky-700">Sending RFQ emails… Please keep this window open.</p>}
+    {busy && <p role="status" className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-bold text-black">Sending RFQ emails… Please keep this window open.</p>}
     <ErrorMessage>{error}</ErrorMessage><FormActions busy={busy} close={onClose} label="Send RFQ" busyLabel="Sending RFQ emails…" />
   </form></Modal>;
 }
@@ -160,11 +164,11 @@ function QuoteForm({ rfq, suppliers, onClose, onSubmit }) {
 }
 
 function statusClass(status) {
-  if (status === 'Delivered' || status === 'Opened') return 'bg-emerald-50 text-emerald-700';
-  if (status === 'Accepted by Email Provider') return 'bg-sky-50 text-sky-700';
-  if (status === 'Failed' || status === 'Bounced') return 'bg-red-50 text-red-700';
-  if (status === 'Pending' || status === 'Sending') return 'bg-amber-50 text-amber-700';
-  return 'bg-slate-100 text-slate-600';
+  if (status === 'Delivered' || status === 'Opened') return 'bg-emerald-50 text-black';
+  if (status === 'Accepted by Email Provider') return 'bg-sky-50 text-black';
+  if (status === 'Failed' || status === 'Bounced') return 'bg-red-50 text-black';
+  if (status === 'Pending' || status === 'Sending') return 'bg-amber-50 text-black';
+  return 'bg-slate-100 text-black';
 }
 
 export function emailResultNotice(result) {
@@ -183,32 +187,13 @@ export function emailResultNotice(result) {
   return `Unable to send RFQ emails. ${failed} recipient(s) failed. Review the individual Supplier statuses below and retry after correcting the problem.`;
 }
 
-function fallbackRfqStats(rfqs) {
-  return {
-    total: rfqs.length,
-    draft: rfqs.filter((rfq) => rfq.status === 'Draft').length,
-    sent: rfqs.filter((rfq) => rfq.status === 'Sent').length,
-    awaitingResponses: rfqs.filter((rfq) => rfq.status === 'Sent' && Number(rfq.quotations) === 0).length,
-    receivedQuotations: rfqs.filter((rfq) => Number(rfq.quotations) > 0).length,
-    closed: rfqs.filter((rfq) => rfq.status === 'Closed').length
-  };
-}
-
-const SUMMARY_CARDS = [
-  { key: 'total', label: 'Total RFQs', icon: FileText, note: 'All registered RFQs', status: '', response: 'all' },
-  { key: 'draft', label: 'Draft RFQs', icon: FileEdit, note: 'Not sent to suppliers', status: 'Draft', response: 'all' },
-  { key: 'sent', label: 'Sent RFQs', icon: Send, note: 'Invitations issued', status: 'Sent', response: 'all' },
-  { key: 'awaitingResponses', label: 'Awaiting Supplier Responses', icon: Clock3, note: 'Sent, no quotation yet', status: 'Sent', response: 'awaiting' },
-  { key: 'receivedQuotations', label: 'Received Quotations', icon: CheckCircle2, note: 'At least one quotation', status: '', response: 'responded' },
-  { key: 'closed', label: 'Closed RFQs', icon: Archive, note: 'Closed without award', status: 'Closed', response: 'all' }
-];
-
 export default function RfqsPage({
   rfqs = [], requisitions = [], suppliers = [], quotations = [], user = {}, query = {},
   committeeMembers = [], initialRequisitionId, autoOpenCreate = false,
   onCreate, onLoadQuotes, onQuote, onAward, onLoadEmailDeliveries,
   onRetryFailedEmails, onResendRfqEmail, onSendToCommittee, onPreviewCommittee,
-  onLoadCommitteeReviews, onResendCommitteeReview, getRfqStats
+  onLoadCommitteeReviews, onResendCommitteeReview,
+  dateFilter, onDateFilterChange
 }) {
   const sendingRfq = useRef(false);
   const notificationRfqHandled = useRef('');
@@ -228,20 +213,15 @@ export default function RfqsPage({
   const [emailBusy, setEmailBusy] = useState(false);
   const [committeeBusy, setCommitteeBusy] = useState(false);
   const [selectedRfqIds, setSelectedRfqIds] = useState([]);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [rfqStats, setRfqStats] = useState(null);
+  const [statusFilter, setStatusFilter] = useState(query.status || '');
   const canEvaluate = ['admin', 'committee', 'procurement'].includes(user.role);
   const canAward = ['admin', 'committee'].includes(user.role);
   const canSendToCommittee = ['admin', 'procurement'].includes(user.role);
+  const canCreateRfq = ['admin', 'procurement'].includes(user.role);
 
   useEffect(() => {
-    if (!getRfqStats) return undefined;
-    let active = true;
-    getRfqStats()
-      .then((response) => { if (active) setRfqStats(response.stats || null); })
-      .catch((exception) => { if (active) setError(exception.message || 'RFQ statistics could not be loaded.'); });
-    return () => { active = false; };
-  }, [getRfqStats, rfqs]);
+    setStatusFilter(query.status || '');
+  }, [query.status]);
 
   const loadEmailStatus = useCallback(async (rfqId) => {
     if (!onLoadEmailDeliveries || !rfqId) return;
@@ -374,8 +354,15 @@ export default function RfqsPage({
 
   const summary = emailData?.summary;
   const deliveries = emailData?.deliveries || [];
-  const currentStats = rfqStats || fallbackRfqStats(rfqs);
   const respondedCount = rfqs.filter((rfq) => (rfq.responses || []).length > 0).length;
+  const report = reportForPage('RFQs');
+  const reportParams = {
+    status: statusFilter,
+    hasResponses: responseFilter === 'responded' ? 'yes' : responseFilter === 'awaiting' ? 'no' : ''
+  };
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
   const visibleRfqs = rfqs.filter((rfq) => {
     const responded = (rfq.responses || []).length > 0;
     const matchesStatus = !statusFilter || rfq.status === statusFilter;
@@ -443,37 +430,43 @@ export default function RfqsPage({
   }
 
   return <>
-    {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">{notice}</div>}
+    {notice && <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-black">{notice}</div>}
     {error && <div className="mb-4"><ErrorMessage>{error}</ErrorMessage></div>}
 
-    <div className="mb-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-      {SUMMARY_CARDS.map((card) => {
-        const active = statusFilter === card.status && responseFilter === card.response;
-        return <button key={card.key} type="button" aria-pressed={active}
-          onClick={() => { setStatusFilter(card.status); setResponseFilter(card.response); }}
-          className={`flex min-h-[126px] flex-col justify-between rounded-xl border p-4 text-left shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${active ? 'border-black bg-reference text-black' : 'border-brand bg-white text-black hover:bg-hover'}`}>
-          <span className="flex items-start justify-between gap-2 text-xs font-semibold">
-            {card.label}<card.icon size={16} aria-hidden="true" />
-          </span>
-          <span className="display-font mt-3 text-2xl font-extrabold">{currentStats[card.key] ?? '—'}</span>
-          <span className="mt-1 text-[10px] text-muted">{card.note}</span>
-        </button>;
-      })}
-    </div>
+    <ReportToolbar
+      report={report}
+      dateFilter={dateFilter}
+      onDateFilterChange={onDateFilterChange}
+      params={reportParams}
+      user={reportUser}
+      printLabel="Print RFQ register"
+      scope="matching RFQs"
+    />
 
-    <div>
-      <div className="mb-3 flex justify-end">
-        <label className="block w-full text-xs font-bold sm:w-64">
-          Filter by response
-          <select value={responseFilter} onChange={(event) => setResponseFilter(event.target.value)} className="field mt-1">
-            <option value="all">All RFQs</option>
-            <option value="responded">Supplier responded</option>
-            <option value="awaiting">Awaiting response</option>
-          </select>
-        </label>
-      </div>
-      <PageCard title="RFQs" description={`${visibleRfqs.length} of ${rfqs.length} RFQs · ${respondedCount} with supplier responses`}
+    <div className="mb-4 grid gap-3 sm:grid-cols-2 sm:justify-end">
+      <label className="block w-full text-xs font-bold sm:w-56">
+        RFQ status
+        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="field mt-1">
+          <option value="">All statuses</option>
+          {['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'].map((status) =>
+            <option key={status} value={status}>{status}</option>)}
+        </select>
+      </label>
+      <label className="block w-full text-xs font-bold sm:w-56">
+        Filter by response
+        <select value={responseFilter} onChange={(event) => setResponseFilter(event.target.value)} className="field mt-1">
+          <option value="all">All RFQs</option>
+          <option value="responded">Supplier responded</option>
+          <option value="awaiting">Awaiting response</option>
+        </select>
+      </label>
+    </div>
+    <PageCard title="RFQs" description={`${visibleRfqs.length} of ${rfqs.length} RFQs · ${respondedCount} with supplier responses`}
         action={<div className="flex flex-wrap justify-end gap-2">
+          {canCreateRfq && <button type="button" onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">
+            <Plus size={14} />Create RFQ
+          </button>}
           {canSendToCommittee && <button type="button" onClick={openCommitteeReview}
             disabled={!selectedRfqIds.length || committeeBusy}
             className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-bold text-black hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
@@ -482,11 +475,11 @@ export default function RfqsPage({
           {canSendToCommittee && <button type="button" onClick={viewCommitteeResults}
             disabled={!selectedRfq || committeeBusy}
             title={!selectedRfq ? 'Select exactly one RFQ to view committee results' : 'View committee results for the selected RFQ'}
-            className="inline-flex items-center gap-2 rounded-lg border border-accent-border bg-accent-tint px-3 py-2 text-xs font-bold text-accent-text hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
+            className="inline-flex items-center gap-2 rounded-lg border border-accent-border bg-accent-tint px-3 py-2 text-xs font-bold text-black hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50">
             <CheckCircle2 size={14} />View Commit Results
           </button>}
         </div>}>
-      {visibleRfqs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>
+      {visibleRfqs.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-black"><tr>
         {canSendToCommittee && <th className="px-3 py-3">
           <input type="checkbox" checked={allVisibleEligibleSelected} disabled={!eligibleVisibleRfqs.length || committeeBusy}
             onChange={toggleVisibleRfqSelection} aria-label="Select all RFQs with supplier responses shown" />
@@ -500,7 +493,7 @@ export default function RfqsPage({
             aria-label={`Select ${rfq.reference} for Procurement Committee`} />
         </td>}
         <td className="px-5 py-4 font-bold">
-          <button type="button" onClick={() => viewQuotes(rfq)} className="text-brand hover:underline">{rfq.reference}</button>
+          <button type="button" onClick={() => viewQuotes(rfq)} className="text-black hover:underline">{rfq.reference}</button>
         </td>
         <td className="px-5 py-4">{rfq.requisition}</td>
         <td className="px-5 py-4">{dateTimeLabel(rfq.dueDate)}</td>
@@ -509,46 +502,55 @@ export default function RfqsPage({
         <td className="max-w-[320px] px-5 py-4">
           {(rfq.responses || []).length ? <div className="space-y-1">
             {rfq.responses.slice(0, 3).map((response) => <div key={response.id} className="rounded bg-emerald-50 px-2 py-1">
-              <div className="font-bold text-emerald-800">{response.supplier} · {currency(response.amount)}</div>
-              {(response.notes || response.items?.some((item) => item.comment)) && <div className="truncate text-[10px] text-muted" title={response.notes || response.items?.find((item) => item.comment)?.comment || ''}>
+              <div className="font-bold text-black">{response.supplier} · {currency(response.amount)}</div>
+              {(response.notes || response.items?.some((item) => item.comment)) && <div className="truncate text-[10px] text-black" title={response.notes || response.items?.find((item) => item.comment)?.comment || ''}>
                 {response.notes || response.items?.find((item) => item.comment)?.comment || ''}
               </div>}
             </div>)}
-            {rfq.responses.length > 3 && <div className="text-[10px] text-muted">+{rfq.responses.length - 3} more</div>}
-          </div> : <span className="text-muted">No replies yet</span>}
+            {rfq.responses.length > 3 && <div className="text-[10px] text-black">+{rfq.responses.length - 3} more</div>}
+          </div> : <span className="text-black">No replies yet</span>}
         </td>
-        <td className="px-5 py-4">{rfq.status}{rfq.selectedSupplier && <div className="text-[10px] text-muted">{rfq.selectedSupplier}</div>}</td>
-        <td className="px-5 py-4"><button onClick={() => viewEmailStatus(rfq)} className="font-bold text-brand">Email status</button></td>
-        <td className="px-5 py-4"><button type="button" onClick={() => viewQuotes(rfq)} className="font-bold text-brand">
+        <td className="px-5 py-4">{rfq.status}{rfq.selectedSupplier && <div className="text-[10px] text-black">{rfq.selectedSupplier}</div>}</td>
+        <td className="px-5 py-4"><button onClick={() => viewEmailStatus(rfq)} className="font-bold text-black">Email status</button></td>
+        <td className="px-5 py-4"><button type="button" onClick={() => viewQuotes(rfq)} className="font-bold text-black">
           {(rfq.responses || []).length ? `View responses (${rfq.responses.length})` : 'View RFQ details'}
         </button></td>
       </tr>)}</tbody></table></div> : <EmptyState>{rfqs.length ? 'No RFQs match this response filter.' : 'No RFQs have been created.'}</EmptyState>}
-    </PageCard></div>
+    </PageCard>
 
     {detailRfq && <Modal title={`RFQ details and supplier responses · ${detailRfq.reference}`} size="xl" onClose={() => setDetailRfq(null)}>
-      {canEvaluate && ['Sent', 'Evaluating'].includes(detailRfq.status) && <div className="mb-4 flex justify-end">
-        <button onClick={() => { setActiveRfq(detailRfq); setQuoteOpen(true); }} className="rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">Record quote</button>
-      </div>}
-        {responsesLoading ? <div role="status" className="p-5 text-sm text-muted">Loading RFQ and supplier response details…</div> :
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-black">{detailRfq.reference} · RFQ record</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <DownloadButton type="rfq" id={detailRfq.id} format="pdf" label="PDF" />
+          <DownloadButton type="rfq" id={detailRfq.id} format="xlsx" label="Excel" />
+          <DownloadButton type="rfq" id={detailRfq.id} format="csv" label="CSV" />
+          {canEvaluate && ['Sent', 'Evaluating'].includes(detailRfq.status) && <button
+            onClick={() => { setActiveRfq(detailRfq); setQuoteOpen(true); }}
+            className="rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"
+          >Record quote</button>}
+        </div>
+      </div>
+        {responsesLoading ? <div role="status" className="p-5 text-sm text-black">Loading RFQ and supplier response details…</div> :
           loadedResponseDetails ? <>
             <section className="border-b border-slate-100 px-5 py-4">
               <h3 className="text-xs font-extrabold uppercase tracking-wide">Invitation sent to suppliers</h3>
               <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                <div><dt className="text-muted">Requisition</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.requisitionReference}</dd></div>
-                <div><dt className="text-muted">Request title</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.title}</dd></div>
-                <div><dt className="text-muted">Department</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.department || '—'}</dd></div>
-                <div><dt className="text-muted">Sent</dt><dd className="mt-1 font-semibold">{dateTimeLabel(loadedResponseDetails.rfq.issuedAt)}</dd></div>
-                <div><dt className="text-muted">Response deadline</dt><dd className="mt-1 font-semibold">{dateTimeLabel(loadedResponseDetails.rfq.dueDate)}</dd></div>
-                <div><dt className="text-muted">RFQ status</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.status}</dd></div>
+                <div><dt className="text-black">Requisition</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.requisitionReference}</dd></div>
+                <div><dt className="text-black">Request title</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.title}</dd></div>
+                <div><dt className="text-black">Department</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.department || '—'}</dd></div>
+                <div><dt className="text-black">Sent</dt><dd className="mt-1 font-semibold">{dateTimeLabel(loadedResponseDetails.rfq.issuedAt)}</dd></div>
+                <div><dt className="text-black">Response deadline</dt><dd className="mt-1 font-semibold">{dateTimeLabel(loadedResponseDetails.rfq.dueDate)}</dd></div>
+                <div><dt className="text-black">RFQ status</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.status}</dd></div>
               </dl>
               {loadedResponseDetails.rfq.message && <div className="mt-4 rounded-lg bg-slate-50 p-3 text-xs leading-5">
                 <div className="font-bold">Message from Procurement</div>
-                <p className="mt-1 whitespace-pre-wrap text-muted">{loadedResponseDetails.rfq.message}</p>
+                <p className="mt-1 whitespace-pre-wrap text-black">{loadedResponseDetails.rfq.message}</p>
               </div>}
               <h4 className="mt-4 text-xs font-bold">Items and prices included in the invitation</h4>
               {loadedResponseDetails.rfq.requestedItems?.length ? <div className="mt-2 overflow-x-auto">
                 <table className="w-full min-w-[580px] text-left text-xs">
-                  <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Item', 'Quantity', 'Estimated unit price', 'Estimated total'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
+                  <thead className="bg-slate-50 text-[10px] uppercase text-black"><tr>{['Item', 'Quantity', 'Estimated unit price', 'Estimated total'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
                   <tbody className="divide-y">{loadedResponseDetails.rfq.requestedItems.map((item, index) => <tr key={`${item.itemName}-${index}`}>
                     <td className="px-3 py-2 font-semibold">{item.itemName}</td>
                     <td className="px-3 py-2">{item.quantity} {item.unit}</td>
@@ -556,7 +558,7 @@ export default function RfqsPage({
                     <td className="px-3 py-2 font-bold">{currency(item.lineTotal)}</td>
                   </tr>)}</tbody>
                 </table>
-              </div> : <p className="mt-2 text-xs text-muted">No requested item details were found.</p>}
+              </div> : <p className="mt-2 text-xs text-black">No requested item details were found.</p>}
             </section>
 
             <div className="px-5 py-4">
@@ -565,40 +567,40 @@ export default function RfqsPage({
                 {loadedResponseDetails.quotations.map((quote) => <article key={quote.id} className="rounded-xl border border-slate-200 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-extrabold">{quote.supplier}{quote.selected && <span className="ml-2 text-emerald-700">Selected</span>}</h4>
-                      <p className="mt-1 text-xs text-muted">
+                      <h4 className="text-sm font-extrabold">{quote.supplier}{quote.selected && <span className="ml-2 text-black">Selected</span>}</h4>
+                      <p className="mt-1 text-xs text-black">
                         {quote.supplierContact ? `${quote.supplierContact} · ` : ''}{quote.supplierEmail || 'No email on file'}
                         {quote.supplierPhone ? ` · ${quote.supplierPhone}` : ''}
                       </p>
-                      <p className="mt-1 text-[11px] text-muted">Submitted {dateTimeLabel(quote.submittedAt)}</p>
+                      <p className="mt-1 text-[11px] text-black">Submitted {dateTimeLabel(quote.submittedAt)}</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-lg font-extrabold text-brand">{currency(quote.amount)}</div>
-                      {Number(quote.deliveryDays) > 0 && <div className="text-xs text-muted">Delivery: {quote.deliveryDays} days</div>}
-                      {(quote.qualityScore !== null || quote.ratingScore !== null) && <div className="mt-1 text-[10px] text-muted">
+                      <div className="text-lg font-extrabold text-black">{currency(quote.amount)}</div>
+                      {Number(quote.deliveryDays) > 0 && <div className="text-xs text-black">Delivery: {quote.deliveryDays} days</div>}
+                      {(quote.qualityScore !== null || quote.ratingScore !== null) && <div className="mt-1 text-[10px] text-black">
                         Evaluation scores: quality {Number(quote.qualityScore) || 0}/5 · rating {Number(quote.ratingScore) || 0}/5
                       </div>}
                     </div>
                   </div>
                   {quote.items.length ? <div className="mt-4 overflow-x-auto">
                     <table className="w-full min-w-[700px] text-left text-xs">
-                      <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Item', 'Description', 'Quantity', 'Unit price', 'Line total', 'Supplier comment'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
+                      <thead className="bg-slate-50 text-[10px] uppercase text-black"><tr>{['Item', 'Description', 'Quantity', 'Unit price', 'Line total', 'Supplier comment'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead>
                       <tbody className="divide-y">{quote.items.map((item, index) => <tr key={`${item.itemName}-${index}`}>
                         <td className="px-3 py-2 font-semibold">{item.itemName}</td>
-                        <td className="px-3 py-2 text-muted">{item.description || '—'}</td>
+                        <td className="px-3 py-2 text-black">{item.description || '—'}</td>
                         <td className="px-3 py-2">{item.quantity} {item.unit}</td>
                         <td className="px-3 py-2">{currency(item.unitPrice)}</td>
                         <td className="px-3 py-2 font-bold">{currency(item.lineTotal)}</td>
-                        <td className="whitespace-pre-wrap px-3 py-2 text-muted">{item.comment || '—'}</td>
+                        <td className="whitespace-pre-wrap px-3 py-2 text-black">{item.comment || '—'}</td>
                       </tr>)}</tbody>
                     </table>
-                  </div> : <p className="mt-3 text-xs text-muted">No itemized prices were submitted.</p>}
+                  </div> : <p className="mt-3 text-xs text-black">No itemized prices were submitted.</p>}
                   <div className="mt-3 rounded-lg bg-slate-50 p-3 text-xs">
                     <div className="font-bold">Overall supplier comment</div>
-                    <p className="mt-1 whitespace-pre-wrap text-muted">{quote.notes || 'No additional comment.'}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-black">{quote.notes || 'No additional comment.'}</p>
                   </div>
                   {canAward && <div className="mt-3 flex justify-end">
-                    <button disabled={quote.selected || !['Sent', 'Evaluating'].includes(detailRfq.status)} onClick={() => award(quote.id)} className="rounded bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 disabled:opacity-40">
+                    <button disabled={quote.selected || !['Sent', 'Evaluating'].includes(detailRfq.status)} onClick={() => award(quote.id)} className="rounded bg-emerald-50 px-3 py-2 text-xs font-bold text-black disabled:opacity-40">
                       {quote.selected ? 'Selected supplier' : 'Select supplier'}
                     </button>
                   </div>}
@@ -617,10 +619,10 @@ export default function RfqsPage({
                         type="button"
                         disabled={committeeBusy}
                         onClick={() => resendCommitteeLink(review)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-brand px-2 py-1 text-[10px] font-bold text-brand disabled:opacity-50">
+                        className="inline-flex items-center gap-1 rounded-lg border border-brand px-2 py-1 text-[10px] font-bold text-black disabled:opacity-50">
                         <RefreshCw size={12} />Resend link
                       </button>}
-                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${review.submittedAt ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${review.submittedAt ? 'bg-emerald-50 text-black' : 'bg-amber-50 text-black'}`}>
                         {review.submittedAt ? `Submitted ${dateTimeLabel(review.submittedAt)}` : 'Awaiting decision'}
                       </span>
                     </div>
@@ -630,38 +632,38 @@ export default function RfqsPage({
                       {review.decisions.map((decision) => <li key={`${review.id}-${decision.supplierId}`} className="rounded-lg bg-slate-50 p-3 text-xs">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <span className="font-bold">{decision.supplier}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${decision.decision === 'Accepted' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${decision.decision === 'Accepted' ? 'bg-emerald-50 text-black' : 'bg-red-50 text-black'}`}>
                             {decision.decision === 'Rejected' ? 'Deny' : decision.decision}
                           </span>
                         </div>
-                        <p className="mt-1 text-muted">Submitted by <strong className="text-slate-800">{decision.responderName || review.recipientName}</strong>{decision.decidedAt ? ` · ${dateTimeLabel(decision.decidedAt)}` : ''}</p>
-                        {decision.reason && <p className="mt-1 whitespace-pre-wrap text-muted">Reason: {decision.reason}</p>}
+                        <p className="mt-1 text-black">Submitted by <strong className="text-black">{decision.responderName || review.recipientName}</strong>{decision.decidedAt ? ` · ${dateTimeLabel(decision.decidedAt)}` : ''}</p>
+                        {decision.reason && <p className="mt-1 whitespace-pre-wrap text-black">Reason: {decision.reason}</p>}
                       </li>)}
-                    </ul> : <p className="mt-2 text-xs text-muted">No decisions have been submitted from this link yet.</p>}
+                    </ul> : <p className="mt-2 text-xs text-black">No decisions have been submitted from this link yet.</p>}
                 </article>)}
-              </div> : <p className="mt-3 text-xs text-muted">No committee results are available for this RFQ yet.</p>}
+              </div> : <p className="mt-3 text-xs text-black">No committee results are available for this RFQ yet.</p>}
             </div>}
           </> : <EmptyState>RFQ details could not be loaded.</EmptyState>}
     </Modal>}
 
     {activeRfq && <div className="mt-5"><PageCard title={`Email delivery · ${activeRfq.reference}`} description=" SMTP acceptance is shown as Accepted by Email Provider, never as Delivered"
       action={summary?.Failed > 0 && <button disabled={emailBusy} onClick={retryFailed} className="inline-flex items-center gap-1 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black disabled:opacity-50"><RefreshCw size={13} />Retry failed emails</button>}>
-      {emailLoading && <div className="p-5 text-sm text-muted">Loading delivery status…</div>}
+      {emailLoading && <div className="p-5 text-sm text-black">Loading delivery status…</div>}
       {!emailLoading && !emailData && <EmptyState>Select “Email status” on an RFQ to see individual delivery records.</EmptyState>}
       {!emailLoading && summary && <>
         <div className="grid gap-3 px-5 pb-4 sm:grid-cols-3 lg:grid-cols-6">
-          {[['Suppliers', summary.suppliers], ['Accepted by provider', summary['Accepted by Email Provider']], ['Delivered', summary.Delivered], ['Opened', summary.Opened], ['Failed', summary.Failed], ['Pending', summary.Pending]].map(([label, value]) => <div key={label} className="rounded-lg border bg-slate-50 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-muted">{label}</div><div className="mt-1 text-lg font-extrabold">{value || 0}</div></div>)}
+          {[['Suppliers', summary.suppliers], ['Accepted by provider', summary['Accepted by Email Provider']], ['Delivered', summary.Delivered], ['Opened', summary.Opened], ['Failed', summary.Failed], ['Pending', summary.Pending]].map(([label, value]) => <div key={label} className="rounded-lg border bg-slate-50 px-3 py-2"><div className="text-[10px] uppercase tracking-wide text-black">{label}</div><div className="mt-1 text-lg font-extrabold">{value || 0}</div></div>)}
         </div>
-        {deliveries.length ? <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Supplier', 'Recipient', 'Status', 'Attempts', 'Sent', 'Provider message ID', 'Opened', 'Failure reason', ''].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{deliveries.map((delivery) => <tr key={delivery.id}>
+        {deliveries.length ? <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase text-black"><tr>{['Supplier', 'Recipient', 'Status', 'Attempts', 'Sent', 'Provider message ID', 'Opened', 'Failure reason', ''].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead><tbody className="divide-y">{deliveries.map((delivery) => <tr key={delivery.id}>
           <td className="px-4 py-3 font-bold">{delivery.supplier}</td>
-          <td className="px-4 py-3">{delivery.recipientEmail || <span className="text-red-600">No valid email</span>}</td>
+          <td className="px-4 py-3">{delivery.recipientEmail || <span className="text-black">No valid email</span>}</td>
           <td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${statusClass(delivery.status)}`}>{delivery.status}</span></td>
           <td className="px-4 py-3">{delivery.attempts}</td>
           <td className="px-4 py-3">{dateTimeLabel(delivery.sentAt)}</td>
-          <td className="max-w-[180px] truncate px-4 py-3 font-mono text-[10px] text-muted" title={delivery.providerMessageId || ''}>{delivery.providerMessageId || '—'}</td>
+          <td className="max-w-[180px] truncate px-4 py-3 font-mono text-[10px] text-black" title={delivery.providerMessageId || ''}>{delivery.providerMessageId || '—'}</td>
           <td className="px-4 py-3">{dateTimeLabel(delivery.openedAt)}</td>
-          <td className="max-w-[220px] px-4 py-3 text-red-600">{delivery.errorDetails?.message || '—'}</td>
-          <td className="px-4 py-3"><button disabled={emailBusy} onClick={() => resend(delivery)} className="inline-flex items-center gap-1 font-bold text-brand disabled:opacity-50"><Send size={12} />Resend link</button></td>
+          <td className="max-w-[220px] px-4 py-3 text-black">{delivery.errorDetails?.message || '—'}</td>
+          <td className="px-4 py-3"><button disabled={emailBusy} onClick={() => resend(delivery)} className="inline-flex items-center gap-1 font-bold text-black disabled:opacity-50"><Send size={12} />Resend link</button></td>
         </tr>)}</tbody></table></div> : <EmptyState>No Supplier invitations were recorded for this RFQ.</EmptyState>}
       </>}
     </PageCard></div>}

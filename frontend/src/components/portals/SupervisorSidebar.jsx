@@ -28,8 +28,8 @@ const accent = {
   aside: 'bg-white text-black',
   active: 'bg-reference text-black shadow-sm',
   hover: 'hover:bg-hover hover:text-black',
-  mutedText: 'text-muted',
-  sectionText: 'text-muted'
+  mutedText: 'text-black',
+  sectionText: 'text-black'
 };
 
 export default function SupervisorSidebar(props) {

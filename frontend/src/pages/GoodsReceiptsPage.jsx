@@ -21,7 +21,7 @@ export default function GoodsReceiptsPage({ receipts }) {
           <col style={{ width: '14%' }} />
           <col style={{ width: '10%' }} />
         </colgroup>
-        <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+        <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
           <tr>{['GRN', 'Purchase order', 'Items received', 'Source', 'Received by', 'Date'].map((cell) =>
             <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
         </thead>
@@ -30,7 +30,7 @@ export default function GoodsReceiptsPage({ receipts }) {
             <td className="px-5 py-4 align-middle font-mono text-[11px] font-semibold">{receipt.reference || '—'}</td>
             <td className="px-5 py-4 align-middle">
               <span className="inline-flex items-center gap-2 font-semibold">
-                <FileText size={14} className="shrink-0 text-black/50" aria-hidden="true" />
+                <FileText size={14} className="shrink-0 text-black" aria-hidden="true" />
                 {receipt.purchaseOrder || 'Direct receipt'}
               </span>
             </td>
@@ -47,7 +47,7 @@ export default function GoodsReceiptsPage({ receipts }) {
           <PackageCheck size={22} strokeWidth={1.7} aria-hidden="true" />
         </span>
         <h3 className="mt-4 text-sm font-bold text-black">No goods receipts yet</h3>
-        <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+        <p className="mt-1 max-w-sm text-xs leading-5 text-black">
           Recorded deliveries will appear here with their items, source, and receipt date.
         </p>
       </div>

@@ -67,7 +67,7 @@ function Field({ name, value, onChange }) {
   const label = LABELS[name] || name;
   const description = DESCRIPTIONS[name];
   if (typeof value === 'boolean') return <label className="flex items-start justify-between gap-4 rounded-xl border border-brand bg-white p-4 transition-colors hover:border-black/20">
-    <span><span className="block text-xs font-bold text-ink">{label}</span>{description && <span className="mt-1 block text-[11px] leading-4 text-muted">{description}</span>}</span>
+    <span><span className="block text-xs font-bold text-black">{label}</span>{description && <span className="mt-1 block text-[11px] leading-4 text-black">{description}</span>}</span>
     <input type="checkbox" checked={value} onChange={(event) => onChange(name, event.target.checked)} className="mt-1 h-4 w-4 accent-black" />
   </label>;
   const selectOptions = {
@@ -79,8 +79,8 @@ function Field({ name, value, onChange }) {
     default_export_format: [['xlsx','Excel (.xlsx)'],['csv','CSV (.csv)'],['pdf','PDF (.pdf)']],
   };
   if (selectOptions[name]) return <label className="block rounded-xl border border-brand bg-white p-4 transition-colors hover:border-black/20">
-    <span className="block text-xs font-bold text-ink">{label}</span>
-    {description && <span className="mt-1 block text-[11px] leading-4 text-muted">{description}</span>}
+    <span className="block text-xs font-bold text-black">{label}</span>
+    {description && <span className="mt-1 block text-[11px] leading-4 text-black">{description}</span>}
     <select value={value} onChange={(event) => onChange(name, event.target.value)} className="field mt-3">
       {selectOptions[name].map(([optionValue, text]) => <option key={optionValue} value={optionValue}>{text}</option>)}
     </select>
@@ -89,8 +89,8 @@ function Field({ name, value, onChange }) {
   const textArea = name === 'organization_address' || name === 'document_footer';
   const common = { value: value ?? '', onChange: (event) => onChange(name, number ? Number(event.target.value) : event.target.value), className: textArea ? 'field mt-3 min-h-20 py-2' : 'field mt-3' };
   return <label className="block rounded-xl border border-brand bg-white p-4 transition-colors hover:border-black/20">
-    <span className="block text-xs font-bold text-ink">{label}</span>
-    {description && <span className="mt-1 block text-[11px] leading-4 text-muted">{description}</span>}
+    <span className="block text-xs font-bold text-black">{label}</span>
+    {description && <span className="mt-1 block text-[11px] leading-4 text-black">{description}</span>}
     {textArea ? <textarea {...common} /> : <input type={number ? 'number' : 'text'} {...common} readOnly={name === 'organization_logo'} />}
   </label>;
 }
@@ -170,15 +170,15 @@ export default function SettingsPage({ actions }) {
     setValues(saved); setNotice(''); setError('');
   }
 
-  if (loading) return <div role="status" className="rounded-xl border border-brand bg-white p-8 text-sm text-muted shadow-dashboard">Loading settings…</div>;
+  if (loading) return <div role="status" className="rounded-xl border border-brand bg-white p-8 text-sm text-black shadow-dashboard">Loading settings…</div>;
 
   return <div className="grid gap-5 xl:grid-cols-[230px_minmax(0,1fr)]">
     <aside className="rounded-xl border border-brand bg-white p-3 shadow-dashboard xl:sticky xl:top-24 xl:self-start">
-      <label className="relative mb-3 block"><Search size={14} className="absolute left-3 top-3 text-muted" /><input aria-label="Search settings" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search settings" className="field mt-0 pl-9" /></label>
+      <label className="relative mb-3 block"><Search size={14} className="absolute left-3 top-3 text-black" /><input aria-label="Search settings" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search settings" className="field mt-0 pl-9" /></label>
       <nav aria-label="Settings sections" className="max-h-[620px] space-y-1 overflow-y-auto">
         {visibleCategories.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setCategory(id)}
           aria-current={category === id ? 'page' : undefined}
-          className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${category === id ? 'bg-reference text-black' : 'text-muted hover:bg-hover hover:text-black'}`}>
+          className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${category === id ? 'bg-reference text-black' : 'text-black hover:bg-hover hover:text-black'}`}>
           <Icon size={15} />{label}
         </button>)}
       </nav>
@@ -190,26 +190,26 @@ export default function SettingsPage({ actions }) {
         <h2 className="display-font text-lg font-extrabold">System Maintenance</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[['Server','Running'],['Database',health?.database || 'Unknown'],['Environment',health?.environment || 'Unknown'],['Uptime',`${health?.uptime || 0}s`],['Backend','Connected'],['Application version',health?.applicationVersion || '1.0.0'],['Logo','Loaded'],['Audit logging',values.audit_logging ? 'Enabled' : 'Disabled']].map(([label,value]) =>
-            <div key={label} className="rounded-xl border border-brand bg-white p-4 transition-colors hover:border-black/20"><div className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</div><div className="mt-2 text-sm font-extrabold">{value}</div></div>)}
+            <div key={label} className="rounded-xl border border-brand bg-white p-4 transition-colors hover:border-black/20"><div className="text-[10px] font-bold uppercase tracking-wide text-black">{label}</div><div className="mt-2 text-sm font-extrabold">{value}</div></div>)}
         </div>
       </section> : null}
       {activeCategory.id === 'audit' ? <section className="rounded-2xl border border-brand bg-white p-6 shadow-dashboard">
         <h2 className="display-font text-lg font-extrabold">Audit Logs</h2>
         <div className="mt-4 max-h-96 overflow-y-auto">
           {audit.length ? audit.map((entry) => <div key={entry.id} className="border-b border-subtle py-4 text-xs last:border-0">
-            <div className="flex justify-wrap justify-between gap-2"><strong>{entry.action}</strong><span className="text-muted">{String(entry.createdAt || '')}</span></div>
-            <div className="mt-1 text-muted">{entry.actor || 'System'} · {entry.entityType} · {entry.entityId}</div>
-          </div>) : <div className="py-8 text-center text-xs text-muted">No audit records available.</div>}
+            <div className="flex justify-wrap justify-between gap-2"><strong>{entry.action}</strong><span className="text-black">{String(entry.createdAt || '')}</span></div>
+            <div className="mt-1 text-black">{entry.actor || 'System'} · {entry.entityType} · {entry.entityId}</div>
+          </div>) : <div className="py-8 text-center text-xs text-black">No audit records available.</div>}
         </div>
       </section> : null}
       {activeCategory.id !== 'audit' && <section className="rounded-2xl border border-brand bg-white p-5 shadow-dashboard sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-subtle pb-4">
-          <div><h2 className="display-font text-lg font-extrabold">{activeCategory.label}</h2><p className="mt-1 text-xs leading-5 text-muted">Changes are validated and saved to the database.</p></div>
+          <div><h2 className="display-font text-lg font-extrabold">{activeCategory.label}</h2><p className="mt-1 text-xs leading-5 text-black">Changes are validated and saved to the database.</p></div>
           {dirtyKeys.length > 0 && <span className="rounded-full border border-brand bg-white px-3 py-1.5 text-[10px] font-bold text-black">{dirtyKeys.length} unsaved changes</span>}
         </div>
         <div className="mt-5 grid gap-3 md:grid-cols-2">
           {activeCategory.keys.map((key) => key in values ? <Field key={key} name={key} value={values[key]} onChange={change} /> : null)}
-          {activeCategory.id === 'departments' && <div className="rounded-xl border border-brand bg-hover p-5 text-xs leading-5 text-muted md:col-span-2">Department creation and approval assignment are managed from <strong className="text-black">Users Management</strong>. This section is integrated through the existing Department APIs and audit logs.</div>}
+          {activeCategory.id === 'departments' && <div className="rounded-xl border border-brand bg-hover p-5 text-xs leading-5 text-black md:col-span-2">Department creation and approval assignment are managed from <strong className="text-black">Users Management</strong>. This section is integrated through the existing Department APIs and audit logs.</div>}
         </div>
       </section>}
       {activeCategory.id !== 'audit' && <div className="flex flex-wrap justify-end gap-2">

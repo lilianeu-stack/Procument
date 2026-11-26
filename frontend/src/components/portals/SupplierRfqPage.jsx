@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, FileText, RefreshCw, Send } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
+import PublicPrintToolbar from '../ui/PublicPrintToolbar.jsx';
 import { currency, dateTimeLabel } from '../../utils/format.js';
 import { api } from '../../services/api.js';
 
@@ -75,42 +76,48 @@ export default function SupplierRfqPage({ token }) {
     <header className="border-b bg-white">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
         <BrandLogo />
-        <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700">Requisition response portal</span>
+        <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Requisition response portal</span>
       </div>
     </header>
 
     <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
-      {loading && <div className="rounded-xl border bg-white p-8 text-center text-sm text-muted">Opening your request form…</div>}
-      {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">{error}</div>}
-      {!loading && notice && <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700"><CheckCircle2 size={16} />{notice}</div>}
+      {loading && <div className="rounded-xl border bg-white p-8 text-center text-sm text-black">Opening your request form…</div>}
+      {!loading && error && <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-black">{error}</div>}
+      {!loading && notice && <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-black"><CheckCircle2 size={16} />{notice}</div>}
 
       {!loading && rfq && <form onSubmit={submit} className="space-y-5">
+        <PublicPrintToolbar
+          title="Supplier quotation form"
+          reference={`${rfq.requisitionReference} · RFQ ${rfq.reference}`}
+          label="Print quotation form"
+          note="Print the signed-link RFQ and your submitted prices for your records."
+        />
         <section className="rounded-xl border bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">Requested items form</p>
-              <h1 className="display-font mt-1 text-2xl font-extrabold text-slate-900">{rfq.requisitionReference}</h1>
-              <p className="mt-1 text-sm text-muted">RFQ {rfq.reference} · {rfq.title || 'Procurement request'}</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-black">Requested items form</p>
+              <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{rfq.requisitionReference}</h1>
+              <p className="mt-1 text-sm text-black">RFQ {rfq.reference} · {rfq.title || 'Procurement request'}</p>
             </div>
             <div className="rounded-lg bg-slate-50 px-4 py-3 text-right text-xs">
-              <div className="font-bold text-slate-700">Response deadline</div>
-              <div className="mt-1 text-base font-extrabold text-brand">{dateTimeLabel(rfq.dueDate)}</div>
-              <div className="mt-1 text-muted">Invited supplier: {rfq.supplier.name}</div>
+              <div className="font-bold text-black">Response deadline</div>
+              <div className="mt-1 text-base font-extrabold text-black">{dateTimeLabel(rfq.dueDate)}</div>
+              <div className="mt-1 text-black">Invited supplier: {rfq.supplier.name}</div>
             </div>
           </div>
           {rfq.message && <div className="mt-5 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-5 shadow-sm">
-            <strong className="block text-sm font-extrabold uppercase tracking-wide text-emerald-800">Message from Procurement</strong>
-            <p className="mt-2 whitespace-pre-wrap text-base font-bold leading-relaxed text-slate-900">{rfq.message}</p>
+            <strong className="block text-sm font-extrabold uppercase tracking-wide text-black">Message from Procurement</strong>
+            <p className="mt-2 whitespace-pre-wrap text-base font-bold leading-relaxed text-black">{rfq.message}</p>
           </div>}
         </section>
 
         <section className="rounded-xl border bg-white shadow-sm">
           <div className="flex items-center gap-2 border-b px-6 py-4">
-            <FileText size={16} className="text-brand" />
+            <FileText size={16} className="text-black" />
             <h2 className="text-sm font-extrabold">Requested items · enter your prices</h2>
           </div>
           {rfq.items.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] uppercase text-muted"><tr>{['Item', 'Qty', 'Unit', 'Est. unit', 'Your unit price (RWF)', 'Your total'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
+            <thead className="bg-slate-50 text-[10px] uppercase text-black"><tr>{['Item', 'Qty', 'Unit', 'Est. unit', 'Your unit price (RWF)', 'Your total'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
             <tbody className="divide-y">{rfq.items.map((item) => {
               const price = Number(form.prices[item.requisitionItemId]) || 0;
               return <tr key={item.requisitionItemId}>
@@ -122,26 +129,26 @@ export default function SupplierRfqPage({ token }) {
                 <td className="px-4 py-3 font-bold">{currency((Number(item.quantity) || 0) * price)}</td>
               </tr>;
             })}</tbody>
-          </table></div> : <p className="p-6 text-sm text-muted">No item lines were supplied with this form.</p>}
+          </table></div> : <p className="p-6 text-sm text-black">No item lines were supplied with this form.</p>}
           {rfq.items.length > 0 && <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-200 bg-emerald-50 px-6 py-4">
-            <span className="text-xs font-extrabold uppercase tracking-wide text-emerald-800">Your response total</span>
-            <strong className="text-base font-bold text-brand">{currency(responseTotal)}</strong>
+            <span className="text-xs font-extrabold uppercase tracking-wide text-black">Your response total</span>
+            <strong className="text-base font-bold text-black">{currency(responseTotal)}</strong>
           </div>}
         </section>
 
         <section className="rounded-xl border bg-white p-6 shadow-sm">
           {responded ? <>
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-              <span className="flex items-center gap-2 text-sm font-bold text-emerald-800"><CheckCircle2 size={17} />Response submitted{rfq.quotation.submittedAt ? ` ${dateTimeLabel(rfq.quotation.submittedAt)}` : ''}</span>
-              <span className="text-xs font-bold text-muted">Only one response is accepted for each form.</span>
+              <span className="flex items-center gap-2 text-sm font-bold text-black"><CheckCircle2 size={17} />Response submitted{rfq.quotation.submittedAt ? ` ${dateTimeLabel(rfq.quotation.submittedAt)}` : ''}</span>
+              <span className="text-xs font-bold text-black">Only one response is accepted for each form.</span>
             </div>
             {rfq.quotation.notes && <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-4">
-              <strong className="text-xs font-extrabold uppercase tracking-wide text-muted">Overall comment</strong>
-              <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-ink">{rfq.quotation.notes}</p>
+              <strong className="text-xs font-extrabold uppercase tracking-wide text-black">Overall comment</strong>
+              <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-black">{rfq.quotation.notes}</p>
             </div>}
           </> : <>
             <label className="block text-xs font-bold">Overall comment<textarea rows="3" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} className="field mt-1 h-auto py-2" placeholder="Add any comment that should reach Procurement…" /></label>
-            <p className="mt-3 text-xs text-muted">Your response, item prices, and comments are visible to Procurement only. Other invited suppliers cannot see them.</p>
+            <p className="mt-3 text-xs text-black">Your response, item prices, and comments are visible to Procurement only. Other invited suppliers cannot see them.</p>
             <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
               <button disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-xs font-bold text-black hover:bg-brand/90 disabled:opacity-50">
                 {busy ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}

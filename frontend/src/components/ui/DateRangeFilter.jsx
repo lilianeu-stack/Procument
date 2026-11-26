@@ -7,7 +7,7 @@ import {
 const PRESETS = datePresets();
 
 const fieldClass = 'field mt-0 h-10 bg-white px-3 text-xs';
-const labelClass = 'block text-[10px] font-bold uppercase leading-4 tracking-[.08em] text-muted';
+const labelClass = 'block text-[10px] font-bold uppercase leading-4 tracking-[.08em] text-black';
 
 // A formatted text control keeps the configured date format visible while a
 // hidden native input preserves the familiar calendar picker.
@@ -110,7 +110,7 @@ function DateField({ label, value, onChange, min, max, invalid }) {
         onClick={openPicker}
         aria-label={`Choose ${label} date`}
         title={`Choose date (${format})`}
-        className="absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md border border-transparent bg-white text-muted"
+        className="absolute right-1 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-md border border-transparent bg-white text-black"
       >
         <CalendarDays size={14} aria-hidden="true" />
       </button>
@@ -190,7 +190,7 @@ export default function DateRangeFilter({
     />
   </div>;
 
-  const message = <div className="flex min-w-0 items-start gap-1.5 text-[10px] leading-4 text-muted" aria-live="polite">
+  const message = <div className="flex min-w-0 items-start gap-1.5 text-[10px] leading-4 text-black" aria-live="polite">
     <CalendarDays size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
     <span className={error ? 'font-semibold text-black' : ''} title={error || rangeLabel}>
       {error || rangeLabel}
@@ -211,7 +211,7 @@ export default function DateRangeFilter({
       {hasSelection && <button
         type="button"
         onClick={() => onChange?.({ preset: '', from: '', to: '', dateField: fields[0]?.key || '' })}
-        className="inline-flex h-8 items-center gap-1 rounded-lg border border-brand bg-white px-2.5 text-[10px] font-bold text-muted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+        className="inline-flex h-8 items-center gap-1 rounded-lg border border-brand bg-white px-2.5 text-[10px] font-bold text-black transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
       >
         <X size={12} aria-hidden="true" />Clear dates
       </button>}

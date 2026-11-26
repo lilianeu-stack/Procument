@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Save, Send } from 'lucide-react';
 import PageCard, { EmptyState } from '../ui/PageCard.jsx';
 import Modal from '../ui/Modal.jsx';
-import PrintButton from '../ui/PrintButton.jsx';
+import PublicPrintToolbar from '../ui/PublicPrintToolbar.jsx';
 import { ErrorState, LoadingState } from './PortalUi.jsx';
 import { api } from '../../services/api.js';
 import { dateLabel, dateTimeLabel } from '../../utils/format.js';
@@ -210,15 +210,20 @@ export default function SupplierPricingPage({ token }) {
     <header className="no-print border-b bg-white">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
         <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Supplier pricing portal</span>
-        <PrintButton label="Print" />
       </div>
     </header>
 
     <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
+      {details.reference && <PublicPrintToolbar
+        title="Supplier pricing response"
+        reference={details.reference}
+        label="Print pricing response"
+        note="Print the signed-link pricing request and your submitted prices for your records."
+      />}
       <div>
         <p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Private supplier response</p>
         <h1 className="display-font mt-1 text-2xl font-extrabold text-black sm:text-3xl">Purchase Order – Supplier Pricing Response</h1>
-        <p className="mt-2 max-w-3xl text-xs leading-5 text-muted">
+        <p className="mt-2 max-w-3xl text-xs leading-5 text-black">
           Enter your own prices for the requested items. Your response is visible to Procurement only.
         </p>
       </div>
@@ -236,18 +241,18 @@ export default function SupplierPricingPage({ token }) {
       {!loading && request && <>
         <PageCard title="Purchase Order Details" description="Details of the request you are pricing.">
           <dl className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Purchase order reference</dt><dd className="mt-1 text-sm font-extrabold">{details.purchaseOrderReference || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Request reference</dt><dd className="mt-1 text-sm font-bold">{details.reference || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Type</dt><dd className="mt-1 text-sm font-bold">{details.purchaseOrderType || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.date)}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Delivery date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.deliveryDate)}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Submission deadline</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.submissionDeadline)}</dd></div>
-            <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Requesting organization</dt>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Purchase order reference</dt><dd className="mt-1 text-sm font-extrabold">{details.purchaseOrderReference || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Request reference</dt><dd className="mt-1 text-sm font-bold">{details.reference || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Type</dt><dd className="mt-1 text-sm font-bold">{details.purchaseOrderType || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.date)}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Delivery date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.deliveryDate)}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Submission deadline</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.submissionDeadline)}</dd></div>
+            <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Requesting organization</dt>
               <dd className="mt-1 text-sm font-bold">{organization.name || '—'}</dd>
-              {(organization.caption || organization.title) && <dd className="mt-0.5 text-xs text-muted">{[organization.caption, organization.title].filter(Boolean).join(' · ')}</dd>}
+              {(organization.caption || organization.title) && <dd className="mt-0.5 text-xs text-black">{[organization.caption, organization.title].filter(Boolean).join(' · ')}</dd>}
               {[organization.address, [organization.city, organization.country].filter(Boolean).join(', '),
                 organization.phone, organization.email].filter(Boolean).map((value, index) =>
-                <dd key={`organization-${index}`} className="mt-0.5 text-xs text-muted">{value}</dd>)}
+                <dd key={`organization-${index}`} className="mt-0.5 text-xs text-black">{value}</dd>)}
             </div>
             {details.message && <div className="sm:col-span-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black"><dt className="text-[10px] font-extrabold uppercase tracking-wide text-black">Message from Procurement</dt><dd className="mt-1 whitespace-pre-wrap">{details.message}</dd></div>}
           </dl>
@@ -255,17 +260,17 @@ export default function SupplierPricingPage({ token }) {
 
         <PageCard title="Supplier Information" description="Registered details for this pricing request.">
           <dl className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Supplier name</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.name || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Contact person</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.contactName || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Email</dt><dd className="mt-1 break-all text-sm font-bold">{details.supplier?.email || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Address</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.address || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Supplier name</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.name || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Contact person</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.contactName || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Email</dt><dd className="mt-1 break-all text-sm font-bold">{details.supplier?.email || '—'}</dd></div>
+            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Address</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.address || '—'}</dd></div>
           </dl>
         </PageCard>
 
         <PageCard title="Requested Items" description="Enter your own unit prices. Requested quantities and descriptions cannot be changed.">
           {items.length ? <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-left text-xs">
-              <thead className="bg-white text-[10px] uppercase text-muted">
+              <thead className="bg-white text-[10px] uppercase text-black">
                 <tr>{['Item No.', 'Quantity', 'Unit', 'Description', 'Supplier Unit Price', 'Supplier Total Price'].map((heading) =>
                   <th key={heading} className="px-4 py-3 font-bold">{heading}</th>)}</tr>
               </thead>
@@ -277,7 +282,7 @@ export default function SupplierPricingPage({ token }) {
                     <td className="px-4 py-3 font-bold">{item.itemNo ?? index + 1}</td>
                     <td className="px-4 py-3">{item.quantity}</td>
                     <td className="px-4 py-3">{item.unit || '—'}</td>
-                    <td className="max-w-[320px] px-4 py-3 text-muted">{item.description || '—'}</td>
+                    <td className="max-w-[320px] px-4 py-3 text-black">{item.description || '—'}</td>
                     <td className="px-4 py-3">
                       {locked
                         ? <span className="font-bold">{item.unitPrice === '' ? '—' : money(item.unitPrice, currencyCode)}</span>
@@ -311,7 +316,7 @@ export default function SupplierPricingPage({ token }) {
                 <Send size={14} />Submit Quotation
               </button>
             </div>}
-            {response.status && <p className="text-[11px] text-muted">Response status: {response.status}</p>}
+            {response.status && <p className="text-[11px] text-black">Response status: {response.status}</p>}
           </div>
         </PageCard>
       </>}
@@ -324,8 +329,8 @@ export default function SupplierPricingPage({ token }) {
           <p>Once submitted, your quotation becomes read-only. Make sure every unit price is correct.</p>
         </div>
         <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
-          <div><dt className="text-[10px] text-muted">Supplier total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>
-          <div><dt className="text-[10px] text-muted">Items priced</dt><dd className="font-bold">{items.length}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier total</dt><dd className="font-extrabold text-black">{money(totals.total, currencyCode)}</dd></div>
+          <div><dt className="text-[10px] text-black">Items priced</dt><dd className="font-bold">{items.length}</dd></div>
         </dl>
         <label className="flex items-start gap-2 text-xs font-semibold">
           <input type="checkbox" checked={submitConfirmed} onChange={(event) => setSubmitConfirmed(event.target.checked)} className="mt-0.5 h-4 w-4" />

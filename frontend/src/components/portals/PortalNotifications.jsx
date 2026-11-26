@@ -68,17 +68,17 @@ export default function PortalNotifications({ notifications = [], portalApi, onO
               className="min-w-0 flex-1 text-left disabled:cursor-default">
               <div className="flex flex-wrap items-center gap-2">
                 {!notification.isRead && <span className="h-2 w-2 rounded-full bg-reference" />}
-                <span className="text-xs font-bold text-ink">{notification.title}</span>
+                <span className="text-xs font-bold text-black">{notification.title}</span>
                 {!notification.isRead && <PortalBadge tone="rose">New</PortalBadge>}
               </div>
-              <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-muted">{notification.body}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+              <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-black">{notification.body}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-black">
                 <span>{dateTimeLabel(notification.createdAt)}</span>
                 {canOpen && <><span>·</span><span className="font-bold text-black">Open {destinationLabel(link)}</span><ChevronRight size={11} className="text-black" /></>}
               </div>
             </button>
             {!notification.isRead && <button type="button" disabled={busyId === notification.id} onClick={() => markRead(notification)}
-              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-muted hover:text-black disabled:opacity-50">
+              className="inline-flex items-center gap-1 rounded-lg border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:text-black disabled:opacity-50">
               <Check size={12} />{busyId === notification.id ? 'Saving…' : 'Mark read'}
             </button>}
           </div>;

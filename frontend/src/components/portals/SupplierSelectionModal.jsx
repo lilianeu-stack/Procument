@@ -132,12 +132,12 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
         <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h3 className="display-font text-lg font-extrabold">{order?.reference || 'New purchase order'}</h3>
-            <p className="mt-1 text-xs text-muted">
+            <p className="mt-1 text-xs text-black">
               {order?.supplier || 'Supplier recorded on the order'} · Delivery {dateLabel(order?.deliveryDate)}
             </p>
           </div>
           <div className="text-right text-xs">
-            <span className="block text-muted">Total</span>
+            <span className="block text-black">Total</span>
             <strong className="text-black">{formatRwf(order?.total)}</strong>
           </div>
         </div>
@@ -147,11 +147,11 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h3 className="text-xs font-extrabold uppercase tracking-wide text-black">Registered suppliers</h3>
-            <p className="mt-1 text-[11px] text-muted">Only active suppliers with a valid registered email can receive a pricing link.</p>
+            <p className="mt-1 text-[11px] text-black">Only active suppliers with a valid registered email can receive a pricing link.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="relative block">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-black" />
               <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search Suppliers"
                 aria-label="Search Suppliers" className="field w-52 pl-9" />
             </label>
@@ -164,14 +164,14 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-brand bg-white px-3 py-2 text-xs">
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={selectAll} disabled={!eligibleIds.length} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black disabled:opacity-50">Select All</button>
-            <button type="button" onClick={deselectAll} disabled={!selected.length} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-muted disabled:opacity-50">Deselect All</button>
+            <button type="button" onClick={deselectAll} disabled={!selected.length} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black disabled:opacity-50">Deselect All</button>
           </div>
           <span className="inline-flex items-center gap-1.5 font-bold text-black"><Users size={14} />Selected Suppliers: {selected.length}</span>
         </div>
 
         {filtered.length ? <div className="mt-3 max-h-[42vh] overflow-auto rounded-lg border border-brand">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="sticky top-0 bg-white text-[10px] uppercase text-muted">
+            <thead className="sticky top-0 bg-white text-[10px] uppercase text-black">
               <tr>{['', 'Supplier name', 'Registered email', 'Contact person', 'Supplier status'].map((heading) =>
                 <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -212,14 +212,14 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
           A private pricing link will be emailed to each registered supplier. Quoted prices stay visible to Procurement only.
         </p>
         <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-2">
-          <div><dt className="text-[10px] text-muted">Purchase order</dt><dd className="font-bold">{order?.reference || 'Assigned when saved'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Suppliers selected</dt><dd className="font-bold">{chosen.length}</dd></div>
-          <div><dt className="text-[10px] text-muted">Total</dt><dd className="font-bold">{formatRwf(order?.total)}</dd></div>
-          <div><dt className="text-[10px] text-muted">Submission deadline</dt><dd className="font-bold">{deadline ? dateLabel(deadline) : 'Not configured'}</dd></div>
+          <div><dt className="text-[10px] text-black">Purchase order</dt><dd className="font-bold">{order?.reference || 'Assigned when saved'}</dd></div>
+          <div><dt className="text-[10px] text-black">Suppliers selected</dt><dd className="font-bold">{chosen.length}</dd></div>
+          <div><dt className="text-[10px] text-black">Total</dt><dd className="font-bold">{formatRwf(order?.total)}</dd></div>
+          <div><dt className="text-[10px] text-black">Submission deadline</dt><dd className="font-bold">{deadline ? dateLabel(deadline) : 'Not configured'}</dd></div>
         </dl>
         <ul className="mt-3 space-y-1.5 rounded-lg border border-brand bg-white p-3 text-xs">
           {chosen.map((supplier) => <li key={supplier.id} className="flex flex-wrap justify-between gap-2 border-b border-subtle pb-1.5 last:border-0 last:pb-0">
-            <span className="font-bold">{supplier.name}</span><span className="break-all text-muted">{supplier.email}</span>
+            <span className="font-bold">{supplier.name}</span><span className="break-all text-black">{supplier.email}</span>
           </li>)}
         </ul>
       </section>
@@ -269,11 +269,11 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
       </section>
 
       <dl className="grid gap-3 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-3">
-        <div><dt className="text-[10px] text-muted">Request reference</dt><dd className="mt-1 break-all font-bold">{result?.reference || result?.requestId || '—'}</dd></div>
-        <div><dt className="text-[10px] text-muted">Accepted</dt><dd className="mt-1 font-bold">{accepted}</dd></div>
-        <div><dt className="text-[10px] text-muted">Failed</dt><dd className="mt-1 font-bold">{failed}</dd></div>
-        <div><dt className="text-[10px] text-muted">Total attempted</dt><dd className="mt-1 font-bold">{Number(delivery.total) || deliveries.length}</dd></div>
-        <div><dt className="text-[10px] text-muted">Skipped</dt><dd className="mt-1 font-bold">{Number(delivery.skipped) || 0}</dd></div>
+        <div><dt className="text-[10px] text-black">Request reference</dt><dd className="mt-1 break-all font-bold">{result?.reference || result?.requestId || '—'}</dd></div>
+        <div><dt className="text-[10px] text-black">Accepted</dt><dd className="mt-1 font-bold">{accepted}</dd></div>
+        <div><dt className="text-[10px] text-black">Failed</dt><dd className="mt-1 font-bold">{failed}</dd></div>
+        <div><dt className="text-[10px] text-black">Total attempted</dt><dd className="mt-1 font-bold">{Number(delivery.total) || deliveries.length}</dd></div>
+        <div><dt className="text-[10px] text-black">Skipped</dt><dd className="mt-1 font-bold">{Number(delivery.skipped) || 0}</dd></div>
       </dl>
 
       {missing.length > 0 && <section className="rounded-lg border border-brand bg-white p-4 text-xs text-black">
@@ -284,7 +284,7 @@ export default function SupplierSelectionModal({ order, suppliers = [], onSend, 
 
       {deliveries.length > 0 && <section className="overflow-x-auto rounded-lg border border-brand">
         <table className="w-full min-w-[640px] text-left text-xs">
-          <thead className="bg-white text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-black">
             <tr>{['Supplier', 'Recipient', 'Email status', 'Status', 'Error'].map((heading) => <th key={heading} className="px-3 py-3 font-bold">{heading}</th>)}</tr>
           </thead>
           <tbody className="divide-y">

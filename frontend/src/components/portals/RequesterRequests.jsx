@@ -51,7 +51,7 @@ const REQUESTER_STATUS_OPTIONS = [
   { value: 'Cancelled', label: 'Cancelled' }
 ];
 
-const HEADER_CLASS = 'px-3 py-3.5 text-left text-[10px] font-extrabold uppercase tracking-[.08em] text-black/50';
+const HEADER_CLASS = 'px-3 py-3.5 text-left text-[10px] font-extrabold uppercase tracking-[.08em] text-black';
 const CELL_CLASS = 'px-3 py-3.5 align-middle';
 
 function procurementStatus(request) {
@@ -272,13 +272,13 @@ export default function RequesterRequests({
     <section className="no-print mb-5 overflow-hidden rounded-xl border border-brand bg-white">
       <div className="flex flex-col gap-3 p-5 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <p data-testid="requests-date" className="text-[11px] font-semibold text-muted">{formatDate(new Date())}</p>
+          <p data-testid="requests-date" className="text-[11px] font-semibold text-black">{formatDate(new Date())}</p>
           <h1 data-testid="requests-title" className="display-font mt-1 text-[25px] font-extrabold leading-tight tracking-[-0.02em] sm:text-[28px]">
             {pageName}
           </h1>
-          <p data-testid="requests-context" className="mt-1 text-xs text-muted">{roleName} · {departmentName}</p>
+          <p data-testid="requests-context" className="mt-1 text-xs text-black">{roleName} · {departmentName}</p>
         </div>
-        <p className="max-w-sm text-[11px] leading-5 text-muted">
+        <p className="max-w-sm text-[11px] leading-5 text-black">
           Showing only requests created by your account. Filter the register to review or export a specific result set.
         </p>
       </div>
@@ -289,11 +289,11 @@ export default function RequesterRequests({
       dateFilter={filters}
       onDateFilterChange={updateDateFilter}
       params={listParams}
-      professionalActions
       onPrint={handlePrint}
       printing={printing}
       printLabel="Print My purchase requisitions"
       printDates={`Generated ${dateTimeLabel(generatedAt)}`}
+      renderPrintTable={false}
     />
 
     <PageCard
@@ -309,10 +309,10 @@ export default function RequesterRequests({
       <div className="border-b border-subtle bg-white px-5 py-5 sm:px-6">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <p className="text-[10px] font-extrabold uppercase tracking-[.12em] text-black/45">Search register</p>
-            <p className="mt-1 text-xs text-muted">Find requests by reference, title or item.</p>
+            <p className="text-[10px] font-extrabold uppercase tracking-[.12em] text-black">Search register</p>
+            <p className="mt-1 text-xs text-black">Find requests by reference, title or item.</p>
           </div>
-          {pagination?.total !== undefined && <span className="shrink-0 rounded-full border border-brand bg-white px-3 py-1.5 text-[10px] font-bold text-black/60">
+          {pagination?.total !== undefined && <span className="shrink-0 rounded-full border border-brand bg-white px-3 py-1.5 text-[10px] font-bold text-black">
             {Number(pagination.total).toLocaleString('en-US')} record{Number(pagination.total) === 1 ? '' : 's'}
           </span>}
         </div>
@@ -335,7 +335,7 @@ export default function RequesterRequests({
           </select>
         </FilterField>
         {hasFilters && <button type="button" onClick={clearFilters}
-          className="mb-0.5 inline-flex h-10 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-muted">
+          className="mb-0.5 inline-flex h-10 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-black">
           <X size={12} aria-hidden="true" />Clear filters
         </button>}
         </div>
@@ -348,7 +348,7 @@ export default function RequesterRequests({
         <>
           <div className="overflow-hidden rounded-xl border border-brand bg-white">
             <TableScroll minWidth={1080} label="My procurement requests table" className="scrollbar-hide">
-              <table className="w-full table-fixed border-collapse text-left text-[13px] text-ink">
+              <table className="w-full table-fixed border-collapse text-left text-[13px] text-black">
                 <colgroup>
                   <col style={{ width: '12%' }} />
                   <col style={{ width: '18%' }} />
@@ -379,12 +379,12 @@ export default function RequesterRequests({
                       <td className={`${CELL_CLASS} min-w-0`}>
                         <div className="max-w-full truncate font-semibold leading-4" title={request.title}>{request.title || '—'}</div>
                         <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                          <span className="min-w-0 max-w-full truncate text-[11px] leading-4 text-muted" title={itemsSummary}>{itemsSummary}</span>
+                          <span className="min-w-0 max-w-full truncate text-[11px] leading-4 text-black" title={itemsSummary}>{itemsSummary}</span>
                           <TextLink onClick={() => openRequest(request.id)} className="shrink-0 !text-[10px]">View items</TextLink>
                         </div>
                       </td>
                       <td className={`${CELL_CLASS} truncate`} title={request.department || ''}>{request.department || '—'}</td>
-                      <td className={`${CELL_CLASS} whitespace-nowrap tabular-nums text-black/70`}
+                      <td className={`${CELL_CLASS} whitespace-nowrap tabular-nums text-black`}
                         title={submitted ? dateTimeLabel(submitted) : ''}>
                         {submitted ? dateLabel(submitted) : '—'}
                       </td>
@@ -397,10 +397,10 @@ export default function RequesterRequests({
                           <span className="inline-flex max-w-full items-start gap-1.5 rounded-lg border border-brand bg-white px-2 py-1.5 text-left text-[10px] font-bold leading-4">
                             <span className="min-w-0 break-words">{request.supervisorDecision ? decisionLabel(request.supervisorDecision) : 'Awaiting'}</span>
                           </span>
-                          {request.forwardedAt && <span className="block max-w-full break-words text-[9px] font-semibold leading-3 text-muted">Forwarded by Supervisor</span>}
+                          {request.forwardedAt && <span className="block max-w-full break-words text-[9px] font-semibold leading-3 text-black">Forwarded by Supervisor</span>}
                         </span>
                       </td>
-                      <td className={`${CELL_CLASS} text-black/70`}>
+                      <td className={`${CELL_CLASS} text-black`}>
                         <span className="block max-w-full break-words leading-4">{procurementStatus(request)}</span>
                       </td>
                       <td className={`${CELL_CLASS} sticky right-0 z-10 whitespace-nowrap border-l border-subtle bg-white`}>
@@ -413,14 +413,14 @@ export default function RequesterRequests({
                             title={`Edit ${request.reference}`}
                             aria-label={`Edit ${request.reference}`}
                             onClick={() => navigate('Create Purchase Request', { request: request.id })}
-                            className="grid h-7 w-7 place-items-center rounded-lg border border-brand bg-white text-muted"
+                            className="grid h-7 w-7 place-items-center rounded-lg border border-brand bg-white text-black"
                           >
                             <Pencil size={13} aria-hidden="true" />
                           </button>}
                           {request.supervisorId && <button type="button" title="Message your Supervisor"
                             aria-label={`Message supervisor about ${request.reference}`}
                             onClick={() => navigate('Messages', { userId: request.supervisorId, request: request.id })}
-                            className="grid h-7 w-7 place-items-center rounded-lg border border-brand bg-white text-muted">
+                            className="grid h-7 w-7 place-items-center rounded-lg border border-brand bg-white text-black">
                             <MessageSquare size={13} aria-hidden="true" />
                           </button>}
                         </span>

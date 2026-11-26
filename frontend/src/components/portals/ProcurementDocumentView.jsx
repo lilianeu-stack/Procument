@@ -173,7 +173,7 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           </p>
         </div>
         <div className="min-w-[180px] rounded-xl border border-brand bg-white px-5 py-4">
-          <div className="text-[10px] font-extrabold uppercase tracking-[.12em] text-muted">Request reference</div>
+          <div className="text-[10px] font-extrabold uppercase tracking-[.12em] text-black">Request reference</div>
           <div className="display-font mt-1 text-xl font-extrabold tracking-tight">{request.reference}</div>
           <div className="mt-3"><StatusBadge value={request.status} /></div>
         </div>
@@ -326,16 +326,16 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
             {sentForms.map((form) => <tr key={form.id}>
               <td className="px-3 py-3 font-bold">{form.recipientEmail}</td>
               <td className="px-3 py-3">{dateTimeLabel(form.createdAt)}</td>
-              <td className="max-w-[260px] px-3 py-3 text-muted">{form.message || '—'}</td>
+              <td className="max-w-[260px] px-3 py-3 text-black">{form.message || '—'}</td>
               <td className="px-3 py-3">{form.responded ? `Submitted ${dateTimeLabel(form.responseSubmittedAt || form.createdAt)}` : 'Awaiting response'}</td>
-              <td className="px-3 py-3"><button type="button" disabled={busy} onClick={() => resendForm(form.id)} className="font-bold text-brand disabled:opacity-50">
+              <td className="px-3 py-3"><button type="button" disabled={busy} onClick={() => resendForm(form.id)} className="font-bold text-black disabled:opacity-50">
                 Resend working link
               </button></td>
             </tr>)}
           </tbody>
         </table>
       </TableScroll> : <EmptyState title="No response forms sent" description="Use “Send to another user” to send the requested items with an online response link." />}
-      <p className="mt-3 text-[11px] leading-5 text-muted">
+      <p className="mt-3 text-[11px] leading-5 text-black">
         Older emails may contain a localhost link. Resend a form to give the recipient the current public link. Each form accepts only one response.
       </p>
     </Section>
