@@ -118,6 +118,21 @@ test('supplier pricing form opens with prefilled prices and only a comments inpu
   }
 });
 
+test('supplier pricing form loads once and allows a single submission', () => {
+  const pricing = source('../src/components/portals/SupplierPricingPage.jsx');
+
+  assert.match(pricing, /useRef, useState/);
+  assert.match(pricing, /const loadedTokenRef = useRef\(null\)/);
+  assert.match(pricing, /if \(!force && loadedTokenRef\.current === token\) return;/);
+  assert.match(pricing, /onRetry=\{\(\) => load\(true\)\}/);
+
+  assert.match(pricing, /const submitAttemptedRef = useRef\(false\)/);
+  assert.match(pricing, /if \(submitAttemptedRef\.current \|\| busy \|\| locked\) return;/);
+  assert.match(pricing, /submitAttemptedRef\.current = true;/);
+  assert.match(pricing, /if \(exception\?\.status === 409\) setLocked\(true\);/);
+  assert.match(pricing, /disabled=\{busy \|\| !submitConfirmed\}/);
+});
+
 test('RFQ form has only start/deadline dates and a searchable multi-supplier dropdown', () => {
   const rfqs = source('../src/pages/RfqsPage.jsx');
   const app = source('../src/App.jsx');

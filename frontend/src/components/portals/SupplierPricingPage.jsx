@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Save, Send } from 'lucide-react';
 import PageCard, { EmptyState } from '../ui/PageCard.jsx';
 import Modal from '../ui/Modal.jsx';
@@ -64,13 +64,19 @@ export default function SupplierPricingPage({ token }) {
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitConfirmed, setSubmitConfirmed] = useState(false);
   const [locked, setLocked] = useState(false);
+  // StrictMode and parent re-renders can run this effect more than once. Load
+  // each token only once so the form never resets itself while being edited.
+  const loadedTokenRef = useRef(null);
+  const submitAttemptedRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!token) {
       setError('This supplier pricing link is missing its access token.');
       setLoading(false);
       return;
     }
+    if (!force && loadedTokenRef.current === token) return;
+    loadedTokenRef.current = token;
     setLoading(true);
     setError('');
     try {
@@ -165,8 +171,12 @@ export default function SupplierPricingPage({ token }) {
   }
 
   async function submitQuotation() {
+    // A quotation can be submitted only once: block repeat clicks while the
+    // request is in flight and after a successful submission.
+    if (submitAttemptedRef.current || busy || locked) return;
     const problem = validate();
     if (problem) { setSubmitOpen(false); setValidationError(problem); return; }
+    submitAttemptedRef.current = true;
     setBusy(true); setError(''); setValidationError(''); setNotice('');
     try {
       const response = await api(`/supplier-pricing/${encodeURIComponent(token)}/submit`, {
@@ -183,6 +193,9 @@ export default function SupplierPricingPage({ token }) {
       setSubmitConfirmed(false);
       setNotice(response.message || 'Your quotation was submitted. Procurement will review it privately.');
     } catch (exception) {
+      // A transport failure can be retried; a completed submission cannot.
+      if (exception?.status === 409) setLocked(true);
+      else submitAttemptedRef.current = false;
       setError(friendlyError(exception));
     } finally {
       setBusy(false);
@@ -211,7 +224,7 @@ export default function SupplierPricingPage({ token }) {
       </div>
 
       {loading && <PageCard title="Opening pricing request"><LoadingState label="Opening your pricing request…" /></PageCard>}
-      {!loading && error && !request && <PageCard title="Pricing link"><ErrorState message={error} onRetry={load} /></PageCard>}
+      {!loading && error && !request && <PageCard title="Pricing link"><ErrorState message={error} onRetry={() => load(true)} /></PageCard>}
       {!loading && error && request && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{error}</div>}
       {validationError && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{validationError}</div>}
       {notice && <div className="flex items-start gap-2 rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black"><CheckCircle2 size={16} className="mt-0.5 shrink-0" />{notice}</div>}
