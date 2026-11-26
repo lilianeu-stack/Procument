@@ -66,7 +66,7 @@ function CommitteeMemberForm({ member, onClose, onSubmit }) {
         <button type="button" disabled={busy} onClick={onClose}
           className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
         <button type="submit" disabled={busy}
-          className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
           {busy ? 'Saving…' : member ? 'Save changes' : 'Add member'}
         </button>
       </div>
@@ -112,13 +112,13 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
       title="Procurement Committee"
       description={`${members.length} committee contact${members.length === 1 ? '' : 's'}`}
       action={<button type="button" onClick={() => setShowForm(true)}
-        className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">
+        className="flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">
         <Plus size={14} />Add member
       </button>}
     >
       {filteredMembers.length ? <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-left text-xs">
-          <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+          <thead className="bg-slate-50 text-[10px] uppercase text-black">
             <tr>{['First name', 'Last name', 'Email', 'Phone number', 'Actions'].map((heading) =>
               <th key={heading} className="px-5 py-3">{heading}</th>)}</tr>
           </thead>
@@ -137,7 +137,7 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
                   </button>
                   <button type="button" onClick={() => { setDeletingMember(member); setDeleteError(''); }}
                     aria-label={`Delete ${member.firstName} ${member.lastName}`}
-                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 font-bold text-red-600 hover:bg-red-50">
+                    className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 font-bold text-black hover:bg-red-50">
                     <Trash2 size={13} />Delete
                   </button>
                 </div>
@@ -156,7 +156,7 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
       dismissible={!deleteBusy}
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-700">
+        <p className="text-sm text-black">
           Permanently delete <strong>{deletingMember.firstName} {deletingMember.lastName}</strong> from the committee contact directory?
         </p>
         <ErrorMessage>{deleteError}</ErrorMessage>
@@ -164,8 +164,8 @@ export default function ProcurementCommitteePage({ members = [], search = '', on
           <button type="button" disabled={deleteBusy} onClick={() => setDeletingMember(null)}
             className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
           <button type="button" disabled={deleteBusy} onClick={deleteMember}
-            className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
-            {deleteBusy ? 'Deleting…' : 'Delete member'}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
+            {deleteBusy ? 'Deleting…' : <><Trash2 size={14} />Delete member</>}
           </button>
         </div>
       </div>

@@ -32,6 +32,7 @@ import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprova
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { initialsFor } from './components/ui/UserAvatar.jsx';
 import { api } from './services/api.js';
+import { fetchSidebarCounts } from './services/sidebarCounts.js';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, roleLabel,
   PORTALS, PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, PROFILE_PAGE, RECEIVED_REQUESTS_PAGE
@@ -148,6 +149,7 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [dateFilters, setDateFilters] = useState({});
+  const [sidebarCounts, setSidebarCounts] = useState({});
 
   const portal = user ? portalForRole(user.role) : null;
   const activePortal = route.portal || portal;
@@ -199,6 +201,36 @@ export default function App() {
     setDateFilters((current) => ({ ...current, [activePage]: next }));
   }, [activePage]);
 
+  const refreshSidebarCounts = useCallback(async () => {
+    if (!user) return;
+    try {
+      setSidebarCounts(await fetchSidebarCounts());
+    } catch {
+      // Keep the last known counts when a transient refresh fails.
+    }
+  }, [user]);
+
+  // No WebSocket/SSE transport exists in this project, so badges use one small
+  // grouped request on mount, after mutations/read actions, on focus, and every
+  // 30 seconds. This avoids one request per sidebar link and avoids stale badges.
+  useEffect(() => {
+    if (!user) {
+      setSidebarCounts({});
+      return undefined;
+    }
+    void refreshSidebarCounts();
+    const interval = window.setInterval(() => { void refreshSidebarCounts(); }, 30000);
+    const onFocus = () => { void refreshSidebarCounts(); };
+    const onVisibility = () => { if (!document.hidden) void refreshSidebarCounts(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user, refreshSidebarCounts]);
+
   const loadData = useCallback(async () => {
     if (!user || !portal) return;
     setLoading(true);
@@ -212,7 +244,8 @@ export default function App() {
       if (portal === 'admin') {
         const [
           dashboard, requisitions, receivedRequests, inventory, suppliers, rfqs, purchaseOrders,
-          goodsReceipts, invoices, storeRequests, notifications, committee
+          goodsReceipts, invoices, storeRequests, notifications, committee,
+          receivedRequestStats, rfqStats
         ] = await Promise.all([
           activePage === 'Overview' ? api('/dashboard') : Promise.resolve(null),
           api(filtered('/requisitions')),
@@ -224,7 +257,13 @@ export default function App() {
           api(filtered('/invoices')), api(filtered('/store-requests')), api('/notifications'),
           canAccessPage(user.role, PROCUREMENT_COMMITTEE_PAGE)
             ? api('/procurement-committee')
-            : Promise.resolve({ members: [] })
+            : Promise.resolve({ members: [] }),
+          activePage === 'Overview' && canAccessPage(user.role, RECEIVED_REQUESTS_PAGE)
+            ? api('/procurement/received-requests/stats')
+            : Promise.resolve(null),
+          activePage === 'Overview' && canAccessPage(user.role, 'RFQs')
+            ? api('/rfqs/stats')
+            : Promise.resolve(null)
         ]);
         // Account and Department administration is Administrator-only.
         // Audit history remains in the backend; the Administrator UI no longer
@@ -242,7 +281,13 @@ export default function App() {
         // leave RfqsPage with quotations === undefined after creating an RFQ.
         setData((current) => ({
           ...current,
-          dashboard: dashboard || current.dashboard,
+          dashboard: dashboard
+            ? {
+                ...dashboard,
+                receivedRequests: receivedRequestStats?.stats || null,
+                rfqs: rfqStats?.stats || null
+              }
+            : current.dashboard,
           requisitions: requisitions.requisitions || [],
           receivedRequests: receivedRequests.requisitions || [],
           items: inventory.items || [],
@@ -263,13 +308,14 @@ export default function App() {
         ]);
         setData({ ...initialData, portalSummary: summary, notifications: notifications.notifications, portalExtras });
       }
+      await refreshSidebarCounts();
     } catch (exception) {
       setError(exception.message);
       if (!localStorage.getItem('pims-token')) setUser(null);
     } finally {
       setLoading(false);
     }
-  }, [activePage, activeFilter, portal, user]);
+  }, [activePage, activeFilter, portal, user, refreshSidebarCounts]);
 
   useEffect(() => {
     if (user && portal) loadData();
@@ -307,6 +353,7 @@ export default function App() {
     localStorage.removeItem('pims-token');
     setUser(null);
     setData(initialData);
+    setSidebarCounts({});
     setRoute({ portal: null, page: null, query: {} });
     setNotificationsOpen(false);
     setMobileNav(false);
@@ -375,12 +422,28 @@ export default function App() {
       getStock: (params = {}) => api(`/portal/supervisor/stock${toQuery(params)}`),
       getStockItem: (id) => api(`/portal/supervisor/stock/${id}`),
       getConversations: () => api('/portal/messages/conversations'),
-      getThread: (userId) => api(`/portal/messages/thread?userId=${encodeURIComponent(userId)}`),
+      getThread: async (userId) => {
+        const result = await api(`/portal/messages/thread?userId=${encodeURIComponent(userId)}`);
+        await refreshSidebarCounts();
+        return result;
+      },
       sendMessage: (payload) => post('/portal/messages', payload),
-      markMessageRead: (id) => api(`/portal/messages/${id}/read`, { method: 'PATCH' }),
+      markMessageRead: async (id) => {
+        const result = await api(`/portal/messages/${id}/read`, { method: 'PATCH' });
+        await refreshSidebarCounts();
+        return result;
+      },
       getNotifications: async () => (await api('/notifications')).notifications,
-      markNotificationRead: (id) => api(`/notifications/${id}/read`, { method: 'PATCH' }),
-      markAllNotificationsRead: () => api('/portal/stockkeeper/notifications/read-all', { method: 'PATCH' }),
+      markNotificationRead: async (id) => {
+        const result = await api(`/notifications/${id}/read`, { method: 'PATCH' });
+        await refreshSidebarCounts();
+        return result;
+      },
+      markAllNotificationsRead: async () => {
+        const result = await api('/portal/stockkeeper/notifications/read-all', { method: 'PATCH' });
+        await refreshSidebarCounts();
+        return result;
+      },
       getStockItems: (params = {}) => api(`/portal/stockkeeper/items${toQuery(params)}`),
       getBinCard: (id) => api(`/portal/stockkeeper/items/${id}`),
       getIssueRequests: () => api('/portal/stockkeeper/issue-requests'),
@@ -391,7 +454,7 @@ export default function App() {
       stockOut: (payload) => post('/portal/stockkeeper/transactions/stock-out', payload),
       stockAdjustment: (payload) => post('/portal/stockkeeper/transactions/adjustment', payload)
     };
-  }, [loadData, portal]);
+  }, [loadData, portal, refreshSidebarCounts]);
 
   async function loadQuotations(rfqId) {
     const result = await api(`/rfqs/${rfqId}/quotations`);
@@ -402,6 +465,7 @@ export default function App() {
   async function openNotification(notification) {
     try {
       await api(`/notifications/${notification.id}/read`, { method: 'PATCH' });
+      await refreshSidebarCounts();
       setNotificationsOpen(false);
       setData((current) => ({
         ...current,
@@ -488,7 +552,7 @@ export default function App() {
 
   if (authLoading) return <main className="grid min-h-screen place-items-center bg-canvas">
     <div role="status" className="flex flex-col items-center gap-4">
-      <span className="text-sm text-muted">Loading your workspace…</span>
+      <span className="text-sm text-black">Loading your workspace…</span>
     </div>
   </main>;
   if (!user) return <LoginPage onLogin={login} />;
@@ -589,6 +653,7 @@ export default function App() {
     page: activePage,
     hidePageHeading: portal === 'requester' && (activePage === dashboardPage
       || activePage === 'My Procurement Requests' || activePage === 'My Request History'),
+    counts: sidebarCounts,
     notifications: data.notifications,
     refreshing: loading,
     mobileNav,
@@ -620,9 +685,9 @@ export default function App() {
     return <AdminLayout {...shellProps}>
       {showGenericPageSearch && <div className="mb-4 flex items-center justify-between gap-3">
         <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={activePage === 'Suppliers' ? 'Search suppliers…' : activePage === 'Stock overview' ? 'Search inventory…' : 'Search this page…'} className="field max-w-xs bg-white" />
-        {loading && <span className="text-xs text-muted">Refreshing…</span>}
+        {loading && <span className="text-xs text-black">Refreshing…</span>}
       </div>}
-      {activePage === 'RFQs' && loading && <div className="mb-4 text-xs text-muted">Refreshing…</div>}
+      {activePage === 'RFQs' && loading && <div className="mb-4 text-xs text-black">Refreshing…</div>}
       {alert}
       <ErrorBoundary key={`${activePortal}-${activePage}`} onRetry={loadData} onLogout={logout}>
         <PageContent
@@ -674,8 +739,8 @@ export default function App() {
     }
   } else if (portal === 'stockkeeper') {
     if (activePage === 'List of Requesters') {
-      portalContent = <Suspense fallback={<div role="status" className="p-8 text-sm text-muted">Loading requester directory…</div>}>
-        <StockKeeperRequesters portalApi={portalApi} initial={extras} />
+      portalContent = <Suspense fallback={<div role="status" className="p-8 text-sm text-black">Loading requester directory…</div>}>
+        <StockKeeperRequesters portalApi={portalApi} initial={extras} user={displayUser} />
       </Suspense>;
     } else if (activePage === 'Notification') {
       portalContent = <StockKeeperNotifications
@@ -690,6 +755,7 @@ export default function App() {
         initialIssueRequests={extras.issueRequests}
         query={route.query || {}}
         navigate={navigatePage}
+        user={displayUser}
       />;
     } else if (activePage === 'Profile') {
       portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
@@ -744,13 +810,13 @@ export default function App() {
         navigate={navigatePage}
       />;
     } else if (activePage === 'Requesters') {
-      portalContent = <SupervisorRequesters portalApi={portalApi} navigate={navigatePage} />;
+      portalContent = <SupervisorRequesters portalApi={portalApi} navigate={navigatePage} user={displayUser} />;
     } else if (activePage === 'Procurement Requests') {
-      portalContent = <SupervisorRequests portalApi={portalApi} query={route.query || {}} navigate={navigatePage} initial={extras.supervisorRequests} />;
+      portalContent = <SupervisorRequests portalApi={portalApi} query={route.query || {}} navigate={navigatePage} initial={extras.supervisorRequests} user={displayUser} />;
     } else if (activePage === 'Approvals') {
-      portalContent = <SupervisorApprovals portalApi={portalApi} query={route.query || {}} navigate={navigatePage} initial={extras.approvalRequests} />;
+      portalContent = <SupervisorApprovals portalApi={portalApi} query={route.query || {}} navigate={navigatePage} initial={extras.approvalRequests} user={displayUser} />;
     } else if (activePage === 'Stock Overview') {
-      portalContent = <SupervisorStock portalApi={portalApi} initial={extras.stock} />;
+      portalContent = <SupervisorStock portalApi={portalApi} initial={extras.stock} user={displayUser} />;
     } else if (activePage === 'Department Messages') {
       portalContent = <PortalMessages
         portal="supervisor"

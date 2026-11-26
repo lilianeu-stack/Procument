@@ -133,20 +133,20 @@ export default function RequestDetail({
       <DetailSection title={`Items (${items.length})`}>
         {items.length ? <TableScroll minWidth={460}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-white text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-black">
               <tr><th className="px-2 py-2">Item</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2">Remarks</th><th className="px-2 py-2 text-right">Total</th></tr>
             </thead>
             <tbody className="divide-y">
               {items.map((item) => <tr key={item.id}>
-                <td className="px-2 py-2 font-bold">{item.itemName}{item.description && <div className="text-[10px] font-normal text-muted">{item.description}</div>}</td>
+                <td className="px-2 py-2 font-bold">{item.itemName}{item.description && <div className="text-[10px] font-normal text-black">{item.description}</div>}</td>
                 <td className="px-2 py-2">{item.quantity} {item.unit}</td>
                 <td className="px-2 py-2">{currency(item.estimatedUnitCost)}</td>
-                <td className="px-2 py-2 text-muted">{item.remarks || '—'}</td>
+                <td className="px-2 py-2 text-black">{item.remarks || '—'}</td>
                 <td className="px-2 py-2 text-right font-bold">{currency(item.lineTotal ?? item.quantity * item.estimatedUnitCost)}</td>
               </tr>)}
             </tbody>
           </table>
-        </TableScroll> : <p className="text-xs text-muted">No items recorded.</p>}
+        </TableScroll> : <p className="text-xs text-black">No items recorded.</p>}
         <div className="mt-3 flex justify-end border-t border-subtle pt-3 text-xs font-bold">
           Total <span className="ml-3 text-black">{currency(total)}</span>
         </div>
@@ -182,12 +182,12 @@ export default function RequestDetail({
           }, 'Request submitted to your Supervisor.')} className={primaryButtonClass()}>
           <Send size={14} />{busy ? 'Submitting…' : isDraft(status) ? 'Submit to Supervisor' : 'Resubmit request'}
         </button>
-        <p className="text-[10px] text-muted">Attachments selected above are included when you submit or resubmit.</p>
+        <p className="text-[10px] text-black">Attachments selected above are included when you submit or resubmit.</p>
       </div>
     </DetailSection>}
 
     {isSupervisor && status === 'Approved by Supervisor' && requisition.supervisorDecision === 'Approved' && !requisition.forwardedBySupervisor && <DetailSection title="Forward to Procurement">
-      <p className="mb-3 text-xs leading-5 text-muted">
+      <p className="mb-3 text-xs leading-5 text-black">
         Your approval is recorded. Forwarding is a separate action: it sends the complete original request and every
         attachment to Procurement, notifies the team and the Requester, and cannot be undone or repeated.
       </p>
@@ -221,7 +221,7 @@ export default function RequestDetail({
         <button type="button" disabled={busy || !pendingDecision} onClick={confirmDecision} className={primaryButtonClass()}>
           <CheckCircle2 size={14} />{busy ? 'Saving…' : 'Confirm decision'}
         </button>
-        <p className="text-[10px] text-muted">A decision can only be recorded once. Already-decided requests cannot be actioned again.</p>
+        <p className="text-[10px] text-black">A decision can only be recorded once. Already-decided requests cannot be actioned again.</p>
       </div>
     </DetailSection>}
 

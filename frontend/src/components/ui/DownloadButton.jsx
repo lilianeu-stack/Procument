@@ -37,10 +37,10 @@ export default function DownloadButton({
   const Icon = ICONS[format] || Download;
   const text = label || `Download ${FORMAT_LABELS[format] || format.toUpperCase()}`;
   const classes = tone === 'toolbar'
-    ? 'h-10 rounded-xl border border-brand bg-white px-4 text-xs font-bold text-black shadow-dashboard transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
+    ? 'h-10 rounded-xl border border-brand bg-white px-4 text-xs font-bold text-black shadow-dashboard transition duration-200 hover:border-accent-border hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
     : `rounded-lg px-3.5 py-2 text-xs font-bold disabled:opacity-50 ${variant === 'primary'
       ? 'bg-brand text-black hover:bg-brand border border-brand'
-      : 'border border-brand bg-white text-ink hover:bg-white'}`;
+      : 'border border-brand bg-white text-black hover:bg-white'}`;
 
   return <span className="relative inline-flex no-print">
     <button

@@ -125,21 +125,21 @@ export default function EmailInboxPage({ actions, query = {} }) {
   }
 
   return <div className="space-y-4">
-    {error && <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700">{error}</div>}
-    {notice && <div role="status" className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-700">{notice}</div>}
+    {error && <div role="alert" className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs text-black">{error}</div>}
+    {notice && <div role="status" className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-black">{notice}</div>}
 
     <section className="rounded-xl border border-slate-100 bg-white p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="display-font text-lg font-extrabold">Email</h2>
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 text-xs text-black">
             {status?.connected
               ? `Connected to ${status.connectedMailbox}${status.connectedAt ? ` · since ${displayDate(status.connectedAt)}` : ''}`
               : 'Connect the procurement Google mailbox to sync incoming messages.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {(status?.smtpConfigured || status?.googleSendEnabled) && <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white">
+          {(status?.smtpConfigured || status?.googleSendEnabled) && <button type="button" onClick={() => setComposing(true)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black">
             <Send size={14} />Compose
           </button>}
           {status?.connected
@@ -147,22 +147,22 @@ export default function EmailInboxPage({ actions, query = {} }) {
                 <button type="button" onClick={sync} disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-50">
                   {busy === 'sync' ? <LoaderCircle size={14} className="animate-spin" /> : <RefreshCw size={14} />}Sync inbox
                 </button>
-                <button type="button" onClick={disconnect} disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold text-red-700 disabled:opacity-50">
+                <button type="button" onClick={disconnect} disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold text-black disabled:opacity-50">
                   <Unplug size={14} />Disconnect
                 </button>
               </>
-            : <button type="button" onClick={connect} disabled={Boolean(busy) || !status?.configured} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-white disabled:opacity-50">
+            : <button type="button" onClick={connect} disabled={Boolean(busy) || !status?.configured} className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black disabled:opacity-50">
                 {busy === 'connect' ? <LoaderCircle size={14} className="animate-spin" /> : <Link2 size={14} />}Connect Google mailbox
               </button>}
         </div>
       </div>
-      {!status?.connected && status?.missing?.length > 0 && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      {!status?.connected && status?.missing?.length > 0 && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-black">
         Configure these backend variables before connecting: {status.missing.join(', ')}.
       </p>}
-      {status?.connectionMismatch && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      {status?.connectionMismatch && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-black">
         The saved Google connection belongs to a different mailbox. Reconnect using the configured mailbox to sync it.
       </p>}
-      {status?.connected && !status.smtpConfigured && !status.googleSendEnabled && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      {status?.connected && !status.smtpConfigured && !status.googleSendEnabled && <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-black">
         Incoming mail is connected. Grant Gmail send access or configure SMTP to enable email composition.
       </p>}
     </section>
@@ -174,7 +174,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
           <label className="block text-xs font-bold">Subject<input required maxLength="200" value={draft.subject} onChange={(event) => setDraft({ ...draft, subject: event.target.value })} className="field" /></label>
         </div>
         <label className="block text-xs font-bold">Message<textarea required maxLength="50000" rows="6" value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} className="field h-auto py-2" /></label>
-        <div className="flex justify-end"><button type="submit" disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
+        <div className="flex justify-end"><button type="submit" disabled={Boolean(busy)} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-50">
           {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}Send email
         </button></div>
       </form>
@@ -183,41 +183,41 @@ export default function EmailInboxPage({ actions, query = {} }) {
     {status?.connected && <div className="grid min-h-[420px] gap-4 xl:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.2fr)]">
       <section className="overflow-hidden rounded-xl border border-slate-100 bg-white">
         <div className="border-b border-slate-100 px-4 py-3 text-xs font-bold">Recent inbox messages</div>
-        {loading ? <div role="status" className="p-5 text-xs text-muted">Loading inbox…</div>
+        {loading ? <div role="status" className="p-5 text-xs text-black">Loading inbox…</div>
           : messages.length ? <div className="max-h-[560px] overflow-y-auto divide-y divide-slate-100">
               {messages.map((message) => <button key={message.id} type="button" onClick={() => openMessage(message)}
                 className={`w-full px-4 py-3 text-left hover:bg-slate-50 ${selected?.id === message.id ? 'bg-brand-light/50' : ''}`}>
                 <span className="flex items-center justify-between gap-2">
-                  <span className={`truncate text-xs ${message.unread ? 'font-extrabold text-ink' : 'font-semibold text-slate-600'}`}>{message.sender || '(unknown sender)'}</span>
-                  {message.unread ? <Mail size={13} className="shrink-0 text-brand" /> : <MailOpen size={13} className="shrink-0 text-muted" />}
+                  <span className={`truncate text-xs ${message.unread ? 'font-extrabold text-black' : 'font-semibold text-black'}`}>{message.sender || '(unknown sender)'}</span>
+                  {message.unread ? <Mail size={13} className="shrink-0 text-black" /> : <MailOpen size={13} className="shrink-0 text-black" />}
                 </span>
                 <span className="mt-1 block truncate text-xs font-bold">{message.subject}</span>
-                {message.requisitionReference && <span className="mt-1 inline-block rounded bg-brand-light px-2 py-0.5 text-[10px] font-bold text-brand">
+                {message.requisitionReference && <span className="mt-1 inline-block rounded bg-brand-light px-2 py-0.5 text-[10px] font-bold text-black">
                   Comment · {message.requisitionReference}
                 </span>}
-                <span className="mt-1 block line-clamp-2 text-[11px] text-muted">{message.snippet}</span>
-                <span className="mt-2 block text-[10px] text-muted">{displayDate(message.receivedAt)}</span>
+                <span className="mt-1 block line-clamp-2 text-[11px] text-black">{message.snippet}</span>
+                <span className="mt-2 block text-[10px] text-black">{displayDate(message.receivedAt)}</span>
               </button>)}
             </div>
-          : <div className="p-5 text-xs text-muted">No synced messages yet. Choose “Sync inbox” to fetch recent mail.</div>}
+          : <div className="p-5 text-xs text-black">No synced messages yet. Choose “Sync inbox” to fetch recent mail.</div>}
       </section>
 
       <section className="min-w-0 rounded-xl border border-slate-100 bg-white p-5">
-        {selected ? selected.loading ? <div className="text-xs text-muted">Loading message…</div> : <>
+        {selected ? selected.loading ? <div className="text-xs text-black">Loading message…</div> : <>
           <h3 className="break-words text-base font-extrabold">{selected.subject}</h3>
           <dl className="mt-3 space-y-1 border-b border-slate-100 pb-4 text-xs">
-            <div><dt className="inline text-muted">From: </dt><dd className="inline break-all">{selected.sender}</dd></div>
-            <div><dt className="inline text-muted">To: </dt><dd className="inline break-all">{selected.recipient}</dd></div>
-            <div><dt className="inline text-muted">Received: </dt><dd className="inline">{displayDate(selected.receivedAt)}</dd></div>
+            <div><dt className="inline text-black">From: </dt><dd className="inline break-all">{selected.sender}</dd></div>
+            <div><dt className="inline text-black">To: </dt><dd className="inline break-all">{selected.recipient}</dd></div>
+            <div><dt className="inline text-black">Received: </dt><dd className="inline">{displayDate(selected.receivedAt)}</dd></div>
           </dl>
           {selected.comment && <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
-            <div className="text-[11px] font-extrabold text-emerald-800">
+            <div className="text-[11px] font-extrabold text-black">
               Recipient comment linked to {selected.requisitionReference || 'a request'}
             </div>
-            <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-emerald-900">{selected.comment}</p>
+            <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-black">{selected.comment}</p>
           </div>}
-          <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-slate-700">{selected.body || selected.snippet || '(No plain-text message body.)'}</pre>
-        </> : <div className="grid h-full min-h-64 place-items-center text-center text-xs text-muted">Select an email to read it here.</div>}
+          <pre className="mt-4 whitespace-pre-wrap break-words font-sans text-sm leading-6 text-black">{selected.body || selected.snippet || '(No plain-text message body.)'}</pre>
+        </> : <div className="grid h-full min-h-64 place-items-center text-center text-xs text-black">Select an email to read it here.</div>}
       </section>
     </div>}
   </div>;

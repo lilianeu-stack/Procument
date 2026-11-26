@@ -1157,7 +1157,10 @@ test('exports are scoped by portal role and require authentication', async () =>
   assert.ok(!adminKeys.includes('portalRequisitions'), 'Administrators use the global requisitions export instead.');
 
   const supervisorExports = await request('/exports/available', { user: users.supervisorA });
-  assert.deepEqual(supervisorExports.data.exports.map((item) => item.key), ['portalRequisitions']);
+  assert.deepEqual(
+    supervisorExports.data.exports.map((item) => item.key).sort(),
+    ['portalRequisitions', 'supervisorRequesters', 'supervisorStock']
+  );
   const requesterExports = await request('/exports/available', { user: users.requesterA });
   assert.deepEqual(requesterExports.data.exports.map((item) => item.key), ['portalRequisitions']);
   const procurementExports = await request('/exports/available', { user: users.procurement });
@@ -1175,6 +1178,39 @@ test('exports are scoped by portal role and require authentication', async () =>
     if (format === 'pdf') assert.equal(report.buffer.subarray(0, 5).toString(), '%PDF-');
     if (format === 'xlsx') assert.equal(report.buffer.subarray(0, 2).toString(), 'PK');
   }
+});
+
+test('bin card exports isolate the selected item and keep transactions in date order', async () => {
+  const itemA = await createInventoryItem('Export bin card item A', 10);
+  const itemB = await createInventoryItem('Export bin card item B', 7);
+  const movementA = await createMovementInDepartment(itemA.id, departments.a.id, 'BCA');
+  const movementB = await createMovementInDepartment(itemB.id, departments.a.id, 'BCB');
+
+  const report = await binaryRequest(`/exports/stockkeeperBinCard/csv?itemId=${itemA.id}`, admin);
+  assert.equal(report.response.status, 200);
+  const csv = report.buffer.toString('utf8');
+  assert.match(csv, new RegExp(movementA.reference));
+  assert.doesNotMatch(csv, new RegExp(movementB.reference));
+  assert.equal((csv.match(/"Opening balance","Opening balance"/g) || []).length, 1, csv);
+  assert.match(csv, /"Item code","Item","Unit","Reference"/);
+  assert.doesNotMatch(csv, /sortOrder/);
+});
+
+test('admin report downloads use genuine file formats with UTF-8 CSV', async () => {
+  const csv = await binaryRequest('/exports/inventory/csv', admin);
+  assert.equal(csv.response.status, 200);
+  assert.equal(csv.buffer[0], 0xef);
+  assert.equal(csv.buffer[1], 0xbb);
+  assert.equal(csv.buffer[2], 0xbf);
+  assert.match(csv.buffer.toString('utf8'), /\r\n/);
+
+  const xlsx = await binaryRequest('/exports/inventory/xlsx', admin);
+  assert.equal(xlsx.response.status, 200);
+  assert.equal(xlsx.buffer.subarray(0, 2).toString(), 'PK');
+
+  const pdf = await binaryRequest('/exports/inventory/pdf', admin);
+  assert.equal(pdf.response.status, 200);
+  assert.equal(pdf.buffer.subarray(0, 5).toString(), '%PDF-');
 });
 
 test('portal requisition exports only return rows the user can see', async () => {
@@ -1488,6 +1524,188 @@ test('messages and announcements stay inside the assigned Department', async () 
   assert.ok(requesterConversations.data.announcements.some((row) => row.body === 'Department meeting on Friday.'));
   const otherConversations = await request('/portal/messages/conversations', { user: users.requesterB });
   assert.ok(!otherConversations.data.announcements.some((row) => row.body === 'Department meeting on Friday.'));
+});
+
+test('sidebar badge counts are real, per-user, role scoped, and clear on read', async () => {
+  const supervisor = users.supervisorB;
+  const requester = users.requesterB;
+  const otherRequester = users.requesterA;
+
+  for (const user of [supervisor, requester, users.procurement, users.stockkeeper]) {
+    const response = await request('/sidebar-counts', { user });
+    assert.equal(response.response.status, 200, response.data.message);
+    assert.ok(response.data.counts && typeof response.data.counts === 'object');
+  }
+
+  const beforeSupervisor = (await request('/sidebar-counts', { user: supervisor })).data.counts;
+  const beforeRequester = (await request('/sidebar-counts', { user: requester })).data.counts;
+  const beforeOther = (await request('/sidebar-counts', { user: otherRequester })).data.counts;
+
+  const [approvalNotice] = await pool.execute(
+    `INSERT INTO notifications (user_id, title, body, link, category)
+     VALUES (?, 'QA approval badge', 'Waiting for the Supervisor.', ?, 'general')`,
+    [supervisor.id, '#/supervisor/Approvals?request=1']
+  );
+  const [requestNotice] = await pool.execute(
+    `INSERT INTO notifications (user_id, title, body, link, category)
+     VALUES (?, 'QA request badge', 'A requester update is waiting.', ?, 'general')`,
+    [requester.id, '#/requester/My%20Procurement%20Requests?request=1']
+  );
+
+  const [messageResult] = await pool.execute(
+    `INSERT INTO messages (department_id, sender_id, recipient_id, body, is_announcement)
+     VALUES (?, ?, ?, 'QA unread sidebar badge message', FALSE)`,
+    [departments.b.id, supervisor.id, requester.id]
+  );
+  const messageId = Number(messageResult.insertId);
+  await pool.execute('INSERT INTO message_recipients (message_id, user_id) VALUES (?, ?)', [messageId, requester.id]);
+  const [messageNotice] = await pool.execute(
+    `INSERT INTO notifications (user_id, title, body, link, category)
+     VALUES (?, 'QA message badge', 'A new message is waiting.', ?, 'message')`,
+    [requester.id, `#/requester/Messages?userId=${supervisor.id}&request=1&message=${messageId}`]
+  );
+
+  const afterSupervisor = (await request('/sidebar-counts', { user: supervisor })).data.counts;
+  const afterRequester = (await request('/sidebar-counts', { user: requester })).data.counts;
+  const afterOther = (await request('/sidebar-counts', { user: otherRequester })).data.counts;
+
+  assert.equal(afterSupervisor.Approvals - (beforeSupervisor.Approvals || 0), 1);
+  assert.equal(afterSupervisor['My Procurement Requests'], undefined);
+  assert.equal(afterRequester.Messages - (beforeRequester.Messages || 0), 1);
+  assert.equal(afterRequester['My Procurement Requests'] - (beforeRequester['My Procurement Requests'] || 0), 2);
+  assert.equal((afterRequester.Notifications || 0) - (beforeRequester.Notifications || 0), 1, 'only the general request notice should count; the paired message notice must be excluded');
+  assert.equal(afterRequester.Approvals, undefined);
+  assert.equal(afterOther.Messages || 0, beforeOther.Messages || 0);
+  assert.equal(afterOther['My Procurement Requests'] || 0, beforeOther['My Procurement Requests'] || 0);
+
+  const marked = await request(`/notifications/${approvalNotice.insertId}/read`, { method: 'PATCH', user: supervisor });
+  assert.equal(marked.response.status, 200, marked.data.message);
+  const supervisorAfterRead = (await request('/sidebar-counts', { user: supervisor })).data.counts;
+  assert.equal(supervisorAfterRead.Approvals || 0, beforeSupervisor.Approvals || 0);
+
+  const thread = await request(`/portal/messages/thread?userId=${supervisor.id}`, { user: requester });
+  assert.equal(thread.response.status, 200, thread.data.message);
+  const unreadInThread = thread.data.messages.find((row) => Number(row.id) === messageId);
+  assert.equal(unreadInThread?.isRead, false, 'loading a conversation must not mark its messages read');
+  const afterNavigation = (await request('/sidebar-counts', { user: requester })).data.counts;
+  assert.equal(afterNavigation.Messages, afterRequester.Messages, 'plain navigation keeps the badge unchanged');
+
+  const markedMessage = await request(`/portal/messages/${messageId}/read`, { method: 'PATCH', user: requester });
+  assert.equal(markedMessage.response.status, 200, markedMessage.data.message);
+  const requesterAfterRead = (await request('/sidebar-counts', { user: requester })).data.counts;
+  assert.equal(requesterAfterRead.Messages || 0, beforeRequester.Messages || 0);
+  assert.equal(
+    requesterAfterRead['My Procurement Requests'] || 0,
+    (beforeRequester['My Procurement Requests'] || 0) + 1,
+    'the conversation notice clears, while the separate request notice stays unread'
+  );
+
+  const [remainingNotice] = await pool.execute(
+    'SELECT is_read AS isRead FROM notifications WHERE id = ?',
+    [messageNotice.insertId]
+  );
+  assert.equal(Boolean(remainingNotice[0]?.isRead), true, 'opening the message clears its paired notification only for the reader');
+  assert.equal(Boolean((await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [requestNotice.insertId]))[0][0]?.isRead), false);
+});
+
+test('sidebar badges follow real send, stepwise read, reappear, refresh, and independent recipients', async () => {
+  const supervisor = users.supervisorB;
+  const requester = users.requesterB;
+  const stamp = Date.now();
+  const secondRecipient = await createUser(
+    'QA Badge Recipient', `qa.badge.recipient.${stamp}@example.org`, 'requestor', departments.b.id
+  );
+  const countsFor = async (account) => (await request('/sidebar-counts', { user: account })).data.counts;
+  const baseline = {
+    requester: await countsFor(requester),
+    secondRecipient: await countsFor(secondRecipient)
+  };
+  const sentIds = [];
+
+  for (let index = 1; index <= 3; index += 1) {
+    const sent = await request('/portal/messages', {
+      method: 'POST', user: supervisor,
+      body: { recipientId: requester.id, body: `QA stepwise badge message ${stamp}-${index}` }
+    });
+    assert.equal(sent.response.status, 201, sent.data.message);
+    sentIds.push(Number(sent.data.id));
+  }
+
+  const afterSend = await countsFor(requester);
+  assert.equal(afterSend.Messages - (baseline.requester.Messages || 0), 3);
+  assert.equal((await countsFor(secondRecipient)).Messages || 0, baseline.secondRecipient.Messages || 0);
+
+  // Dashboard, conversation list, thread load, and repeated count refreshes
+  // must not change the database read state.
+  const summary = await request('/portal/requester/summary', { user: requester });
+  assert.equal(summary.response.status, 200, summary.data.message);
+  await request('/portal/messages/conversations', { user: requester });
+  const thread = await request(`/portal/messages/thread?userId=${supervisor.id}`, { user: requester });
+  assert.equal(thread.response.status, 200, thread.data.message);
+  for (const id of sentIds) {
+    assert.equal(thread.data.messages.find((row) => Number(row.id) === id)?.isRead, false);
+  }
+  assert.equal((await countsFor(requester)).Messages, afterSend.Messages);
+  assert.equal((await countsFor(requester)).Messages, afterSend.Messages);
+
+  for (let index = 0; index < sentIds.length; index += 1) {
+    const marked = await request(`/portal/messages/${sentIds[index]}/read`, { method: 'PATCH', user: requester });
+    assert.equal(marked.response.status, 200, marked.data.message);
+    const afterOneRead = await countsFor(requester);
+    assert.equal(afterOneRead.Messages - (baseline.requester.Messages || 0), 2 - index);
+
+    const [readRows] = await pool.execute(
+      `SELECT message_id, is_read FROM message_recipients
+        WHERE user_id = ? AND message_id IN (${sentIds.map(() => '?').join(',')})`,
+      [requester.id, ...sentIds]
+    );
+    const readById = new Map(readRows.map((row) => [Number(row.message_id), Boolean(row.is_read)]));
+    for (let readIndex = 0; readIndex <= index; readIndex += 1) {
+      assert.equal(readById.get(sentIds[readIndex]), true, `message ${sentIds[readIndex]} should be read`);
+    }
+    for (let unreadIndex = index + 1; unreadIndex < sentIds.length; unreadIndex += 1) {
+      assert.equal(readById.get(sentIds[unreadIndex]), false, `message ${sentIds[unreadIndex]} should stay unread`);
+    }
+  }
+
+  const newMessage = await request('/portal/messages', {
+    method: 'POST', user: supervisor,
+    body: { recipientId: requester.id, body: `QA reappearing badge message ${stamp}` }
+  });
+  assert.equal(newMessage.response.status, 201, newMessage.data.message);
+  const reappeared = await countsFor(requester);
+  assert.equal(reappeared.Messages - (baseline.requester.Messages || 0), 1, 'a later message must make the badge reappear');
+  assert.equal((await countsFor(requester)).Messages, reappeared.Messages, 'the new count survives a later refresh');
+  const markedAgain = await request(`/portal/messages/${newMessage.data.id}/read`, { method: 'PATCH', user: requester });
+  assert.equal(markedAgain.response.status, 200, markedAgain.data.message);
+  assert.equal((await countsFor(requester)).Messages || 0, baseline.requester.Messages || 0);
+
+  // Announcements have one recipient row per user. Reading as one recipient
+  // must not clear the other recipient's unread row or badge.
+  const announcement = await request('/portal/messages', {
+    method: 'POST', user: supervisor,
+    body: { announcement: true, body: `QA multi-recipient badge announcement ${stamp}` }
+  });
+  assert.equal(announcement.response.status, 201, announcement.data.message);
+  const bothUnread = {
+    requester: await countsFor(requester),
+    secondRecipient: await countsFor(secondRecipient)
+  };
+  assert.equal(bothUnread.requester.Messages - (baseline.requester.Messages || 0), 1);
+  assert.equal(bothUnread.secondRecipient.Messages - (baseline.secondRecipient.Messages || 0), 1);
+
+  const firstRecipientRead = await request(`/portal/messages/${announcement.data.id}/read`, { method: 'PATCH', user: requester });
+  assert.equal(firstRecipientRead.response.status, 200, firstRecipientRead.data.message);
+  assert.equal((await countsFor(requester)).Messages || 0, baseline.requester.Messages || 0);
+  const otherAfterFirstRead = await countsFor(secondRecipient);
+  assert.equal(otherAfterFirstRead.Messages - (baseline.secondRecipient.Messages || 0), 1, 'the second recipient stays unread');
+  const [recipientRows] = await pool.execute(
+    'SELECT user_id, is_read FROM message_recipients WHERE message_id = ? ORDER BY user_id',
+    [announcement.data.id]
+  );
+  assert.equal(recipientRows.length, 2);
+  assert.equal(recipientRows.find((row) => row.user_id === requester.id)?.is_read, 1);
+  assert.equal(recipientRows.find((row) => row.user_id === secondRecipient.id)?.is_read, 0);
 });
 
 test('supervisor stock view is read-only and scoped to the assigned Department', async () => {
@@ -3234,6 +3452,17 @@ test('RFQ register statistics, filters, details, draft lifecycle and supplier li
   const statsBefore = await request('/rfqs/stats', { user: users.procurement });
   assert.equal(statsBefore.response.status, 200, statsBefore.data.message);
   assert.ok(statsBefore.data.stats, 'stats endpoint must return real database counts');
+  assert.ok(
+    ['draft', 'sent', 'evaluating', 'awarded', 'closed']
+      .map((status) => statsBefore.data.stats[status]).every(Number.isInteger),
+    'stats must include a database count for each RFQ lifecycle status'
+  );
+  assert.equal(
+    statsBefore.data.stats.total,
+    statsBefore.data.stats.draft + statsBefore.data.stats.sent + statsBefore.data.stats.evaluating
+      + statsBefore.data.stats.awarded + statsBefore.data.stats.closed,
+    'each RFQ must be counted in exactly one lifecycle status'
+  );
 
   const draft = await request('/rfqs', {
     method: 'POST', user: users.procurement,

@@ -83,19 +83,19 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
     onClose={() => !busy && onClose()}
   >
     <form onSubmit={send} className="space-y-5">
-      <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+      <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-semibold text-black">
         Check exactly what each selected committee member will receive: your recommendation, the requested
         items, when each RFQ was sent and is due, and every supplier response with each item’s price and
         comment. Each recipient gets one Accept/Deny choice with a required reason. Nothing is sent until
         you click “Send to Committee”.
       </p>
-      {loading && <div role="status" className="p-5 text-center text-sm text-muted">Preparing the review form…</div>}
+      {loading && <div role="status" className="p-5 text-center text-sm text-black">Preparing the review form…</div>}
       {!loading && error && <ErrorMessage>{error}</ErrorMessage>}
 
       {!loading && report && <>
         <section className="rounded-xl border border-slate-200 p-4">
           <h3 className="text-xs font-extrabold uppercase tracking-wide">1. Select the people who will receive this form</h3>
-          <p className="mt-1 text-[11px] text-muted">Committee members from the Procurement Committee directory.</p>
+          <p className="mt-1 text-[11px] text-black">Committee members from the Procurement Committee directory.</p>
           {members.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {members.map((member) => {
               const checked = selectedMembers.includes(member.id);
@@ -103,7 +103,7 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
                 <input type="checkbox" checked={checked} onChange={() => toggleMember(member.id)} className="mt-0.5" />
                 <span>
                   <span className="block font-bold">{member.firstName} {member.lastName}</span>
-                  <span className="block text-[11px] text-muted">{member.email}</span>
+                  <span className="block text-[11px] text-black">{member.email}</span>
                 </span>
               </label>;
             })}
@@ -118,40 +118,40 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
               {index + 2}. Content for {section.reference}
             </h3>
             <div className="mt-2 grid gap-3 text-xs sm:grid-cols-3">
-              <div><span className="text-muted">Requisition</span><strong className="mt-1 block">{section.requisitionReference}</strong></div>
-              <div><span className="text-muted">Request</span><strong className="mt-1 block">{section.title}</strong></div>
-              <div><span className="text-muted">Sent / deadline</span><strong className="mt-1 block">{dateTimeLabel(section.issuedAt)} · {dateTimeLabel(section.dueDate)}</strong></div>
+              <div><span className="text-black">Requisition</span><strong className="mt-1 block">{section.requisitionReference}</strong></div>
+              <div><span className="text-black">Request</span><strong className="mt-1 block">{section.title}</strong></div>
+              <div><span className="text-black">Sent / deadline</span><strong className="mt-1 block">{dateTimeLabel(section.issuedAt)} · {dateTimeLabel(section.dueDate)}</strong></div>
             </div>
             {section.message && <div className="mt-3 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 text-xs">
-              <strong className="font-extrabold uppercase tracking-wide text-emerald-800">Message from Procurement</strong>
+              <strong className="font-extrabold uppercase tracking-wide text-black">Message from Procurement</strong>
               <p className="mt-1 whitespace-pre-wrap font-bold leading-relaxed">{section.message}</p>
             </div>}
 
-            <h4 className="mt-4 text-[11px] font-bold uppercase text-muted">Emails sent to suppliers and their responses</h4>
+            <h4 className="mt-4 text-[11px] font-bold uppercase text-black">Emails sent to suppliers and their responses</h4>
             <div className="mt-2 overflow-x-auto">
               <table className="w-full min-w-[1180px] text-left text-xs">
-                <thead className="bg-slate-50 text-[10px] uppercase text-muted">
+                <thead className="bg-slate-50 text-[10px] uppercase text-black">
                   <tr>{['Supplier', 'Email sent to', 'Quotation requested', 'Email sent', 'Response received', 'Quote', 'Items, prices and responses'].map((label) => <th key={label} className="px-3 py-2">{label}</th>)}</tr>
                 </thead>
                 <tbody className="divide-y">
                   {(section.suppliers || []).map((supplier) => <tr key={supplier.supplierId}>
-                    <td className="px-3 py-2 font-bold">{supplier.name}<div className="text-[10px] font-normal text-muted">{supplier.emailStatus}</div></td>
+                    <td className="px-3 py-2 font-bold">{supplier.name}<div className="text-[10px] font-normal text-black">{supplier.emailStatus}</div></td>
                     <td className="px-3 py-2">{supplier.recipientEmail || 'No email on file'}</td>
                     <td className="px-3 py-2">{dateTimeLabel(supplier.quotationRequestedAt)}</td>
                     <td className="px-3 py-2">{dateTimeLabel(supplier.emailSentAt)}</td>
-                    <td className="px-3 py-2 font-semibold text-emerald-700">{dateTimeLabel(supplier.responseAt)}</td>
+                    <td className="px-3 py-2 font-semibold text-black">{dateTimeLabel(supplier.responseAt)}</td>
                     <td className="px-3 py-2 font-bold">{supplier.responseAt ? currency(supplier.amount) : 'No response'}</td>
                     <td className="px-3 py-2 align-top">
                       {(supplier.items || []).length ? <ul className="space-y-2">
                         {(supplier.items || []).map((item, itemIndex) => <li key={`${item.itemName}-${itemIndex}`} className="rounded-md bg-slate-50 p-2">
                           <div className="font-bold">{item.itemName} · {item.quantity} {item.unit}</div>
-                          <div className="text-[11px] text-muted">
+                          <div className="text-[11px] text-black">
                             Unit price {currency(item.unitPrice)} · Total {currency(item.lineTotal)}
                           </div>
-                          <div className="mt-1 text-[11px] text-emerald-700">Response: {item.comment || 'No item comment'}</div>
+                          <div className="mt-1 text-[11px] text-black">Response: {item.comment || 'No item comment'}</div>
                         </li>)}
-                      </ul> : <span className="text-muted">No quoted items were supplied.</span>}
-                      {supplier.notes && <p className="mt-2 whitespace-pre-wrap text-[11px] text-muted">Overall response: {supplier.notes}</p>}
+                      </ul> : <span className="text-black">No quoted items were supplied.</span>}
+                      {supplier.notes && <p className="mt-2 whitespace-pre-wrap text-[11px] text-black">Overall response: {supplier.notes}</p>}
                     </td>
                   </tr>)}
                 </tbody>
@@ -179,7 +179,7 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
               </label>
             </div>
 
-            <div className="mt-4 rounded-lg bg-brand-light/40 p-3 text-[11px] text-muted">
+            <div className="mt-4 rounded-lg bg-brand-light/40 p-3 text-[11px] text-black">
               Each recipient receives this content and one <strong>Accept</strong> or <strong>Deny</strong> choice on your recommendation, with a required reason. Only one decision is accepted per link.
             </div>
           </section>;
@@ -187,10 +187,10 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
       </>}
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-        <span className="text-[11px] text-muted">Each recipient gets their own private review link.</span>
+        <span className="text-[11px] text-black">Each recipient gets their own private review link.</span>
         <div className="flex gap-2">
           <button type="button" disabled={busy} onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-bold disabled:opacity-60">Cancel</button>
-          <button type="submit" disabled={busy || loading || !report?.length} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-white disabled:opacity-60">
+          <button type="submit" disabled={busy || loading || !report?.length} className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
             {busy ? 'Sending…' : <Check size={14} />}
             {busy ? 'Sending emails…' : `Send to Committee${selectedMembers.length ? ` (${selectedMembers.length})` : ''}`}
           </button>

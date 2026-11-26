@@ -76,7 +76,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
             <col style={{ width: '21%' }} />
             <col style={{ width: '15%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr>{['Date', 'Item', 'Movement', 'Quantity', 'Source', 'Balance'].map((cell) =>
               <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
           </thead>
@@ -87,7 +87,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
                 <td className="whitespace-nowrap px-5 py-4 align-middle tabular-nums">{dateLabel(entry.movementAt || entry.createdAt)}</td>
                 <td className="break-words px-5 py-4 align-middle">
                   <span className="block font-semibold">{entry.item || '—'}</span>
-                  {entry.sku && <span className="mt-1 block text-[10px] font-medium tracking-wide text-muted">{entry.sku}</span>}
+                  {entry.sku && <span className="mt-1 block text-[10px] font-medium tracking-wide text-black">{entry.sku}</span>}
                 </td>
                 <td className="px-5 py-4 align-middle">
                   <span className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 py-1.5 text-[10px] font-semibold text-black">
@@ -110,7 +110,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
             <Activity size={22} strokeWidth={1.7} aria-hidden="true" />
           </span>
           <h3 className="mt-4 text-sm font-bold text-black">No stock movements yet</h3>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+          <p className="mt-1 max-w-sm text-xs leading-5 text-black">
             Receipts, issues, and adjustments will appear here as inventory changes are recorded.
           </p>
         </div>
@@ -134,7 +134,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
             <col style={{ width: '14%' }} />
             <col style={{ width: '12%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr>{['Item', 'Category', 'On hand', 'Reorder at', 'Unit cost', 'Status'].map((cell) =>
               <th key={cell} className="whitespace-nowrap px-5 py-3.5 font-bold">{cell}</th>)}</tr>
           </thead>
@@ -147,7 +147,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
                   </span>
                   <span className="min-w-0">
                     <span className="block break-words font-bold">{item.name}</span>
-                    <span className="mt-1 block text-[10px] font-medium tracking-wide text-muted">{item.sku}</span>
+                    <span className="mt-1 block text-[10px] font-medium tracking-wide text-black">{item.sku}</span>
                   </span>
                 </div>
               </td>
@@ -167,7 +167,7 @@ export default function InventoryPage({ page, items, movements, user, search, qu
           <h3 className="mt-4 text-sm font-bold text-black">
             {!items.length ? 'No inventory items yet' : lowStockOnly ? 'No matching items below reorder level' : 'No inventory items match your search'}
           </h3>
-          <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
+          <p className="mt-1 max-w-sm text-xs leading-5 text-black">
             {!items.length
               ? 'Items added to the inventory catalogue will appear here.'
               : lowStockOnly

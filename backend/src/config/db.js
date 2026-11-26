@@ -170,6 +170,26 @@ export async function applySchemaMigrations() {
     await pool.query('ALTER TABLE rfqs MODIFY due_date DATETIME NULL');
   }
 
+  // Older installations predate this table but still run the column additions
+  // below. Create it first so the ALTERs are safe; the later table bootstrap
+  // is idempotent.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS requisition_email_threads (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      requisition_id INT UNSIGNED NOT NULL,
+      token CHAR(32) NOT NULL,
+      recipient_email VARCHAR(190) NOT NULL,
+      recipient_phone VARCHAR(50) NULL,
+      message TEXT NULL,
+      created_by INT UNSIGNED NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      response_submitted_at DATETIME NULL,
+      CONSTRAINT uq_requisition_email_thread_token UNIQUE (token),
+      CONSTRAINT fk_requisition_email_thread_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_requisition_email_thread_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    )
+  `);
+
   const additions = [
     { table: 'departments', column: 'description', ddl: 'ALTER TABLE departments ADD COLUMN description VARCHAR(255) NULL AFTER name' },
     { table: 'departments', column: 'parent_id', ddl: 'ALTER TABLE departments ADD COLUMN parent_id INT UNSIGNED NULL AFTER description' },

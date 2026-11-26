@@ -4,8 +4,8 @@ export default function PrintButton({ label = 'Print', className = '', disabled 
   const style = tone === 'primary'
     ? 'h-10 rounded-xl border border-brand bg-brand px-4 text-xs font-bold text-black shadow-dashboard transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
     : tone === 'toolbar'
-    ? 'h-9 rounded-xl border border-brand bg-white px-3.5 text-xs font-bold text-black shadow-dashboard transition duration-200 hover:border-accent-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
-    : 'rounded-lg border border-brand bg-white px-3.5 py-2 text-xs font-bold text-ink hover:bg-white disabled:opacity-50';
+    ? 'h-10 rounded-xl border border-brand bg-white px-4 text-xs font-bold text-black shadow-dashboard transition duration-200 hover:border-accent-border hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:cursor-not-allowed disabled:opacity-50'
+    : 'rounded-lg border border-brand bg-white px-3.5 py-2 text-xs font-bold text-black hover:bg-white disabled:opacity-50';
   return <button
     type="button"
     onClick={onClick || (() => window.print())}

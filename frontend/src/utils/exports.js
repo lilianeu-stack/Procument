@@ -1,3 +1,5 @@
+import { parseCsv } from './csv.js';
+
 const API_URL = import.meta.env.VITE_API_URL || '/api';
 
 function filenameFromDisposition(header) {
@@ -35,6 +37,26 @@ function withQuery(path, params = {}) {
   }
   const query = search.toString();
   return query ? `${path}?${query}` : path;
+}
+
+// Print registers use the same unrestricted report query as the download
+// actions. The backend CSV is the shared source of truth, so a printed table
+// always contains every filtered row and never just the current page.
+export async function fetchReportRows({ key, params = {}, reference = '' }) {
+  const response = await fetchExport(withQuery(`/exports/${encodeURIComponent(key)}/csv`, {
+    ...params,
+    ...(reference ? { reference } : {})
+  }));
+  const table = parseCsv(await response.text());
+  const headerIndex = table.findIndex((row, index) => index >= 2 && row.length > 1);
+  if (headerIndex < 0) {
+    return { columns: [], rows: [], metadata: table.map((cells) => cells[0] || '') };
+  }
+  return {
+    columns: table[headerIndex],
+    rows: table.slice(headerIndex + 1).filter((row) => row.length === table[headerIndex].length),
+    metadata: table.slice(0, headerIndex).map((cells) => cells[0] || '')
+  };
 }
 
 export async function downloadReport({ key, format = 'pdf', params = {}, reference = '' }) {

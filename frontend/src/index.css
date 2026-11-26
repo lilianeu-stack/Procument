@@ -6,8 +6,9 @@
   font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --pims-reference: #7CB342;
   --pims-success: var(--pims-reference);
+  --text-primary: #000000;
   --pims-surface: #FFFFFF;
-  --pims-ink: #000000;
+  --pims-ink: var(--text-primary);
 
   /* Neutral border scale. A future dark theme only needs to override the RGB
      channel token; every default border and divider resolves through it. */
@@ -16,11 +17,12 @@
   --pims-border: rgb(var(--pims-border-rgb) / 0.12);
   --pims-border-strong: rgb(var(--pims-border-rgb) / 0.2);
   --pims-hover: rgba(0, 0, 0, 0.04);
+  --pims-disabled-surface: rgba(0, 0, 0, 0.06);
 
   /* Match interactive states and primary surfaces to the selected green. */
   --pims-interaction-green: var(--pims-reference);
   --pims-interaction-green-rgb: 124 179 66;
-  --pims-interaction-green-text: #456921;
+  --pims-interaction-green-text: var(--text-primary);
   --pims-interaction-tint: rgb(var(--pims-interaction-green-rgb) / 0.12);
   --pims-interaction-tint-strong: rgb(var(--pims-interaction-green-rgb) / 0.18);
   --pims-interaction-row-tint: rgb(var(--pims-interaction-green-rgb) / 0.07);
@@ -32,20 +34,20 @@
 
   --tw-ring-color: var(--pims-border);
   --tw-ring-offset-color: var(--pims-surface);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   background: var(--pims-surface);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 360px; min-height: 100vh; background: var(--pims-surface); color: var(--pims-ink); }
+body { margin: 0; min-width: 360px; min-height: 100vh; background: var(--pims-surface); color: var(--text-primary); }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; }
 input, select, textarea { accent-color: var(--pims-reference); }
-input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; opacity: 1 !important; }
-::selection { background: var(--pims-reference); color: var(--pims-ink); }
+input::placeholder, textarea::placeholder { color: var(--text-primary) !important; opacity: 1 !important; }
+::selection { background: var(--pims-reference); color: var(--text-primary); }
 .display-font { font-family: 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif; }
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { scrollbar-width: none; }
@@ -87,25 +89,34 @@ input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; o
   cursor: not-allowed !important;
 }
 
+/* Disabled controls stay legible with black text and are distinguished by a
+   neutral surface instead of a grey text/opacity treatment. */
+:where(button, input, select, textarea, [role='button'], [role='link'], [role='tab'], [role='menuitem']):disabled,
+[aria-disabled='true'] {
+  background-color: var(--pims-disabled-surface) !important;
+  border-color: var(--pims-border) !important;
+  opacity: 1 !important;
+}
+
 :where(a[href], button, [role='button'], [role='tab'], [role='menuitem']):disabled:hover,
 [aria-disabled='true']:hover {
   filter: none !important;
 }
 
-/* Restore the authored white surface for disabled secondary controls whose
-   legacy hover utility now resolves to a transparent token. */
+/* Keep the neutral surface on disabled secondary controls whose legacy hover
+   utility resolves to the transparent token above. */
 :where(a[href], button, [role='button'], [role='tab'], [role='menuitem']):disabled:hover:is([class~='bg-white'], [class~='!bg-white'], [class~='bg-brand'], [class~='bg-canvas']),
 [aria-disabled='true']:hover:is([class~='bg-white'], [class~='!bg-white'], [class~='bg-brand'], [class~='bg-canvas']) {
-  background-color: var(--pims-surface) !important;
+  background-color: var(--pims-disabled-surface) !important;
 }
 
 :where(
   a[href], button, summary,
   [role='button'], [role='link'], [role='tab'], [role='menuitem'], [role='option']
-):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class~='bg-ink']):not([class~='!bg-black']):not([class*='bg-black/']):not([class*='text-white']):not([class*='!text-white']) {
+):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class~='bg-ink']):not([class~='!bg-black']):not([class*='bg-black/']) {
   background-color: var(--pims-interaction-tint) !important;
   border-color: var(--pims-interaction-border) !important;
-  color: var(--pims-interaction-green-text) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Primary green buttons keep dark text and receive a subtle green hover. */
@@ -113,7 +124,7 @@ input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; o
   background-color: var(--pims-reference) !important;
   background-image: linear-gradient(var(--pims-interaction-tint), var(--pims-interaction-tint)) !important;
   border-color: var(--pims-interaction-border) !important;
-  color: var(--pims-ink) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Keep legacy hover utility classes from reintroducing grey/black feedback. */
@@ -122,7 +133,6 @@ input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; o
 [class*='hover:bg-brand']:hover:not(:disabled):not([aria-disabled='true']),
 [class*='hover:text-black']:hover:not(:disabled):not([aria-disabled='true']),
 [class*='hover:!text-black']:hover:not(:disabled):not([aria-disabled='true']),
-[class*='hover:text-ink']:hover:not(:disabled):not([aria-disabled='true']),
 [class*='hover:!bg-white']:hover:not(:disabled):not([aria-disabled='true']),
 [class*='hover:border-black']:hover:not(:disabled):not([aria-disabled='true']),
 [class*='hover:border-brand']:hover:not(:disabled):not([aria-disabled='true']) {
@@ -141,11 +151,10 @@ input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; o
   [class*='hover:bg-brand'],
   [class*='hover:!bg-white'],
   [class*='hover:text-black'],
-  [class*='hover:!text-black'],
-  [class*='hover:text-ink']
-):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class*='bg-black/']):not([class*='text-white']):not([class*='!text-white']) {
+  [class*='hover:!text-black']
+):hover:not(:disabled):not([aria-disabled='true']):not([aria-current='page']):not([aria-selected='true']):not([aria-pressed='true']):not([class~='bg-black']):not([class~='bg-reference']):not([class~='!bg-reference']):not([class*='bg-black/']) {
   background-color: var(--pims-interaction-tint) !important;
-  color: var(--pims-interaction-green-text) !important;
+  color: var(--text-primary) !important;
 }
 
 .group:hover [class*='group-hover:bg-hover'] {
@@ -153,7 +162,7 @@ input::placeholder, textarea::placeholder { color: var(--pims-ink) !important; o
 }
 
 .group:hover [class*='group-hover:text-black'] {
-  color: var(--pims-interaction-green-text) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Form controls: subtle green tint on hover, stronger green focus ring. */
@@ -202,7 +211,7 @@ tbody tr:hover > th.sticky {
 label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='hover:border-']):not(.opacity-50):not(.opacity-60):not(.cursor-not-allowed):not([aria-disabled='true']) {
   background-color: var(--pims-interaction-tint) !important;
   border-color: var(--pims-interaction-border) !important;
-  color: var(--pims-interaction-green-text) !important;
+  color: var(--text-primary) !important;
 }
 
 /* Pressed state is slightly stronger, without adding lift or shadow. */
@@ -219,6 +228,12 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .hover\:shadow-lg:hover {
   transform: none !important;
   box-shadow: none !important;
+}
+
+/* Unread sidebar counts are the only scoped white-text exception. The global
+   black-text token stays intact for every other label, including print output. */
+.pims-sidebar-badge {
+  color: #FFFFFF !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -241,12 +256,12 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   @bottom-right {
     content: 'Page ' counter(page) ' of ' counter(pages);
     font-size: 8pt;
-    color: var(--pims-ink);
+    color: var(--text-primary);
   }
 }
 
 @media print {
-  :root { background: var(--pims-surface); color: var(--pims-ink); }
+  :root { background: var(--pims-surface); color: var(--text-primary); }
   body { background: var(--pims-surface); min-width: 0; }
   .no-print,
   aside,
@@ -263,7 +278,7 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   .print-header { display: flex !important; align-items: center; gap: 12px; border-bottom: 1px solid var(--pims-border); padding-bottom: 10px; margin-bottom: 14px; }
   .print-header img { width: 46px; height: 46px; object-fit: contain; }
   .print-header strong { display: block; font-size: 14pt; }
-  .print-header span { display: block; font-size: 9pt; color: var(--pims-ink); }
+  .print-header span { display: block; font-size: 9pt; color: var(--text-primary); }
 
   .requester-print-register { font-size: 9pt; }
   .print-register-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14mm; row-gap: 4px; margin-bottom: 12px; }
@@ -273,6 +288,9 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   .print-register-table { table-layout: fixed; font-size: 8pt; }
   .print-register-table th, .print-register-table td { padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; }
   .print-register-note { margin-top: 8px; font-size: 9pt; }
+  .report-print-register { font-size: 9pt; }
+  .report-print-table { table-layout: fixed; font-size: 8pt; }
+  .report-print-table th, .report-print-table td { padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; }
 
   main, .min-h-screen, .mx-auto { padding: 0 !important; margin: 0 !important; max-width: none !important; }
   .fixed.inset-0 { position: static !important; display: block !important; background: transparent !important; padding: 0 !important; }
@@ -301,7 +319,7 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   margin: 0 auto;
   padding: 14mm 12mm;
   background: var(--pims-surface);
-  color: var(--pims-ink);
+  color: var(--text-primary);
   font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 10pt;
   line-height: 1.35;
@@ -311,14 +329,14 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .official-logo { width: 54px; height: 54px; object-fit: contain; }
 .official-header-text { display: flex; flex: 1; flex-direction: column; line-height: 1.2; }
 .official-header-text strong { font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 15pt; letter-spacing: .02em; }
-.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: var(--pims-ink); }
-.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: var(--pims-ink); }
+.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: var(--text-primary); }
+.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: var(--text-primary); }
 .official-title { margin: 18px 0 16px; text-align: center; font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 16pt; font-weight: 800; letter-spacing: .08em; }
 
-.official-label { display: block; font-size: 9pt; font-weight: 800; color: var(--pims-ink); }
+.official-label { display: block; font-size: 9pt; font-weight: 800; color: var(--text-primary); }
 .official-value { display: block; min-height: 18px; font-size: 10pt; font-weight: 600; }
 .official-strong { font-weight: 800; }
-.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: var(--pims-ink); white-space: pre-wrap; }
+.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: var(--text-primary); white-space: pre-wrap; }
 .official-center { text-align: center; }
 .official-right { text-align: right; }
 
@@ -366,4 +384,30 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   .official-document th, .official-document td { border: 1px solid var(--pims-border); }
   .official-document tr, .official-document .official-purpose, .official-document .official-approval-grid > div { break-inside: avoid; page-break-inside: avoid; }
   .official-title { break-after: avoid; page-break-after: avoid; }
+}
+
+/* ---------------------------------------------------------------------------
+   Final color-only safety net. Text color is the single canonical token; every
+   other visual property (backgrounds, borders, spacing, typography, hover
+   surfaces, focus rings and status indicators) is deliberately untouched.
+   --------------------------------------------------------------------------- */
+*, ::before, ::after {
+  color: var(--text-primary) !important;
+  -webkit-text-fill-color: var(--text-primary) !important;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-primary) !important;
+  opacity: 1 !important;
+}
+
+::selection { color: var(--text-primary) !important; }
+
+@media print {
+  *, ::before, ::after {
+    color: var(--text-primary) !important;
+    -webkit-text-fill-color: var(--text-primary) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

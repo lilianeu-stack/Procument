@@ -268,14 +268,14 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
               fallbackClassName="bg-white text-black"
             />
             <h3 className="display-font mt-4 text-lg font-extrabold">{profile?.name || 'User'}</h3>
-            <p className="mt-1 text-xs text-muted">{role}</p>
-            <p className="mt-0.5 truncate text-[11px] text-muted">{profile?.email || '—'}</p>
+            <p className="mt-1 text-xs text-black">{role}</p>
+            <p className="mt-0.5 truncate text-[11px] text-black">{profile?.email || '—'}</p>
             <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
               <PortalBadge tone={profile?.active === false ? 'amber' : 'indigo'}>
                 {profile?.active === false ? 'Inactive' : 'Active'}
               </PortalBadge>
               {profile?.department || department.name
-                ? <span className="text-[11px] text-muted">{profile?.department || department.name}</span>
+                ? <span className="text-[11px] text-black">{profile?.department || department.name}</span>
                 : null}
             </div>
 
@@ -292,20 +292,20 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
                 <Trash2 size={14} />Remove Photo
               </button>
             </div>
-            <p className="mt-2 text-[10px] leading-4 text-muted">JPG, PNG or WebP · Maximum 5 MB · Square crop at 512 × 512</p>
+            <p className="mt-2 text-[10px] leading-4 text-black">JPG, PNG or WebP · Maximum 5 MB · Square crop at 512 × 512</p>
 
             {busy === 'photo' && <div className="mt-4 w-full" role="status">
-              <div className="mb-1 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-muted">
+              <div className="mb-1 flex items-center justify-center gap-1.5 text-[11px] font-semibold text-black">
                 <Loader2 size={12} className="animate-spin" />Uploading…
               </div>
               <div className="h-1.5 w-full overflow-hidden rounded-full border border-brand bg-white">
                 <div className="h-full w-2/3 animate-pulse rounded-full bg-reference" />
               </div>
             </div>}
-            {busy === 'remove' && <p role="status" className="mt-4 flex items-center gap-1.5 text-[11px] text-muted"><Loader2 size={12} className="animate-spin" />Removing photo…</p>}
+            {busy === 'remove' && <p role="status" className="mt-4 flex items-center gap-1.5 text-[11px] text-black"><Loader2 size={12} className="animate-spin" />Removing photo…</p>}
 
             {selected && <div className="mt-5 w-full rounded-xl border border-brand bg-white p-3">
-              <div className="text-[10px] font-extrabold uppercase tracking-wide text-muted">Preview</div>
+              <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Preview</div>
               <img src={previewUrl} alt="Selected profile photo preview" className="mx-auto mt-3 h-28 w-28 rounded-full border border-brand object-cover" />
               <p className="mt-2 truncate text-[11px] font-semibold">{selected.name} · {readableSize(selected.size)}</p>
               <div className="mt-3 flex justify-center gap-2">
@@ -328,12 +328,12 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
             </button>}>
             {editingDetails ? <form onSubmit={saveDetails} className="space-y-4 p-5">
               <label className="block">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Full name</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-black">Full name</span>
                 <input value={details.name} onChange={(event) => setDetails((current) => ({ ...current, name: event.target.value }))}
                   maxLength={150} required className="field" />
               </label>
               <label className="block">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Phone number</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-black">Phone number</span>
                 <input value={details.phone} onChange={(event) => setDetails((current) => ({ ...current, phone: event.target.value }))}
                   maxLength={50} placeholder="—" className="field" />
               </label>
@@ -350,10 +350,10 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
             </form> : <dl className="grid gap-5 p-5 sm:grid-cols-2">
               <KeyValue label="Full name">{profile?.name || '—'}</KeyValue>
               <KeyValue label="Username">{profile?.username || '—'}</KeyValue>
-              <KeyValue label="Email address"><span className="flex items-center gap-1.5"><Mail size={12} className="text-muted" />{profile?.email || '—'}</span></KeyValue>
-              <KeyValue label="Phone number"><span className="flex items-center gap-1.5"><Phone size={12} className="text-muted" />{profile?.phone || '—'}</span></KeyValue>
+              <KeyValue label="Email address"><span className="flex items-center gap-1.5"><Mail size={12} className="text-black" />{profile?.email || '—'}</span></KeyValue>
+              <KeyValue label="Phone number"><span className="flex items-center gap-1.5"><Phone size={12} className="text-black" />{profile?.phone || '—'}</span></KeyValue>
               <KeyValue label="Role">{role}</KeyValue>
-              <KeyValue label="Department"><span className="flex items-center gap-1.5"><Building2 size={12} className="text-muted" />{profile?.department || department.name || '—'}</span></KeyValue>
+              <KeyValue label="Department"><span className="flex items-center gap-1.5"><Building2 size={12} className="text-black" />{profile?.department || department.name || '—'}</span></KeyValue>
               <KeyValue label="Account status">
                 <PortalBadge tone={profile?.active === false ? 'amber' : 'indigo'}>{profile?.active === false ? 'Inactive' : 'Active'}</PortalBadge>
               </KeyValue>
@@ -372,25 +372,25 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
           <PageCard title="Security" description="Change your password without displaying any credential or hash.">
             <form onSubmit={changePassword} className="grid gap-4 p-5 sm:grid-cols-3">
               <label className="block sm:col-span-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Current password</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-black">Current password</span>
                 <input type="password" autoComplete="current-password" value={passwordForm.currentPassword}
                   onChange={(event) => setPasswordForm((current) => ({ ...current, currentPassword: event.target.value }))}
                   required className="field" />
               </label>
               <label className="block sm:col-span-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">New password</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-black">New password</span>
                 <input type="password" autoComplete="new-password" minLength={12} value={passwordForm.newPassword}
                   onChange={(event) => setPasswordForm((current) => ({ ...current, newPassword: event.target.value }))}
                   required className="field" />
               </label>
               <label className="block sm:col-span-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Confirm new password</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-black">Confirm new password</span>
                 <input type="password" autoComplete="new-password" minLength={12} value={passwordForm.confirmPassword}
                   onChange={(event) => setPasswordForm((current) => ({ ...current, confirmPassword: event.target.value }))}
                   required className="field" />
               </label>
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-subtle pt-4 sm:col-span-3">
-                <span className="flex items-start gap-2 text-[11px] leading-4 text-muted">
+                <span className="flex items-start gap-2 text-[11px] leading-4 text-black">
                   <ShieldCheck size={14} className="mt-0.5 shrink-0" />
                   Use at least 12 characters. Your role, permissions and administrative privileges are not changed here.
                 </span>
@@ -402,7 +402,7 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
             </form>
           </PageCard>
 
-          <div className="flex items-start gap-3 rounded-xl border border-brand bg-white p-5 text-xs leading-5 text-muted">
+          <div className="flex items-start gap-3 rounded-xl border border-brand bg-white p-5 text-xs leading-5 text-black">
             <UserRound size={18} className="mt-0.5 shrink-0" />
             <p>Your access is determined by your assigned role and Department. Contact an Administrator if any protected detail needs correction.</p>
           </div>

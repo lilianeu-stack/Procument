@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
+import SidebarBadge from '../ui/SidebarBadge.jsx';
 
 export default function PortalSidebarFrame({
-  accent, groups, page, open, collapsed,
+  accent, groups, page, counts = {}, open, collapsed,
   onNavigate, onClose, onToggleCollapse
 }) {
   return <>
@@ -10,10 +11,10 @@ export default function PortalSidebarFrame({
       <div className={`mb-5 flex items-center border-b border-subtle pb-5 ${collapsed ? 'flex-col gap-3' : 'justify-between px-2'}`}>
         <BrandLogo light compact={collapsed} />
         <button type="button" onClick={onToggleCollapse} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className={`hidden h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:grid ${accent.mutedText}`}>
+          className={`hidden h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:grid ${accent.mutedText}`}>
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
-        <button type="button" className={`grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-accent-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:hidden ${accent.mutedText}`} onClick={onClose} aria-label="Close navigation">×</button>
+        <button type="button" className={`grid h-9 w-9 place-items-center rounded-lg transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus lg:hidden ${accent.mutedText}`} onClick={onClose} aria-label="Close navigation">×</button>
       </div>
 
       <nav aria-label="Main navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto px-1 pb-2">
@@ -25,10 +26,11 @@ export default function PortalSidebarFrame({
             <div className="space-y-1">
               {links.map(({ name, label, icon: Icon }) => <button key={name} onClick={() => { onNavigate(name); onClose(); }}
                 type="button" aria-label={label || name} aria-current={page === name ? 'page' : undefined} title={collapsed ? (label || name) : undefined}
-                className={`flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${collapsed ? 'lg:justify-center lg:px-0' : ''} ${page === name ? accent.active : `${accent.mutedText} ${accent.hover}`}`}>
+                className={`relative flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${collapsed ? 'lg:justify-center lg:px-0' : ''} ${page === name ? accent.active : `${accent.mutedText} ${accent.hover}`}`}>
                 <Icon size={17} strokeWidth={1.8} />
                 <span className={`flex-1 ${collapsed ? 'lg:hidden' : ''}`}>{label || name}</span>
-                {page === name && <span className={`h-1.5 w-1.5 rounded-full bg-success ${collapsed ? 'lg:hidden' : ''}`} aria-hidden="true" />}
+                <SidebarBadge count={counts[name]} floating={collapsed} />
+                {page === name && !Number(counts[name]) && <span className={`h-1.5 w-1.5 rounded-full bg-success ${collapsed ? 'lg:hidden' : ''}`} aria-hidden="true" />}
               </button>)}
             </div>
           </div>;

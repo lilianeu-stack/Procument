@@ -105,13 +105,13 @@ function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
   return <div className="space-y-3">
     <div className="overflow-x-auto rounded-lg border border-brand">
       <table className="w-full min-w-[760px] text-left text-xs">
-        <thead className="bg-white text-[10px] uppercase text-muted">
+        <thead className="bg-white text-[10px] uppercase text-black">
           <tr>{['Item No.', 'Quantity', 'Unit', 'Description', 'Unit Price', 'Total Price', ''].map((heading) =>
             <th key={heading} className="whitespace-nowrap px-3 py-3 font-bold">{heading}</th>)}</tr>
         </thead>
         <tbody className="divide-y">
           {lines.map((line, index) => <tr key={line.id || `line-${index}`} className="align-top">
-            <td className="px-3 py-3 font-bold text-muted">{index + 1}</td>
+            <td className="px-3 py-3 font-bold text-black">{index + 1}</td>
             <td className="px-3 py-3"><input required type="number" min="1" step="1" value={line.quantity}
               onChange={(event) => onChange(index, 'quantity', event.target.value)} className="field mt-0 w-20" /></td>
             <td className="px-3 py-3"><input required value={line.unit}
@@ -126,7 +126,7 @@ function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
               onChange={(event) => onChange(index, 'unitPrice', event.target.value)} className="field mt-0 w-28" /></td>
             <td className="whitespace-nowrap px-3 py-4 font-bold">{formatRwf((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0))}</td>
             <td className="px-3 py-3"><button type="button" onClick={() => onRemove(index)} aria-label={`Remove line ${index + 1}`}
-              className="inline-flex items-center gap-1 rounded-lg p-2 text-muted hover:bg-white hover:text-black">
+              className="inline-flex items-center gap-1 rounded-lg p-2 text-black hover:bg-white hover:text-black">
               <Trash2 size={14} /><span className="text-[10px] font-bold">Remove</span>
             </button></td>
           </tr>)}
@@ -138,10 +138,10 @@ function ItemTable({ lines, onChange, onAdd, onRemove, vatRate }) {
     </button>
     <dl className="grid gap-2 rounded-lg border border-brand bg-white p-4 text-xs sm:grid-cols-2">
       <dt className="sm:col-span-2 text-[10px] font-extrabold uppercase tracking-wide text-black">Financial Summary</dt>
-      <div className="flex justify-between"><dt className="text-muted">Subtotal</dt><dd className="font-bold">{formatRwf(totals.subtotal)}</dd></div>
-      <div className="flex justify-between"><dt className="text-muted">VAT ({totals.vatRate}%)</dt><dd className="font-bold">{formatRwf(totals.vatAmount)}</dd></div>
+      <div className="flex justify-between"><dt className="text-black">Subtotal</dt><dd className="font-bold">{formatRwf(totals.subtotal)}</dd></div>
+      <div className="flex justify-between"><dt className="text-black">VAT ({totals.vatRate}%)</dt><dd className="font-bold">{formatRwf(totals.vatAmount)}</dd></div>
       <div className="flex justify-between sm:col-span-2"><dt className="font-bold">Total Amount</dt><dd className="font-extrabold text-black">{formatRwf(totals.total)}</dd></div>
-      <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-muted">Total Amount in Words · Rwandan Francs</dt><dd className="mt-1 font-semibold">{totals.amountInWords}</dd></div>
+      <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Total Amount in Words · Rwandan Francs</dt><dd className="mt-1 font-semibold">{totals.amountInWords}</dd></div>
     </dl>
   </div>;
 }
@@ -231,10 +231,10 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
             </select>
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value="Assigned when saved" className="field bg-white text-muted" />
+            <input readOnly value="Assigned when saved" className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-white text-muted" />
+            <input readOnly value={dateLabel(new Date().toISOString())} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
@@ -245,18 +245,18 @@ export function OrderForm({ rfqs, requisition, initialRfqId, onClose, onSubmit, 
       <section className="rounded-lg border border-brand bg-white p-4">
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Registered supplier information</h3>
         <dl className="grid gap-3 text-xs sm:grid-cols-3">
-          <div><dt className="text-[10px] text-muted">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
-          <div><dt className="text-[10px] text-muted">Supplier Contact</dt><dd className="font-bold">{supplier.contact}</dd></div>
-          <div><dt className="text-[10px] text-muted">Address</dt><dd className="font-bold">{supplier.address}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier</dt><dd className="font-bold">{supplier.name}</dd></div>
+          <div><dt className="text-[10px] text-black">Supplier Contact</dt><dd className="font-bold">{supplier.contact}</dd></div>
+          <div><dt className="text-[10px] text-black">Address</dt><dd className="font-bold">{supplier.address}</dd></div>
         </dl>
-        <p className="mt-2 text-[10px] text-muted">Registered details come from the awarded quotation and are printed on the official purchase order.</p>
+        <p className="mt-2 text-[10px] text-black">Registered details come from the awarded quotation and are printed on the official purchase order.</p>
       </section>
 
       <section>
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order items</h3>
         <ItemTable lines={lines} onChange={updateLine} onAdd={() => setLines((current) => [...current, emptyLine()])}
           onRemove={(index) => setLines((current) => current.length === 1 ? current : current.filter((_, position) => position !== index))} />
-        {requisitionLines.length > 0 && <p className="mt-2 text-[10px] text-muted">Lines were prefilled from the originating requisition. Final prices are recalculated from the awarded quotation.</p>}
+        {requisitionLines.length > 0 && <p className="mt-2 text-[10px] text-black">Lines were prefilled from the originating requisition. Final prices are recalculated from the awarded quotation.</p>}
       </section>
 
       <ErrorMessage>{error}</ErrorMessage>
@@ -329,10 +329,10 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
         <h3 className="mb-3 text-xs font-extrabold uppercase tracking-wide text-black">Purchase order details</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-xs font-bold">Supplier
-            <input readOnly value={order.supplier || '—'} className="field bg-white text-muted" />
+            <input readOnly value={order.supplier || '—'} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">P.O No
-            <input readOnly value={order.reference || '—'} className="field bg-white text-muted" />
+            <input readOnly value={order.reference || '—'} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Supplier Contact
             <input value={form.supplierContact} onChange={(event) => setForm({ ...form, supplierContact: event.target.value })} className="field" />
@@ -346,13 +346,13 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
             <input value={form.supplierAddress} onChange={(event) => setForm({ ...form, supplierAddress: event.target.value })} className="field" />
           </label>
           <label className="block text-xs font-bold">Date
-            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-white text-muted" />
+            <input readOnly value={dateLabel(order.createdAt || order.date)} className="field bg-white text-black" />
           </label>
           <label className="block text-xs font-bold">Date of Delivery *
             <input required type="date" value={form.deliveryDate} onChange={(event) => setForm({ ...form, deliveryDate: event.target.value })} className="field" />
           </label>
         </div>
-        <p className="mt-2 text-[10px] text-muted">VAT is fixed at {vatRate}% by the configured business settings and cannot be edited here.</p>
+        <p className="mt-2 text-[10px] text-black">VAT is fixed at {vatRate}% by the configured business settings and cannot be edited here.</p>
       </section>
 
       <section>
@@ -576,7 +576,7 @@ export default function PurchaseOrdersPage({
       {notice && <div className="px-4 pb-4"><p role="status" className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">{notice}</p></div>}
       {activePoStatuses && <div className="px-4 pb-3">
         <button type="button" onClick={() => navigate?.('Purchase orders')} className="inline-flex items-center gap-2 rounded-full border border-brand bg-white px-3 py-1.5 text-[11px] font-bold text-black hover:bg-hover">
-          Filtered: {query.status}<span className="text-black/50 underline">Clear</span>
+          Filtered: {query.status}<span className="text-black underline">Clear</span>
         </button>
       </div>}
       {visibleOrders.length ? <div className="overflow-x-auto">
@@ -592,7 +592,7 @@ export default function PurchaseOrdersPage({
             <col style={{ width: '12%' }} />
             <col style={{ width: '12%' }} />
           </colgroup>
-          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black/55">
+          <thead className="bg-hover text-[10px] uppercase tracking-[.08em] text-black">
             <tr className="border-b border-subtle">
               {['PO', 'Supplier / registered contact', 'Requisition', 'Type', 'Items', 'Total', 'Delivery', 'Status', 'Actions']
                 .map((cell) => <th key={cell} scope="col" className="whitespace-nowrap px-3 py-3.5 font-extrabold">{cell}</th>)}
@@ -603,24 +603,24 @@ export default function PurchaseOrdersPage({
               <td className="break-words px-3 py-4 font-extrabold leading-5 text-black">{order.reference}</td>
               <td className="px-3 py-4">
                 <div className="break-words font-bold leading-5 text-black">{order.supplier || '—'}</div>
-                <div className="mt-1 break-words text-[10px] leading-4 text-muted">
+                <div className="mt-1 break-words text-[10px] leading-4 text-black">
                   {order.supplierContact || 'No contact recorded'}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}
                 </div>
               </td>
-              <td className="break-words px-3 py-4 font-medium text-muted">{order.requisition || '—'}</td>
+              <td className="break-words px-3 py-4 font-medium text-black">{order.requisition || '—'}</td>
               <td className="px-3 py-4">
                 <span className="inline-flex rounded-md border border-brand bg-white px-2 py-1 text-[10px] font-semibold text-black">
                   {order.type || 'Standard'}
                 </span>
               </td>
-              <td className="whitespace-pre-line break-words px-3 py-4 text-[11px] leading-5 text-muted">{order.items || '—'}</td>
+              <td className="whitespace-pre-line break-words px-3 py-4 text-[11px] leading-5 text-black">{order.items || '—'}</td>
               <td className="whitespace-nowrap px-3 py-4 text-right font-extrabold tabular-nums text-black">{currency(order.total)}</td>
-              <td className="whitespace-nowrap px-3 py-4 tabular-nums text-muted">{dateLabel(order.deliveryDate) || '—'}</td>
+              <td className="whitespace-nowrap px-3 py-4 tabular-nums text-black">{dateLabel(order.deliveryDate) || '—'}</td>
               <td className="px-3 py-4">
                 <StatusBadge value={order.status} className="max-w-full whitespace-normal text-[10px] leading-tight" />
                 {order.supplierPricingStatus && order.supplierPricingStatus !== 'Not requested'
-                  && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">Supplier pricing · {order.supplierPricingStatus}</div>}
-                {order.approval && <div className="mt-1.5 break-words text-[10px] leading-4 text-muted">
+                  && <div className="mt-1.5 break-words text-[10px] leading-4 text-black">Supplier pricing · {order.supplierPricingStatus}</div>}
+                {order.approval && <div className="mt-1.5 break-words text-[10px] leading-4 text-black">
                   {order.approval.status === 'Pending' ? `Sent to ${order.approval.recipientName}` : `Approval ${order.approval.status}`}
                   {order.approval.decisionComment ? ` · “${order.approval.decisionComment}”` : ''}
                 </div>}
@@ -665,7 +665,7 @@ export default function PurchaseOrdersPage({
     {sendOrder?.__sendToSuppliers && <SupplierSelectionModal order={sendOrder} suppliers={suppliers} onSend={saveAndSend} onClose={closeSendModal} />}
     {sendOrder && !sendOrder.__sendToSuppliers && <SendForApprovalModal order={sendOrder} loadApprovers={loadApprovers} onSend={saveAndSend} onClose={closeSendModal} />}
 
-    {detailLoading && <Modal title="Opening purchase order" onClose={closeDetail}><div className="py-8 text-center text-xs text-muted">Loading official form…</div></Modal>}
+    {detailLoading && <Modal title="Opening purchase order" onClose={closeDetail}><div className="py-8 text-center text-xs text-black">Loading official form…</div></Modal>}
     {!detailLoading && detailMode === 'view' && detail && <Modal title={`Official purchase order · ${detail.reference}`} size="xl" onClose={closeDetail}>
       <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-2">
@@ -686,11 +686,11 @@ export default function PurchaseOrdersPage({
           {detail.approval.status === 'Pending' && canCreate && <button type="button" onClick={() => revokeApproval(detail)} className="rounded-lg border border-brand bg-white px-3 py-1.5 font-bold text-black">Revoke link</button>}
         </div>
         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <div><dt className="text-[10px] text-muted">Recipient</dt><dd className="font-bold">{detail.approval.recipientName || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Sender</dt><dd className="font-bold">{detail.approval.senderName || '—'}</dd></div>
-          <div><dt className="text-[10px] text-muted">Sent</dt><dd className="font-bold">{dateTimeLabel(detail.approval.sentAt)}</dd></div>
-          <div><dt className="text-[10px] text-muted">Decision</dt><dd className="font-bold">{detail.approval.decidedAt ? dateTimeLabel(detail.approval.decidedAt) : '—'}</dd></div>
-          {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-muted">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
+          <div><dt className="text-[10px] text-black">Recipient</dt><dd className="font-bold">{detail.approval.recipientName || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Sender</dt><dd className="font-bold">{detail.approval.senderName || '—'}</dd></div>
+          <div><dt className="text-[10px] text-black">Sent</dt><dd className="font-bold">{dateTimeLabel(detail.approval.sentAt)}</dd></div>
+          <div><dt className="text-[10px] text-black">Decision</dt><dd className="font-bold">{detail.approval.decidedAt ? dateTimeLabel(detail.approval.decidedAt) : '—'}</dd></div>
+          {detail.approval.decisionComment && <div className="sm:col-span-4"><dt className="text-[10px] text-black">Comment</dt><dd className="italic">“{detail.approval.decisionComment}”</dd></div>}
         </dl>
       </section>}
       <div className="max-h-[65vh] overflow-auto rounded-lg border border-brand bg-white p-3">

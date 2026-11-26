@@ -35,7 +35,7 @@ export default function PortalPlaceholder({ portal, page, user, summary, notific
           </span>
           <div>
             <h2 className="display-font text-xl font-extrabold tracking-tight">{page}</h2>
-            <p className="mt-1 max-w-xl text-xs leading-5 text-muted">{meta.description}</p>
+            <p className="mt-1 max-w-xl text-xs leading-5 text-black">{meta.description}</p>
           </div>
         </div>
         <span className="w-fit rounded-full border border-brand bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[.12em] text-black">
@@ -46,9 +46,9 @@ export default function PortalPlaceholder({ portal, page, user, summary, notific
       <div className="grid gap-5 p-6 lg:grid-cols-[1.4fr_1fr]">
         <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-brand bg-white p-8 text-center">
           <div>
-            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-white text-muted "><Icon size={24} /></span>
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-white text-black "><Icon size={24} /></span>
             <p className="mt-4 text-sm font-bold">Nothing to show yet</p>
-            <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-muted">
+            <p className="mx-auto mt-1 max-w-sm text-xs leading-5 text-black">
               The navigation and page structure are ready. Functional content for {page} will be added in a later phase.
             </p>
           </div>
@@ -56,31 +56,31 @@ export default function PortalPlaceholder({ portal, page, user, summary, notific
 
         <aside className="space-y-4">
           <div className="rounded-xl border border-brand bg-white p-4">
-            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-muted">Your context</div>
+            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Your context</div>
             <SharedUserProfile user={user} portal={portal} />
             <dl className="mt-4 space-y-2 border-t border-subtle pt-4 text-xs">
-              <div className="flex justify-between gap-3"><dt className="text-muted">Department</dt><dd className="font-bold text-right">{department?.name || user?.department || '—'}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Department ID</dt><dd className="font-bold">{department?.id ?? user?.departmentId ?? '—'}</dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">Portal</dt><dd className="font-bold capitalize">{portal}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-black">Department</dt><dd className="font-bold text-right">{department?.name || user?.department || '—'}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-black">Department ID</dt><dd className="font-bold">{department?.id ?? user?.departmentId ?? '—'}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-black">Portal</dt><dd className="font-bold capitalize">{portal}</dd></div>
             </dl>
           </div>
 
           {page === 'Notifications' && <div className="rounded-xl border border-brand bg-white p-4">
-            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-muted">Notifications</div>
+            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Notifications</div>
             {notifications.length ? <div className="max-h-64 space-y-2 overflow-y-auto">
               {notifications.map((notice) => <div key={notice.id} className="rounded-lg border border-brand bg-white p-3">
                 <div className="text-xs font-bold">{notice.title}</div>
-                <div className="mt-1 text-[11px] leading-4 text-muted">{notice.body}</div>
-                <div className="mt-1 text-[9px] text-muted">{dateLabel(notice.createdAt)}</div>
+                <div className="mt-1 text-[11px] leading-4 text-black">{notice.body}</div>
+                <div className="mt-1 text-[9px] text-black">{dateLabel(notice.createdAt)}</div>
               </div>)}
-            </div> : <p className="py-6 text-center text-xs text-muted">You’re all caught up.</p>}
+            </div> : <p className="py-6 text-center text-xs text-black">You’re all caught up.</p>}
           </div>}
 
           {page === 'My Profile' && <div className="rounded-xl border border-brand bg-white p-4">
-            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-muted">Account details</div>
+            <div className="mb-3 text-[10px] font-extrabold uppercase tracking-[.14em] text-black">Account details</div>
             <dl className="space-y-2 text-xs">
               {[['Name', user?.name], ['Email', user?.email], ['Role', user?.roleLabel], ['Status', 'Active']].map(([label, value]) => (
-                <div key={label} className="flex justify-between gap-3"><dt className="text-muted">{label}</dt><dd className="font-bold text-right">{value || '—'}</dd></div>
+                <div key={label} className="flex justify-between gap-3"><dt className="text-black">{label}</dt><dd className="font-bold text-right">{value || '—'}</dd></div>
               ))}
             </dl>
           </div>}

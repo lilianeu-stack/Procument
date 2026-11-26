@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowDown, ArrowUp, CheckCircle2, ClipboardCheck, Eye, Inbox,
-  ListChecks, Loader2, RefreshCw, X, XCircle
+  ArrowDown, ArrowUp, Eye, Inbox, RefreshCw, X
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import DateRangeFilter from '../ui/DateRangeFilter.jsx';
@@ -38,30 +37,15 @@ const RECEIVED_STATUS_DOT = {
   Cancelled: 'bg-black/25'
 };
 
-const SUMMARY_CARDS = [
-  { key: 'total', label: 'Total Requests Received', icon: ListChecks, group: '', note: 'All forwarded requests' },
-  { key: 'new', label: 'New Requests', icon: Inbox, group: 'new', note: 'Awaiting procurement review' },
-  { key: 'underReview', label: 'Under Review', icon: ClipboardCheck, group: 'underReview', note: 'Actively being assessed' },
-  { key: 'processing', label: 'Processing', icon: Loader2, group: 'processing', note: 'Procurement actions under way' },
-  { key: 'completed', label: 'Completed', icon: CheckCircle2, group: 'completed', note: 'Fully processed requests' },
-  { key: 'rejected', label: 'Rejected', icon: XCircle, group: 'rejected', note: 'Declined by procurement' }
-];
-
 const HEADER_CLASS = 'px-3 py-3.5 text-left font-bold';
 const CELL_CLASS = 'px-3 py-3.5 align-middle';
 
-function formatCount(value) {
-  if (value === null || value === undefined || value === '') return '—';
-  const number = Number(value);
-  return Number.isFinite(number) ? number.toLocaleString('en-US') : '—';
-}
-
 function SortHeader({ label, sortKey, filters, onSort }) {
   const active = filters.sort === sortKey;
-  return <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black/50`}
+  return <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black`}
     aria-sort={active ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
     <button type="button" onClick={() => onSort(sortKey)}
-      className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus hover:text-accent-text">
+      className="inline-flex items-center gap-1.5 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus hover:text-black">
       {label}
       {active && (filters.direction === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
     </button>
@@ -85,10 +69,8 @@ export default function ReceivedRequests({
     limit: Number(query.limit) || 10
   });
   const [result, setResult] = useState(initial);
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
-  const [statsError, setStatsError] = useState('');
   const [printRows, setPrintRows] = useState([]);
   const [printing, setPrinting] = useState(false);
   const [generatedAt, setGeneratedAt] = useState(() => new Date().toISOString());
@@ -125,23 +107,10 @@ export default function ReceivedRequests({
     }
   }, [portalApi, filters, dateQuery.from, dateQuery.to, dateQuery.dateField]);
 
-  const loadStats = useCallback(async () => {
-    if (!portalApi.getReceivedRequestStats) return;
-    setStatsError('');
-    try {
-      const response = await portalApi.getReceivedRequestStats();
-      setStats(response.stats || null);
-    } catch (exception) {
-      setStatsError(exception.message || 'Statistics could not be loaded.');
-    }
-  }, [portalApi]);
-
   useEffect(() => {
     const timer = window.setTimeout(load, 200);
     return () => window.clearTimeout(timer);
   }, [load]);
-
-  useEffect(() => { loadStats(); }, [loadStats]);
 
   function updateFilter(key, value) {
     setFilters((current) => ({
@@ -149,10 +118,6 @@ export default function ReceivedRequests({
       [key]: value,
       page: key === 'page' ? value : 1
     }));
-  }
-
-  function applyCardGroup(group) {
-    setFilters((current) => ({ ...current, status: '', statusGroup: group, page: 1 }));
   }
 
   function toggleSort(key) {
@@ -171,7 +136,6 @@ export default function ReceivedRequests({
       page: 1
     }));
     onDateFilterChange?.({ preset: '', from: '', to: '', dateField: report.defaultField });
-    loadStats();
   }
 
   function openDocument(id) {
@@ -223,38 +187,16 @@ export default function ReceivedRequests({
     <section className="no-print mb-6 overflow-hidden rounded-xl border border-brand bg-white">
       <div className="border-b border-subtle bg-white px-6 py-6">
         <h1 className="display-font text-[28px] font-extrabold leading-tight tracking-[-0.02em]">Requests Received from Departments</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-black">
           Review and manage procurement requests formally forwarded by Department Supervisors.
         </p>
       </div>
     </section>
 
-    <div className="no-print mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" aria-label="Received request summary">
-      {SUMMARY_CARDS.map((card) => {
-        const active = !filters.status && filters.statusGroup === card.group;
-        return <button key={card.key} type="button" aria-pressed={active}
-          aria-label={`${card.label}: ${formatCount(stats?.[card.key])}. ${card.note}`}
-          onClick={() => applyCardGroup(card.group)}
-          className={`group flex min-h-[148px] flex-col justify-between rounded-2xl border bg-white p-5 text-left shadow-dashboard transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus hover:bg-accent-tint hover:border-accent-border ${active ? 'border-black ring-1 ring-black' : 'border-brand'}`}>
-          <div className="flex items-start justify-between gap-3">
-            <span className="text-[11px] font-bold uppercase leading-4 tracking-[.08em] text-black/60">{card.label}</span>
-            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-brand bg-white">
-              <card.icon size={16} strokeWidth={1.8} aria-hidden="true" />
-            </span>
-          </div>
-          <div className="mt-5">
-            <div className="display-font text-[32px] font-extrabold leading-none tracking-[-0.02em]">{formatCount(stats?.[card.key])}</div>
-            <div className="mt-2 min-h-8 text-[11px] leading-4 text-black/50">{card.note}</div>
-          </div>
-        </button>;
-      })}
-    </div>
-    {statsError && <p role="alert" className="no-print mb-4 rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{statsError}</p>}
-
     <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <h2 className="display-font text-sm font-extrabold">Received requests register</h2>
-        <p className="text-[11px] text-muted">
+        <p className="text-[11px] text-black">
           Print or download all {exportedTotal.toLocaleString('en-US')} {scopeLabel} — not just the current page.
         </p>
       </div>
@@ -294,7 +236,7 @@ export default function ReceivedRequests({
       className="no-print"
       title="Requests register"
       description="Only complete requests explicitly forwarded by a Department Supervisor appear here."
-      action={<button type="button" onClick={() => { load(); loadStats(); }}
+      action={<button type="button" onClick={load}
         className={secondaryButtonClass('focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand')}>
         <RefreshCw size={13} />Refresh
       </button>}>
@@ -346,7 +288,7 @@ export default function ReceivedRequests({
         <>
           <div className="overflow-hidden rounded-xl border border-brand bg-white shadow-dashboard">
             <TableScroll minWidth={1280} label="Requests register table">
-              <table className="w-full table-fixed border-collapse text-left text-[13px] text-ink">
+              <table className="w-full table-fixed border-collapse text-left text-[13px] text-black">
                 <colgroup>
                   <col style={{ width: '5%' }} />
                   <col style={{ width: '19%' }} />
@@ -359,19 +301,19 @@ export default function ReceivedRequests({
                 </colgroup>
                 <thead className="bg-white">
                   <tr className="border-b border-subtle">
-                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black/50`}>#</th>
-                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black/50`}>Request Reference</th>
-                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black/50`}>Requester</th>
+                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black`}>#</th>
+                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black`}>Request Reference</th>
+                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap text-[11px] font-extrabold uppercase tracking-[.08em] text-black`}>Requester</th>
                     <SortHeader label="Department" sortKey="department" filters={filters} onSort={toggleSort} />
                     <SortHeader label="Date Submitted" sortKey="submittedAt" filters={filters} onSort={toggleSort} />
-                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap px-2 text-center text-[10px] font-extrabold uppercase tracking-[.06em] text-black/50`}>Number of Items</th>
+                    <th scope="col" className={`${HEADER_CLASS} whitespace-nowrap px-2 text-center text-[10px] font-extrabold uppercase tracking-[.06em] text-black`}>Number of Items</th>
                     <SortHeader label="Status" sortKey="status" filters={filters} onSort={toggleSort} />
-                    <th scope="col" className={`${HEADER_CLASS} sticky right-0 z-10 whitespace-nowrap border-l border-subtle bg-white text-center text-[11px] font-extrabold uppercase tracking-[.08em] text-black/50`}>Actions</th>
+                    <th scope="col" className={`${HEADER_CLASS} sticky right-0 z-10 whitespace-nowrap border-l border-subtle bg-white text-center text-[11px] font-extrabold uppercase tracking-[.08em] text-black`}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {requisitions.map((request, index) => <tr key={request.id} className="border-b border-subtle transition-colors last:border-b-0 hover:bg-hover">
-                    <td className={`${CELL_CLASS} whitespace-nowrap text-[11px] tabular-nums text-black/40`}>
+                    <td className={`${CELL_CLASS} whitespace-nowrap text-[11px] tabular-nums text-black`}>
                       {((pagination?.page || 1) - 1) * filters.limit + index + 1}
                     </td>
                     <td className={`${CELL_CLASS} min-w-0`}>
@@ -379,7 +321,7 @@ export default function ReceivedRequests({
                         <TextLink onClick={() => openDocument(request.id)} className="truncate !font-semibold">
                           {request.reference}
                         </TextLink>
-                        <span className="block max-w-[280px] truncate text-[11px] font-normal leading-4 text-black/50"
+                        <span className="block max-w-[280px] truncate text-[11px] font-normal leading-4 text-black"
                           title={request.title || ''}>
                           {request.title || '—'}
                         </span>
@@ -387,7 +329,7 @@ export default function ReceivedRequests({
                     </td>
                     <td className={`${CELL_CLASS} truncate`} title={request.requester || ''}>{request.requester || '—'}</td>
                     <td className={`${CELL_CLASS} truncate`} title={request.department || ''}>{request.department || '—'}</td>
-                    <td className={`${CELL_CLASS} whitespace-nowrap tabular-nums text-black/70`}
+                    <td className={`${CELL_CLASS} whitespace-nowrap tabular-nums text-black`}
                       title={request.submittedAt ? dateTimeLabel(request.submittedAt) : ''}>
                       {request.submittedAt ? dateLabel(request.submittedAt) : '—'}
                     </td>
@@ -426,7 +368,7 @@ export default function ReceivedRequests({
         </>}
     </PageCard>
 
-    <footer className="no-print mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand bg-white px-4 py-3 text-[11px] text-muted">
+    <footer className="no-print mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand bg-white px-4 py-3 text-[11px] text-black">
       <span className="inline-flex items-center gap-2">
         <RefreshCw size={13} aria-hidden="true" />
         <span>Refreshed <time dateTime={lastRefreshedAt}>{dateTimeLabel(lastRefreshedAt)}</time></span>

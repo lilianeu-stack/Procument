@@ -25,13 +25,31 @@ const BRAND = {
   caption: 'PROCUREMENT & STORES'
 };
 const THEME = { brand: '#FFFFFF', surface: '#FFFFFF', ink: '#000000', border: '#000000' };
+const XLSX_INK = 'FF000000';
+const XLSX_HEADER_FILL = 'FFF2F2F2';
+const XLSX_BORDER = 'FFD9D9D9';
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+const rolesFor = (definition) => (Array.isArray(definition.role) ? definition.role : [definition.role]);
 
 const EXPORT_DEFINITIONS = {
   requisitions: {
     label: 'Purchase Requisitions',
-    role: 'admin',
+    role: ['admin', 'approver'],
+    scope: 'approver-pending',
     dateFields: { created: 'r.created_at', submitted: 'r.submitted_at', approved: 'r.supervisor_decision_at', forwarded: 'r.forwarded_at', required: 'r.required_by' },
     defaultField: 'submitted',
+    textFilters: [
+      {
+        key: 'search',
+        clause: `(r.reference LIKE ? OR r.title LIKE ? OR u.name LIKE ? OR COALESCE(d.name, '') LIKE ?
+          OR COALESCE(su.name, '') LIKE ? OR COALESCE(r.supervisor_decision, '') LIKE ? OR r.status LIKE ?)`
+      },
+      { key: 'status', clause: 'r.status = ?', exact: true }
+    ],
+    sortable: {
+      reference: 'r.reference', requester: 'u.name', department: 'COALESCE(d.name, \'\')',
+      status: 'r.status', submitted: 'COALESCE(r.submitted_at, r.created_at)'
+    },
     sql: `
       SELECT r.reference AS Reference, r.title AS Title, COALESCE(u.name, '—') AS Requester,
         COALESCE(d.name, '—') AS Department, r.status AS Status, r.priority AS Priority,
@@ -43,6 +61,7 @@ const EXPORT_DEFINITIONS = {
       FROM requisitions r
       JOIN users u ON u.id = r.requester_id
       LEFT JOIN departments d ON d.id = r.department_id
+      LEFT JOIN users su ON su.id = r.supervisor_id
       LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
       WHERE 1 = 1 {{dateFilter}}
       GROUP BY r.id ORDER BY COALESCE(r.submitted_at, r.created_at) DESC`
@@ -50,9 +69,18 @@ const EXPORT_DEFINITIONS = {
   receivedRequests: {
     label: 'Requests Received from Departments',
     role: 'procurement',
-    dateFields: { forwarded: 'r.forwarded_at', submitted: 'r.submitted_at', created: 'r.created_at', approved: 'r.supervisor_decision_at' },
+    dateFields: {
+      forwarded: 'r.forwarded_at', submitted: 'r.submitted_at', created: 'r.created_at',
+      approved: 'r.supervisor_decision_at', required: 'r.required_by'
+    },
     defaultField: 'forwarded',
     groupFilters: { statusGroup: RECEIVED_STATUS_GROUPS },
+    sortable: {
+      reference: 'r.reference', requester: 'u.name', department: 'COALESCE(d.name, \'\')',
+      submitted: 'COALESCE(r.submitted_at, r.created_at)',
+      submittedAt: 'COALESCE(r.submitted_at, r.created_at)',
+      forwarded: 'r.forwarded_at', status: 'r.status'
+    },
     textFilters: [
       { key: 'reference', clause: 'r.reference LIKE ?' },
       { key: 'requester', clause: 'u.name LIKE ?' },
@@ -86,6 +114,7 @@ const EXPORT_DEFINITIONS = {
     role: 'procurement',
     dateFields: { issued: 'f.issued_at', due: 'f.due_date', closed: 'f.closed_at', created: 'f.created_at' },
     defaultField: 'issued',
+    sortable: { reference: 'f.reference', issued: 'COALESCE(f.issued_at, f.created_at)', due: 'f.due_date', status: 'f.status' },
     textFilters: [
       { key: 'reference', clause: 'f.reference LIKE ?' },
       { key: 'requisition', clause: '(r.reference LIKE ? OR r.title LIKE ?)' },
@@ -118,6 +147,20 @@ const EXPORT_DEFINITIONS = {
     role: 'procurement',
     dateFields: { created: 'p.created_at', approved: 'p.approved_at', delivery: 'p.delivery_date' },
     defaultField: 'created',
+    groupFilters: {
+      statusGroup: {
+        'Pending approval': ['Pending approval'],
+        Approved: ['Approved', 'Partially received', 'Received']
+      }
+    },
+    textFilters: [
+      { key: 'requisitionId', clause: 'f.requisition_id = ?', exact: true },
+      { key: 'rfqId', clause: 'p.rfq_id = ?', exact: true }
+    ],
+    sortable: {
+      reference: 'p.reference', supplier: 's.name', status: 'p.status',
+      created: 'p.created_at', approved: 'p.approved_at'
+    },
     sql: `
       SELECT p.reference AS Reference, COALESCE(r.reference, '—') AS Requisition,
         COALESCE(f.reference, '—') AS RFQ, s.name AS Supplier, p.total AS Total,
@@ -150,7 +193,7 @@ const EXPORT_DEFINITIONS = {
   },
   invoices: {
     label: 'Invoices',
-    role: 'finance',
+    role: ['finance', 'procurement'],
     dateFields: { submitted: 'i.submitted_at', approved: 'i.approved_at', paid: 'i.paid_at', due: 'i.due_date', created: 'i.created_at' },
     defaultField: 'submitted',
     sql: `
@@ -166,7 +209,7 @@ const EXPORT_DEFINITIONS = {
   },
   storeRequests: {
     label: 'Store Requests',
-    role: 'storekeeper',
+    role: ['storekeeper', 'procurement'],
     dateFields: { submitted: 'sr.submitted_at', approved: 'sr.approved_at', issued: 'sr.issued_at', required: 'sr.required_by', created: 'sr.created_at' },
     defaultField: 'submitted',
     sql: `
@@ -187,9 +230,19 @@ const EXPORT_DEFINITIONS = {
   },
   inventory: {
     label: 'Inventory Catalogue',
-    role: 'storekeeper',
+    role: ['storekeeper', 'procurement'],
     dateFields: { updated: 'i.updated_at' },
     defaultField: 'updated',
+    textFilters: [
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR i.category LIKE ?)' }
+    ],
+    customFilters: {
+      lowStock: { true: 'i.quantity <= i.reorder_level', 1: 'i.quantity <= i.reorder_level' }
+    },
+    sortable: {
+      item: 'i.name', sku: 'i.sku', category: 'i.category',
+      quantity: 'i.quantity', status: 'i.quantity', updated: 'i.updated_at'
+    },
     sql: `
       SELECT i.sku AS SKU, i.name AS Item, i.category AS Category, i.unit AS Unit,
         i.quantity AS 'Quantity on hand', i.reorder_level AS 'Reorder level',
@@ -201,7 +254,7 @@ const EXPORT_DEFINITIONS = {
   },
   inventoryMovements: {
     label: 'Inventory Movements',
-    role: 'storekeeper',
+    role: ['storekeeper', 'procurement'],
     dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
     defaultField: 'movement',
     sql: `
@@ -220,6 +273,13 @@ const EXPORT_DEFINITIONS = {
     role: 'procurement',
     dateFields: { created: 's.created_at', updated: 's.updated_at' },
     defaultField: 'created',
+    textFilters: [
+      {
+        key: 'search',
+        clause: '(s.name LIKE ? OR COALESCE(s.contact_name, \'\') LIKE ? OR COALESCE(s.email, \'\') LIKE ? OR COALESCE(s.phone, \'\') LIKE ?)'
+      }
+    ],
+    sortable: { supplier: 's.name', contact: 's.contact_name', status: 's.status', created: 's.created_at' },
     sql: `
       SELECT s.name AS Supplier, COALESCE(s.contact_name, '—') AS Contact,
         COALESCE(s.email, '—') AS Email, COALESCE(s.phone, '—') AS Phone,
@@ -233,6 +293,19 @@ const EXPORT_DEFINITIONS = {
     role: 'admin',
     dateFields: { created: 'u.created_at', login: 'u.last_login_at', updated: 'u.updated_at' },
     defaultField: 'created',
+    textFilters: [
+      {
+        key: 'search',
+        clause: `(u.name LIKE ? OR u.email LIKE ? OR u.role LIKE ? OR COALESCE(d.name, '') LIKE ? OR COALESCE(u.phone, '') LIKE ?)`
+      },
+      { key: 'role', clause: 'u.role = ?', exact: true },
+      { key: 'status', clause: "LOWER(IF(u.active, 'Active', 'Inactive')) = LOWER(?)", exact: true },
+      { key: 'departmentId', clause: 'u.department_id = ?', exact: true }
+    ],
+    sortable: {
+      name: 'u.name', role: 'u.role', department: 'COALESCE(d.name, \'\')',
+      status: 'u.active', created: 'u.created_at'
+    },
     sql: `
       SELECT u.name AS Name, u.email AS Email, u.role AS Role,
         COALESCE(d.name, '—') AS Department,
@@ -251,11 +324,193 @@ const EXPORT_DEFINITIONS = {
       SELECT a.id AS ID, a.created_at AS Timestamp, COALESCE(u.name, 'System') AS Actor,
         a.action AS 'Activity type', a.entity_type AS 'Record type', a.entity_id AS 'Record ID',
         COALESCE(a.previous_status, '—') AS 'Previous status',
-        COALESCE(a.new_status, '—') AS 'New status',
-        COALESCE(a.details, '—') AS Details
+        COALESCE(a.new_status, '—') AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE 1 = 1 {{dateFilter}}
       ORDER BY a.created_at DESC, a.id DESC`
+  },
+  committeeMembers: {
+    label: 'Procurement Committee Members',
+    role: ['admin', 'procurement'],
+    dateFields: { created: 'cm.created_at' },
+    defaultField: 'created',
+    textFilters: [
+      { key: 'search', clause: '(cm.first_name LIKE ? OR cm.last_name LIKE ? OR cm.email LIKE ? OR cm.phone LIKE ?)' }
+    ],
+    sortable: { name: 'cm.last_name, cm.first_name', email: 'cm.email', created: 'cm.created_at' },
+    sql: `
+      SELECT CONCAT(cm.first_name, ' ', cm.last_name) AS Name, cm.email AS Email,
+        COALESCE(cm.phone, '—') AS Phone, cm.created_at AS 'Created at'
+      FROM procurement_committee_members cm
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY cm.last_name, cm.first_name`
+  },
+  supervisorRequesters: {
+    label: 'Department Requesters',
+    role: 'supervisor',
+    dateFields: { created: 'u.created_at' },
+    defaultField: 'created',
+    scope: 'supervisor-user',
+    textFilters: [
+      { key: 'search', clause: '(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)' },
+      { key: 'name', clause: 'u.name LIKE ?' },
+      { key: 'email', clause: 'u.email LIKE ?' },
+      { key: 'status', clause: "LOWER(IF(u.active, 'Active', 'Inactive')) = LOWER(?)", exact: true }
+    ],
+    sortable: { name: 'u.name', email: 'u.email', status: 'u.active' },
+    sql: `
+      SELECT u.name AS Requester, u.email AS Email, COALESCE(u.phone, '—') AS Phone,
+        IF(u.active, 'Active', 'Inactive') AS Status,
+        (SELECT COUNT(*) FROM requisitions r WHERE r.requester_id = u.id) AS Requests,
+        u.created_at AS 'Created at'
+      FROM users u
+      WHERE u.role = 'requestor' AND u.active = TRUE {{dateFilter}}
+      ORDER BY u.name`
+  },
+  supervisorStock: {
+    label: 'Department Stock Overview',
+    role: 'supervisor',
+    dateFields: { updated: 'i.updated_at' },
+    defaultField: 'updated',
+    scope: 'supervisor-stock',
+    textFilters: [
+      { key: 'search', clause: '(i.sku LIKE ? OR i.name LIKE ? OR i.category LIKE ?)' },
+      { key: 'category', clause: 'i.category = ?', exact: true },
+      {
+        key: 'status',
+        clause: `(CASE WHEN i.quantity = 0 THEN 'Out of Stock'
+          WHEN i.quantity <= i.reorder_level THEN 'Low Stock' ELSE 'Available' END) = ?`,
+        exact: true
+      }
+    ],
+    sortable: { item: 'i.name', category: 'i.category', quantity: 'i.quantity', status: 'i.quantity' },
+    sql: `
+      SELECT i.sku AS SKU, i.name AS Item, i.category AS Category, i.unit AS Unit,
+        i.quantity AS 'Quantity on hand', i.reorder_level AS 'Reorder level',
+        i.unit_cost AS 'Unit cost',
+        (CASE WHEN i.quantity = 0 THEN 'Out of Stock'
+          WHEN i.quantity <= i.reorder_level THEN 'Low Stock' ELSE 'Available' END) AS Status,
+        i.updated_at AS 'Updated at'
+      FROM items i
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY i.category, i.name`
+  },
+  stockkeeperRequesters: {
+    label: 'Requesters',
+    role: 'storekeeper',
+    dateFields: { created: 'u.created_at' },
+    defaultField: 'created',
+    textFilters: [
+      { key: 'search', clause: '(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ? OR d.name LIKE ?)' },
+      { key: 'name', clause: 'u.name LIKE ?' },
+      { key: 'email', clause: 'u.email LIKE ?' },
+      { key: 'department', clause: 'd.name LIKE ?' },
+      { key: 'departmentId', clause: 'u.department_id = ?', exact: true },
+      { key: 'status', clause: "LOWER(IF(u.active, 'Active', 'Inactive')) = LOWER(?)", exact: true }
+    ],
+    sortable: {
+      name: 'u.name', department: 'COALESCE(d.name, \'\')', status: 'u.active',
+      issues: 'COALESCE(issueSummary.stockIssues, 0)'
+    },
+    sql: `
+      SELECT u.name AS Requester, u.email AS Email, COALESCE(u.phone, '—') AS Phone,
+        COALESCE(d.name, '—') AS Department, IF(u.active, 'Active', 'Inactive') AS Status,
+        COALESCE(issueSummary.stockIssues, 0) AS 'Stock issues', u.created_at AS 'Created at'
+      FROM users u LEFT JOIN departments d ON d.id = u.department_id
+      LEFT JOIN (
+        SELECT requester_id, COUNT(*) AS stockIssues FROM inventory_movements
+        WHERE movement_type = 'Issue' AND direction = 'Out' GROUP BY requester_id
+      ) issueSummary ON issueSummary.requester_id = u.id
+      WHERE u.role = 'requestor' {{dateFilter}}
+      ORDER BY u.name`
+  },
+  stockkeeperItems: {
+    label: 'Stock Register',
+    role: 'storekeeper',
+    dateFields: { updated: 'i.updated_at' },
+    defaultField: 'updated',
+    textFilters: [
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR i.category LIKE ? OR COALESCE(d.name, \'\') LIKE ?)' }
+    ],
+    sortable: {
+      item: 'i.name', category: 'i.category', location: 'COALESCE(d.name, \'\')',
+      balance: 'i.quantity', status: 'i.quantity'
+    },
+    sql: `
+      SELECT i.sku AS SKU, i.name AS Item, i.category AS Category,
+        COALESCE(d.name, 'General storage') AS Location, i.unit AS Unit,
+        i.quantity AS 'Current balance', i.reorder_level AS 'Minimum level',
+        i.unit_cost AS 'Unit cost', i.updated_at AS 'Updated at',
+        CASE WHEN i.quantity = 0 THEN 'Out of stock'
+          WHEN i.quantity <= i.reorder_level THEN 'Low stock' ELSE 'Available' END AS Status
+      FROM items i LEFT JOIN departments d ON d.id = i.department_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY i.name`
+  },
+  stockkeeperTransactions: {
+    label: 'Stock Transactions',
+    role: 'storekeeper',
+    dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
+    defaultField: 'movement',
+    textFilters: [
+      { key: 'itemId', clause: 'm.item_id = ?', exact: true },
+      { key: 'requesterId', clause: 'm.requester_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR m.reference_no LIKE ? OR m.source LIKE ?)' }
+    ],
+    customFilters: {
+      issueOut: { true: "m.movement_type = 'Issue' AND m.direction = 'Out'" }
+    },
+    sortable: { date: 'COALESCE(m.movement_at, m.created_at)', item: 'i.name', type: 'm.movement_type' },
+    sql: `
+      SELECT i.sku AS SKU, i.name AS Item,
+        COALESCE(m.movement_at, m.created_at) AS 'Transaction date',
+        COALESCE(m.reference_no, m.source, '—') AS Reference,
+        COALESCE(m.description, m.source, '—') AS Description,
+        m.movement_type AS Type, m.quantity AS Quantity,
+        m.balance_after AS Balance, COALESCE(u.name, '—') AS 'Updated by'
+      FROM inventory_movements m
+      JOIN items i ON i.id = m.item_id
+      LEFT JOIN users u ON u.id = m.user_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY COALESCE(m.movement_at, m.created_at) DESC, m.id DESC`
+  },
+  stockkeeperBinCard: {
+    label: 'Bin Card',
+    role: 'storekeeper',
+    dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
+    defaultField: 'movement',
+    scope: 'bin-card-item',
+    sql: `
+      SELECT \`Item code\`, Item, Unit, Reference, Description,
+        \`Transaction date\`, \`Stock in\`, \`Stock out\`, Balance, \`Updated by\`
+      FROM (
+        SELECT * FROM (
+          SELECT i.sku AS 'Item code', i.name AS Item, i.unit AS Unit,
+            'Opening balance' AS Reference, 'Opening balance' AS Description,
+            '' AS 'Transaction date', '' AS 'Stock in', '' AS 'Stock out',
+            (i.quantity - COALESCE(totals.netMovement, 0)) AS Balance,
+            '' AS 'Updated by', 0 AS sortOrder
+          FROM items i
+          LEFT JOIN (
+            SELECT item_id, SUM(CASE WHEN direction = 'In' THEN quantity ELSE -quantity END) AS netMovement
+            FROM inventory_movements GROUP BY item_id
+          ) totals ON totals.item_id = i.id
+          WHERE i.id = ?
+          UNION ALL
+          SELECT i.sku, i.name, i.unit,
+            COALESCE(m.reference_no, m.source, '—'),
+            COALESCE(m.description, m.source, m.movement_type, '—'),
+            COALESCE(m.movement_at, m.created_at),
+            CASE WHEN m.direction = 'In' THEN m.quantity ELSE '' END,
+            CASE WHEN m.direction = 'Out' THEN m.quantity ELSE '' END,
+            m.balance_after, COALESCE(u.name, '—'), 1
+          FROM inventory_movements m
+          JOIN items i ON i.id = m.item_id
+          LEFT JOIN users u ON u.id = m.user_id
+          WHERE 1 = 1 {{dateFilter}} {{scopeFilter}}
+        ) ledger
+        ORDER BY sortOrder, \`Transaction date\`, Reference
+      ) ordered`
   }
 };
 
@@ -295,7 +550,7 @@ const RECORD_QUERIES = {
     activitySql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM requisition_activity a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.requisition_id = ? ORDER BY a.created_at, a.id`
   },
@@ -320,7 +575,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'store_request' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -349,7 +604,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'rfq' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -394,7 +649,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'purchase_order' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -425,7 +680,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'supplier_pricing_response' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -456,7 +711,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'purchase_order_pricing_request' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -477,7 +732,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'goods_receipt' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   },
@@ -503,7 +758,7 @@ const RECORD_QUERIES = {
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
-        a.new_status AS 'New status', a.details AS Details
+        a.new_status AS 'New status'
       FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
       WHERE a.entity_type = 'invoice' AND a.entity_id = ? ORDER BY a.created_at, a.id`
   }
@@ -991,8 +1246,8 @@ export async function renderRecordXlsx(record) {
     if (!rows.length) return;
     const sheet = workbook.addWorksheet(name.slice(0, 31));
     const columns = Object.keys(rows[0]);
-    sheet.addRow(columns).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3656A5' } };
+    sheet.addRow(columns).font = { bold: true, color: { argb: XLSX_INK } };
+    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_HEADER_FILL } };
     rows.forEach((data) => sheet.addRow(columns.map((column) => displayValue(data[column]))));
     columns.forEach((column, index) => {
       sheet.getColumn(index + 1).width = Math.min(45, Math.max(16, column.length + 4));
@@ -1045,6 +1300,11 @@ const PORTAL_EXPORT_FIELDS = {
   forwarded: 'r.forwarded_at',
   required: 'r.required_by'
 };
+const PORTAL_SORTABLE = {
+  reference: 'r.reference', title: 'r.title', requester: 'u.name',
+  department: 'COALESCE(d.name, \'\')', status: 'r.status',
+  submitted: 'COALESCE(r.submitted_at, r.created_at)', approved: 'r.supervisor_decision_at'
+};
 
 const APPROVED_EXPORT_STATUSES = [REQUISITION_STATUS.APPROVED, REQUISITION_STATUS.FORWARDED];
 const EXPORT_STATUS_ALIASES = {
@@ -1073,7 +1333,7 @@ function normalizeExportStatuses(value) {
     if (['approved group', 'approved-group', 'approved forwarded', 'approved or forwarded'].includes(lower)) {
       return APPROVED_EXPORT_STATUSES;
     }
-    return [EXPORT_STATUS_ALIASES[lower] || status];
+    return [hasOwn(EXPORT_STATUS_ALIASES, lower) ? EXPORT_STATUS_ALIASES[lower] : status];
   });
   return [...new Set(values.filter(Boolean))];
 }
@@ -1147,10 +1407,16 @@ function exportFormatValue(value, column, report = {}) {
   if (value instanceof Date || isDateValue(value)) return formatReportDateTime(value, report);
   if (isMoneyColumn(column) && isNumericValue(value)) {
     const precision = Number.isInteger(report.precision) ? report.precision : 2;
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency', currency: report.currency || 'USD',
-      minimumFractionDigits: precision, maximumFractionDigits: precision
-    }).format(Number(value));
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency', currency: report.currency || 'USD',
+        minimumFractionDigits: precision, maximumFractionDigits: precision
+      }).format(Number(value));
+    } catch {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2
+      }).format(Number(value));
+    }
   }
   return displayValue(value);
 }
@@ -1198,6 +1464,11 @@ export async function fetchPortalRequisitions(query, user) {
     params.push(account.department_id);
   }
 
+  const requesterId = Number(query.requesterId);
+  if (Number.isInteger(requesterId) && requesterId > 0) {
+    where.push('r.requester_id = ?');
+    params.push(requesterId);
+  }
   const rawStatus = String(query.status || '').trim().slice(0, 200);
   const statuses = normalizeExportStatuses(rawStatus);
   if (statuses.length === 1) {
@@ -1231,8 +1502,7 @@ export async function fetchPortalRequisitions(query, user) {
   const dateClause = dateFilterClause(filter, PORTAL_EXPORT_FIELDS, params);
   if (dateClause) where.push(dateClause.replace(/^ AND \(|\)$/g, ''));
 
-  const [rows] = await pool.query(
-    `SELECT r.reference AS Reference, r.title AS Title,
+  let sql = `SELECT r.reference AS Reference, r.title AS Title,
       COALESCE(d.name, '—') AS Department, u.name AS Requester,
       COALESCE(su.name, '—') AS Supervisor, r.status AS Status,
       r.priority AS Priority, COALESCE(r.required_by, '—') AS 'Required by',
@@ -1246,13 +1516,17 @@ export async function fetchPortalRequisitions(query, user) {
      LEFT JOIN users su ON su.id = r.supervisor_id
      LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
      WHERE ${where.join(' AND ')}
-     GROUP BY r.id ORDER BY COALESCE(r.submitted_at, r.created_at) DESC, r.id DESC`,
-    params
-  );
+     GROUP BY r.id ORDER BY COALESCE(r.submitted_at, r.created_at) DESC, r.id DESC`;
+  sql = applySort(sql, { sortable: PORTAL_SORTABLE }, query);
+  const [rows] = await pool.query(sql, params);
 
   const appliedFilters = [];
+  if (Number.isInteger(requesterId) && requesterId > 0) appliedFilters.push(`Requester ID: ${requesterId}`);
   if (statuses.length) appliedFilters.push(`Status: ${statuses.join(', ')}`);
   if (query.search) appliedFilters.push(`Search: ${String(query.search).trim()}`);
+  if (PORTAL_SORTABLE[String(query.sort || '').trim()]) {
+    appliedFilters.push(`Sort: ${query.sort} ${String(query.direction || '').toLowerCase() === 'asc' ? 'ascending' : 'descending'}`);
+  }
   if (filter.active) {
     appliedFilters.push(`${filter.field}: ${query.from || 'beginning'} to ${query.to || 'today'}`);
   }
@@ -1269,7 +1543,7 @@ export async function fetchPortalRequisitions(query, user) {
 
 export function availableExports() {
   const reports = Object.entries(EXPORT_DEFINITIONS).map(([key, definition]) => ({
-    key, label: definition.label, role: definition.role,
+    key, label: definition.label, role: rolesFor(definition),
     dateFields: Object.keys(definition.dateFields)
   }));
   reports.push({
@@ -1288,7 +1562,46 @@ export function canExport(user, key) {
   const definition = EXPORT_DEFINITIONS[key];
   if (!definition) return false;
   if (identity.role === 'admin') return true;
-  return identity.portal === 'admin' && identity.role === definition.role;
+  return rolesFor(definition).includes(identity.role);
+}
+
+async function reportScope(definition, query, user) {
+  if (!definition.scope) return { clause: '', params: [] };
+  const identity = withPortalIdentity(user);
+  if (definition.scope === 'bin-card-item') {
+    const itemId = Number(query.itemId);
+    if (!Number.isInteger(itemId) || itemId < 1) {
+      const error = new Error('Select a valid inventory item before exporting its Bin Card.');
+      error.status = 400;
+      throw error;
+    }
+    return { clause: 'AND m.item_id = ?', params: [itemId, itemId] };
+  }
+  if (definition.scope === 'approver-pending') {
+    return identity.role === 'approver'
+      ? { clause: "AND r.status = 'Pending Supervisor Approval'", params: [] }
+      : { clause: '', params: [] };
+  }
+  if (identity.role !== 'supervisor') return { clause: '', params: [] };
+  const [[account]] = await pool.execute('SELECT department_id FROM users WHERE id = ?', [user.id]);
+  if (!account?.department_id) {
+    const error = new Error('Your account is not assigned to a Department.');
+    error.status = 403;
+    throw error;
+  }
+  return {
+    clause: definition.scope === 'supervisor-stock'
+      ? 'AND (i.department_id = ? OR i.department_id IS NULL)'
+      : 'AND u.department_id = ?',
+    params: [account.department_id]
+  };
+}
+
+function applySort(sql, definition, query) {
+  const sort = String(query.sort || '').trim();
+  if (!definition.sortable || !hasOwn(definition.sortable, sort)) return sql;
+  const direction = String(query.direction || '').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  return sql.replace(/\bORDER\s+BY\b[\s\S]*$/i, `ORDER BY ${definition.sortable[sort]} ${direction}`);
 }
 
 function displayValue(value) {
@@ -1311,16 +1624,42 @@ function textFilterClause(definition, query, params) {
   }
   for (const [param, groups] of Object.entries(definition.groupFilters || {})) {
     const group = String(query[param] || '').trim();
+    if (!hasOwn(groups, group)) continue;
     const statuses = groups[group];
-    if (!statuses) continue;
     clauses.push(`r.status IN (${statuses.map(() => '?').join(',')})`);
     params.push(...statuses);
   }
   for (const [param, clausesByValue] of Object.entries(definition.customFilters || {})) {
-    const clause = clausesByValue[String(query[param] || '').trim()];
-    if (clause) clauses.push(clause);
+    const value = String(query[param] || '').trim();
+    if (!hasOwn(clausesByValue, value)) continue;
+    clauses.push(clausesByValue[value]);
   }
   return clauses.length ? ` AND ${clauses.join(' AND ')}` : '';
+}
+
+function describeFilters(definition, query, filter) {
+  const items = [];
+  if (filter.active) {
+    items.push(`${filter.field}: ${query.from || 'beginning'} to ${query.to || 'today'}`);
+  }
+  for (const entry of definition.textFilters || []) {
+    const raw = String(query[entry.key] || '').trim();
+    if (raw) items.push(`${entry.key}: ${raw}`);
+  }
+  for (const [param, groups] of Object.entries(definition.groupFilters || {})) {
+    const group = String(query[param] || '').trim();
+    if (hasOwn(groups, group)) items.push(`${param}: ${group}`);
+  }
+  for (const [param, values] of Object.entries(definition.customFilters || {})) {
+    const value = String(query[param] || '').trim();
+    if (hasOwn(values, value)) items.push(`${param}: ${query[param]}`);
+  }
+  if (definition.scope === 'bin-card-item' && query.itemId) items.push(`Item ID: ${query.itemId}`);
+  const sort = String(query.sort || '').trim();
+  if (definition.sortable && hasOwn(definition.sortable, sort)) {
+    items.push(`Sort: ${sort} ${String(query.direction || '').toLowerCase() === 'asc' ? 'ascending' : 'descending'}`);
+  }
+  return items.join(' · ') || 'None';
 }
 
 export async function fetchExportRows(key, query, user) {
@@ -1349,19 +1688,36 @@ export async function fetchExportRows(key, query, user) {
     error.status = 400;
     throw error;
   }
-  const params = [];
-  const clause = dateFilterClause(filter, definition.dateFields, params)
-    + textFilterClause(definition, query, params);
-  const sql = definition.sql.replace('{{dateFilter}}', clause);
+  const dateParams = [];
+  const textParams = [];
+  const dateClause = dateFilterClause(filter, definition.dateFields, dateParams);
+  const textClause = textFilterClause(definition, query, textParams);
+  const scope = await reportScope(definition, query, user);
+
+  // The Bin Card ledger binds the item before its date filter, then binds the
+  // same item again in the transaction branch. Other reports append their
+  // scope predicates at the shared filter placeholder.
+  const isBinCard = definition.scope === 'bin-card-item';
+  const params = isBinCard
+    ? [scope.params[0], ...dateParams, ...textParams, scope.params[1]]
+    : [...dateParams, ...textParams, ...scope.params];
+  const clause = dateClause + textClause + (isBinCard ? '' : scope.clause);
+  const sql = applySort(
+    definition.sql
+      .replace('{{dateFilter}}', clause)
+      .replace('{{scopeFilter}}', scope.clause),
+    definition,
+    query
+  );
   const [rows] = await pool.query(sql, params);
+
   return {
     label: definition.label,
     rows,
     dateField: filter.field,
     from: query.from || '',
     to: query.to || '',
-    filters: filter.active
-      ? `${filter.field}: ${query.from || 'beginning'} to ${query.to || 'today'}` : 'None',
+    filters: describeFilters(definition, query, filter),
     ...await reportFormatting()
   };
 }
@@ -1437,15 +1793,15 @@ export async function renderPdf(report, reference = '') {
       drawHeader();
       doc.font('Helvetica').fontSize(8).fillColor(THEME.ink);
     }
+    if (rowIndex % 2 === 1) {
+      doc.save().rect(40, y, usableWidth, rowHeight).fill(THEME.surface).restore();
+    }
     let x = 40;
     for (const [index, column] of columns.entries()) {
       doc.text(exportFormatValue(row[column], column, report), x + 5, y + 7, { width: widths[index] - 10, height: 12, ellipsis: true, lineBreak: false });
       x += widths[index];
     }
     y += rowHeight;
-    if (rowIndex % 2 === 1) {
-      doc.rect(40, y - rowHeight, usableWidth, rowHeight).fill(THEME.surface);
-    }
   });
 
   const pages = doc.bufferedPageRange();
@@ -1464,7 +1820,7 @@ export async function renderXlsx(report, reference = '') {
   workbook.title = report.label;
   workbook.created = new Date();
   const sheet = workbook.addWorksheet(report.label.slice(0, 31), {
-    views: [{ state: 'frozen', ySplit: 6 }]
+    views: [{ state: 'frozen', ySplit: 8 }]
   });
 
   const logo = logoPath();
@@ -1475,23 +1831,23 @@ export async function renderXlsx(report, reference = '') {
     } catch { /* Branding image is optional if the source asset is unavailable. */ }
   }
   sheet.getCell('B2').value = BRAND.organization;
-  sheet.getCell('B2').font = { bold: true, size: 16, color: { argb: 'FF172638' } };
+  sheet.getCell('B2').font = { bold: true, size: 16, color: { argb: XLSX_INK } };
   sheet.getCell('B3').value = BRAND.title;
-  sheet.getCell('B3').font = { bold: true, size: 11, color: { argb: 'FF3656A5' } };
+  sheet.getCell('B3').font = { bold: true, size: 11, color: { argb: XLSX_INK } };
   sheet.getCell('B4').value = BRAND.caption;
-  sheet.getCell('B4').font = { size: 9, color: { argb: 'FF64748B' } };
+  sheet.getCell('B4').font = { size: 9, color: { argb: XLSX_INK } };
   sheet.getCell('B5').value = reference ? `${report.label}: ${reference}` : report.label;
   sheet.getCell('B5').font = { bold: true, size: 11 };
   sheet.getCell('B6').value = `Applied filters: ${report.filters || 'None'} · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
-  sheet.getCell('B6').font = { size: 9, color: { argb: 'FF64748B' } };
+  sheet.getCell('B6').font = { size: 9, color: { argb: XLSX_INK } };
 
   const columns = report.rows.length ? Object.keys(report.rows[0]) : ['No records found'];
   const headerRow = sheet.getRow(8);
   columns.forEach((column, index) => {
     const cell = headerRow.getCell(index + 1);
     cell.value = column;
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3656A5' } };
+    cell.font = { bold: true, color: { argb: XLSX_INK } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_HEADER_FILL } };
     cell.alignment = { vertical: 'middle' };
     sheet.getColumn(index + 1).width = Math.min(42, Math.max(14, column.length + 4));
   });
@@ -1503,13 +1859,16 @@ export async function renderXlsx(report, reference = '') {
     sheetRow.eachCell((cell) => {
       const column = columns[cell.col - 1];
       cell.alignment = { vertical: 'top', wrapText: true };
-      cell.border = { bottom: { style: 'hair', color: { argb: 'FFE2E8F0' } } };
+      cell.border = { bottom: { style: 'hair', color: { argb: XLSX_BORDER } } };
       const format = xlsxNumberFormat(column, report);
       if (format && typeof cell.value === 'number') cell.numFmt = format;
       else if (cell.value instanceof Date) cell.numFmt = 'dd/mm/yyyy hh:mm';
     });
   });
-  sheet.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: columns.length } };
+  sheet.autoFilter = {
+    from: { row: 8, column: 1 },
+    to: { row: Math.max(8, 8 + report.rows.length), column: columns.length }
+  };
   sheet.headerFooter.oddFooter = '&CPage &P of &N';
   return workbook.xlsx.writeBuffer();
 }

@@ -98,15 +98,38 @@ test('Send to Committee previews recipient content and stores one decision per l
   assert.doesNotMatch(app, /CommitteeDecisionPage/);
 });
 
-test('procurement overview keeps only the metric cards', () => {
+test('procurement overview groups every live metric into its business section', () => {
   const overview = source('../src/pages/OverviewPage.jsx');
-  assert.match(overview, /Total requisitions/);
-  assert.match(overview, /Awaiting approval/);
-  assert.match(overview, /Items in catalogue/);
-  assert.match(overview, /Active suppliers/);
+  const app = source('../src/App.jsx');
+  for (const label of [
+    'Total Purchase Requests', 'Pending Requests', 'Approved Requests', 'Rejected Requests',
+    'Total Requests Received', 'New Requests', 'Under Review', 'Processing', 'Completed', 'Rejected',
+    'Total Purchase Orders', 'Pending Purchase Orders', 'Approved Purchase Orders',
+    'Total RFQs', 'Draft RFQs', 'Sent RFQs', 'Evaluating RFQs', 'Awarded RFQs', 'Closed RFQs',
+    'Total Suppliers', 'Total Stock Items', 'Low Stock Items'
+  ]) assert.match(overview, new RegExp(label));
+  assert.match(app, /api\('\/procurement\/received-requests\/stats'\)/);
+  assert.match(app, /api\('\/rfqs\/stats'\)/);
+  assert.match(overview, /grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4/);
+  assert.match(overview, /min-h-\[112px\].*sm:min-h-\[120px\]/);
   assert.doesNotMatch(overview, /Recent requisitions/);
   assert.doesNotMatch(overview, /Inventory health/);
   assert.doesNotMatch(overview, /Keep every request moving/);
+});
+
+test('received-request and RFQ registers keep their tools without top summary cards', () => {
+  const received = source('../src/components/portals/ReceivedRequests.jsx');
+  const rfqs = source('../src/pages/RfqsPage.jsx');
+  assert.doesNotMatch(received, /SUMMARY_CARDS|aria-label="Received request summary"/);
+  assert.match(received, /Received requests register/);
+  assert.match(received, /<DateRangeFilter/);
+  assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="pdf"/);
+  assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="xlsx"/);
+  assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="csv"/);
+  assert.doesNotMatch(rfqs, /SUMMARY_CARDS|currentStats/);
+  assert.match(rfqs, /Create RFQ/);
+  assert.match(rfqs, /Filter by response/);
+  assert.match(rfqs, /RFQ status/);
 });
 
 test('add supplier form does not ask for a contact person', () => {

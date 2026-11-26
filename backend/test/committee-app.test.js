@@ -1121,7 +1121,10 @@ test('exports are scoped by portal role and require authentication', async () =>
   assert.ok(!adminKeys.includes('portalRequisitions'), 'Administrators use the global requisitions export instead.');
 
   const supervisorExports = await request('/exports/available', { user: users.supervisorA });
-  assert.deepEqual(supervisorExports.data.exports.map((item) => item.key), ['portalRequisitions']);
+  assert.deepEqual(
+    supervisorExports.data.exports.map((item) => item.key).sort(),
+    ['portalRequisitions', 'supervisorRequesters', 'supervisorStock']
+  );
   const requesterExports = await request('/exports/available', { user: users.requesterA });
   assert.deepEqual(requesterExports.data.exports.map((item) => item.key), ['portalRequisitions']);
   const procurementExports = await request('/exports/available', { user: users.procurement });

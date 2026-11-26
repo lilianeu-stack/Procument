@@ -9,6 +9,7 @@ import {
   primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
+import { roleLabel } from '../../utils/access.js';
 import { SUPERVISOR_PENDING } from '../../utils/status.js';
 
 const REPORT = {
@@ -34,7 +35,7 @@ const DECISION_BUTTONS = [
   { value: 'Reject', icon: XCircle, className: 'border-brand bg-white text-black' }
 ];
 
-export default function SupervisorApprovals({ portalApi, query = {}, navigate, initial = null }) {
+export default function SupervisorApprovals({ portalApi, query = {}, navigate, initial = null, user = {} }) {
   const PAGE = 'Approvals';
   const [pending, setPending] = useState(initial?.requisitions || []);
   const [decided, setDecided] = useState([]);
@@ -143,12 +144,19 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
     const next = { ...query }; delete next.request; navigate(PAGE, next);
   }
 
+  const reportUser = user?.name
+    ? { name: user.name, roleLabel: roleLabel(user.role), department: user.department }
+    : null;
+
   return <>
     <ReportToolbar
       report={REPORT}
       dateFilter={reportFilter}
       onDateFilterChange={updateReportFilter}
       params={{ hasDecision: 1, status: reportFilter.status }}
+      user={reportUser}
+      department={user.department || ''}
+      scope="supervisor decisions"
     />
     <PageHeader
       eyebrow="Your Department review queue"
@@ -175,7 +183,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
         <EmptyState title="Nothing awaiting approval" description="New submissions from your Department will appear here." /> :
         <TableScroll minWidth={1000}>
           <table className="w-full text-left text-xs">
-            <thead className="bg-white text-[10px] uppercase text-muted">
+            <thead className="bg-white text-[10px] uppercase text-black">
               <tr>{['Reference', 'Requester', 'Title', 'Submitted', 'Estimated cost', 'Priority', 'Status', 'Decision', ''].map((heading) =>
                 <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
             </thead>
@@ -198,7 +206,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
                       <button type="button" disabled={busy} onClick={() => confirm(request)} className={primaryButtonClass('px-2.5 py-1.5')}>
                         {busy ? 'Saving…' : `Confirm ${decision}`}
                       </button>
-                      <button type="button" onClick={() => { setActiveId(null); setRowError(''); }} className="text-[11px] font-bold text-muted hover:text-black">Cancel</button>
+                      <button type="button" onClick={() => { setActiveId(null); setRowError(''); }} className="text-[11px] font-bold text-black hover:text-black">Cancel</button>
                     </div>
                     {rowError && <p role="alert" className="text-[11px] text-black">{rowError}</p>}
                   </div> : <div className="flex items-center gap-1.5">
@@ -207,7 +215,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
                       className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold ${className}`}>
                       <Icon size={12} />{value === 'Request Information' ? 'Info' : value === 'Approve' ? 'Approve' : 'Reject'}
                     </button>)}
-                    <button type="button" onClick={() => navigate(PAGE, { ...query, request: request.id })} title="View full request" className="ml-1 text-muted hover:text-black"><Eye size={14} /></button>
+                    <button type="button" onClick={() => navigate(PAGE, { ...query, request: request.id })} title="View full request" className="ml-1 text-black hover:text-black"><Eye size={14} /></button>
                   </div>}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3" />
@@ -220,7 +228,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
     <div className="mt-5"><PageCard title="Recently decided" description="Your latest approval decisions for this Department.">
       {decided.length ? <TableScroll minWidth={780}>
         <table className="w-full text-left text-xs">
-          <thead className="bg-white text-[10px] uppercase text-muted">
+          <thead className="bg-white text-[10px] uppercase text-black">
             <tr>{['Reference', 'Requester', 'Decision', 'Note', 'Decided at', 'Status', ''].map((heading) =>
               <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
           </thead>
@@ -231,7 +239,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
               </td>
               <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
               <td className="whitespace-nowrap px-4 py-3 font-bold">{request.supervisorDecision}</td>
-              <td className="max-w-[220px] truncate px-4 py-3 text-muted">{request.supervisorNotes || '—'}</td>
+              <td className="max-w-[220px] truncate px-4 py-3 text-black">{request.supervisorNotes || '—'}</td>
               <td className="whitespace-nowrap px-4 py-3">{dateTimeLabel(request.supervisorDecisionAt)}</td>
               <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={request.status} /></td>
               <td className="whitespace-nowrap px-4 py-3">

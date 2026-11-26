@@ -10,8 +10,8 @@ export default function SharedUserProfile({ user, portal = 'supervisor', classNa
   return <div className={`flex items-center gap-3 ${className}`}>
     <UserAvatar user={user} size="h-10 w-10" textSize="text-xs" className="border border-brand" fallbackClassName={tones[portal] || tones.supervisor} />
     <div className="min-w-0">
-      <div className="truncate text-xs font-bold text-ink">{user?.name || 'User'}</div>
-      <div className="mt-0.5 truncate text-[10px] text-muted">
+      <div className="truncate text-xs font-bold text-black">{user?.name || 'User'}</div>
+      <div className="mt-0.5 truncate text-[10px] text-black">
         {roleLabel(user?.role)} · {user?.department || 'No department assigned'}
       </div>
     </div>
