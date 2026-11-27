@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
@@ -38,6 +39,13 @@ async function imageSignature() {
     create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
   }).png().toBuffer();
   return `data:image/png;base64,${buffer.toString('base64')}`;
+}
+
+async function webpSignature() {
+  const buffer = await sharp({
+    create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
+  }).webp().toBuffer();
+  return `data:image/webp;base64,${buffer.toString('base64')}`;
 }
 
 async function request(path, { method = 'GET', user, body } = {}) {
@@ -2096,6 +2104,16 @@ function tokenFrom(link) {
   return /token=([^&\s"']+)/.exec(link)?.[1] || '';
 }
 
+function attachmentBuffer(raw, filename) {
+  const escaped = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = String(raw || '').match(new RegExp(
+    `Content-Disposition: attachment; filename="?${escaped}"?[\\s\\S]*?\\r?\\n\\r?\\n([\\s\\S]*?)\\r?\\n--`,
+    'i'
+  ));
+  assert.ok(match, `Email should attach ${filename}`);
+  return Buffer.from(match[1].replace(/\s/g, ''), 'base64');
+}
+
 test('purchase orders stay linked to their original department request', async () => {
   const stamp = Date.now();
   const department = await createDepartment(`QA PO Dept ${stamp}`);
@@ -2361,6 +2379,40 @@ test('official requisition and purchase order PDFs render the supplied form temp
   assert.equal(approvedOrderPdf.response.status, 200);
   assert.ok(pdfText(approvedOrderPdf.buffer).includes(admin.name),
     'Approved By must show the approver after approval');
+});
+
+test('official purchase order PDF embeds large WebP signatures with the supplied design palette', async () => {
+  const context = await createAwardedPurchaseOrder('PDFWEBP');
+  const signature = await webpSignature();
+  await pool.execute(
+    'UPDATE purchase_orders SET prepared_signature = ?, approved_signature = ? WHERE id = ?',
+    [signature, signature, context.purchaseOrder.id]
+  );
+
+  const pdf = await binaryRequest(
+    `/exports/record/purchaseOrder/${context.purchaseOrder.id}/pdf`, users.procurement
+  );
+  assert.equal(pdf.response.status, 200);
+  assertPdfIncludes(pdf.buffer, 'PURCHASE ORDER', 'Hope Haven', 'Prepared By:', 'Approved By:');
+
+  const raw = pdf.buffer.toString('latin1');
+  const imageCount = (raw.match(/\/Subtype\s*\/Image/g) || []).length;
+  assert.ok(imageCount >= 3,
+    `the logo and both WebP signatures should be embedded (found ${imageCount} image objects)`);
+  assert.match(raw, /0\.070\d*\s+0\.239\d*\s+0\.227\d*\s+(?:scn|SCN)/,
+    'the masthead and accents should use the deep teal from the design reference');
+  assert.match(raw, /0\.956\d*\s+0\.968\d*\s+0\.964\d*\s+(?:scn|SCN)/,
+    'the page should use the light gray outer background from the design reference');
+  assert.equal((raw.match(/\/Type\s*\/Page\b/g) || []).length, 1,
+    'the enlarged signatures must still fit on one page');
+
+  const renderer = readFileSync(new URL('../src/services/exports.js', import.meta.url), 'utf8');
+  assert.match(renderer, /fit: \[width - 24, 52\]/,
+    'both signatures should be embedded at the enlarged size');
+  const purchaseRenderer = renderer.slice(renderer.indexOf('async function drawPurchaseOrderDocument'));
+  assert.match(purchaseRenderer, /emptyRows: 0/,
+    'the purchase order must not add blank item rows below the real items');
+  assert.doesNotMatch(purchaseRenderer, /emptyRows: Math\.max\(0, 7 - itemRows\.length\)/);
 });
 
 test('supplier RFQ email delivery, secure links, statuses and retry use the real SMTP path', async () => {
@@ -3193,6 +3245,14 @@ test('supplier pricing requests keep original purchase orders, isolate private l
       assert.equal(Number(document.response.items[0].unitPrice), Number(originalLine.unitPrice));
       assert.equal(Number(document.response.items[0].lineTotal),
         Math.round((Number(originalLine.unitPrice) * Number(originalLine.quantity) + Number.EPSILON) * 100) / 100);
+      // The exact purchase order created by Procurement is part of the link.
+      assert.equal(document.purchaseOrder.reference, original.reference);
+      assert.equal(document.purchaseOrder.supplier, original.supplier);
+      assert.equal(document.purchaseOrder.status, original.status);
+      assert.ok('preparedSignature' in document.purchaseOrder);
+      assert.ok('approvedSignature' in document.purchaseOrder);
+      assert.equal(document.purchaseOrder.items.length, 1);
+      assert.equal(Number(document.purchaseOrder.items[0].unitPrice), Number(originalLine.unitPrice));
       assert.equal(document.items.length, 1);
       assert.equal(document.items[0].description, 'Official form line');
       assert.equal(Number(document.items[0].quantity), Number(originalLine.quantity));
@@ -3437,6 +3497,67 @@ test('supplier pricing requests keep original purchase orders, isolate private l
         id: item.id, name: item.itemName, unitPrice: item.unitPrice, lineTotal: item.lineTotal
       }))
     );
+  } finally {
+    if (relay) await relay.close();
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('sending a purchase order to its supplier attaches the official signed PO PDF', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let relay = null;
+
+  try {
+    relay = await startTestSmtp();
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(relay.port);
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.po.email.${Date.now()}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = 'qa.po.sender@hopehaven.test';
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+
+    const context = await createAwardedPurchaseOrder('POEMAIL');
+    const purchaseOrder = context.purchaseOrder;
+    const endpoint = `/purchase-orders/${purchaseOrder.id}/send-to-supplier`;
+    // Creating the awarded RFQ may send its own supplier invitation. Only count
+    // messages emitted by the direct purchase-order action below.
+    const messageCountBeforeSend = relay.messages.length;
+
+    const [signatures] = await pool.query(
+      'SELECT prepared_signature, approved_signature FROM purchase_orders WHERE id = ?',
+      [purchaseOrder.id]
+    );
+    await pool.execute('UPDATE purchase_orders SET prepared_signature = NULL WHERE id = ?', [purchaseOrder.id]);
+    const missingSignature = await request(endpoint, { method: 'POST', user: users.procurement, body: {} });
+    assert.equal(missingSignature.response.status, 409, missingSignature.data.message);
+    assert.match(missingSignature.data.message, /official signatures/i);
+    await pool.execute('UPDATE purchase_orders SET prepared_signature = ? WHERE id = ?', [signatures[0].prepared_signature, purchaseOrder.id]);
+
+    const sent = await request(endpoint, { method: 'POST', user: users.procurement, body: {} });
+    assert.equal(sent.response.status, 200, sent.data.message);
+    assert.equal(sent.data.recipientEmail, context.supplier.email.toLowerCase());
+    assert.equal(sent.data.emailDelivery.accepted, 1);
+    assert.equal(relay.messages.length - messageCountBeforeSend, 1, 'only the official PO should be emailed');
+
+    const raw = relay.messages[relay.messages.length - 1];
+    const filename = `${purchaseOrder.reference}.pdf`;
+    assert.ok(
+      raw.includes(`filename=${filename}`) || raw.includes(`filename="${filename}"`),
+      `email should name the attachment ${filename}`
+    );
+    const pdf = attachmentBuffer(raw, filename);
+    assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    assertPdfIncludes(pdf, 'PURCHASE ORDER', purchaseOrder.reference, context.supplier.name, 'Prepared By:', 'Approved By:');
+    assert.ok(pdf.includes(Buffer.from('/Subtype /Image')), 'the official PDF should embed the uploaded signatures');
+    assert.ok(!raw.includes('/supplier-pricing/quote?token='));
+    assert.ok(!raw.includes('/#/supplier/RFQ?token='));
   } finally {
     if (relay) await relay.close();
     for (const name of envNames) {

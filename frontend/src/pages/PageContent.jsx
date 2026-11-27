@@ -158,7 +158,7 @@ export default function PageContent({
       onLoadQuotes={actions.onLoadQuotes}
       onSendForApproval={actions.sendPurchaseOrderForApproval}
       onRevokeApproval={actions.revokePurchaseOrderApproval}
-      sendPurchaseOrderToSuppliers={actions.sendPurchaseOrderToSuppliers} />;
+      sendPurchaseOrderToSupplier={actions.sendPurchaseOrderToSupplier} />;
   } else if (page === 'Goods receipts') {
     content = <GoodsReceiptsPage receipts={data.goodsReceipts} />;
   } else if (page === 'Invoices') {

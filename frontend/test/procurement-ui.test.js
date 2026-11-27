@@ -29,7 +29,7 @@ test('Purchase orders surfaces Procurement-recommended suppliers with clickable 
   assert.match(app, /onLoadCommitteeRecommendations: \(\) => api\('\/committee-recommendations'\)/);
   assert.match(pageContent, /suppliers=\{data\.suppliers\}/);
   assert.match(pageContent, /onLoadCommitteeRecommendations=\{actions\.onLoadCommitteeRecommendations\}/);
-  assert.match(pageContent, /sendPurchaseOrderToSuppliers=\{actions\.sendPurchaseOrderToSuppliers\}/);
+  assert.match(pageContent, /sendPurchaseOrderToSupplier=\{actions\.sendPurchaseOrderToSupplier\}/);
   assert.match(purchaseOrders, /Recommended suppliers/);
   assert.match(purchaseOrders, /click a supplier to see the quotation, reason and response/);
   assert.match(purchaseOrders, /View recommended supplier \$\{entry\.recommendedSupplier\}/);
@@ -77,6 +77,30 @@ test('official purchase order follows the supplied template and requires image s
   assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
 });
 
+test('official purchase order document uses the supplied design palette with large signatures', () => {
+  const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
+  const css = source('../src/index.css');
+
+  assert.match(documentSource, /src="\/procurement-logo\.png"/);
+  assert.match(documentSource, /<strong>HOPE HAVEN<\/strong>/);
+  assert.match(css, /--pims-document-page:\s*#F4F7F6/);
+  assert.match(css, /--pims-document-teal:\s*#123D3A/);
+  assert.match(css, /\.official-header \{[\s\S]*?background:\s*var\(--pims-document-teal\)/);
+  assert.match(css, /\.official-header,[\s\S]*?\.official-header \* \{[\s\S]*?color:\s*#FFFFFF\s*!important/);
+
+  const signatureRule = /\.official-po-signature-image img \{([^}]*)\}/.exec(css);
+  assert.ok(signatureRule, 'the purchase-order signature image rule should exist');
+  assert.match(signatureRule[1], /height:\s*56px/);
+
+  const fieldRule = /\.official-po-field \{([^}]*)\}/.exec(css);
+  assert.ok(fieldRule, 'the purchase-order field rule should exist');
+  assert.doesNotMatch(fieldRule[1], /border-bottom/);
+
+  const valueRule = /\.official-po-field \.official-value \{([^}]*)\}/.exec(css);
+  assert.ok(valueRule, 'the purchase-order value rule should exist');
+  assert.doesNotMatch(valueRule[1], /border-bottom/);
+});
+
 test('create purchase order uses supplier-entered quotation lines without a financial summary', () => {
   const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
   const pageContent = source('../src/pages/PageContent.jsx');
@@ -87,6 +111,26 @@ test('create purchase order uses supplier-entered quotation lines without a fina
   assert.ok(purchaseOrders.includes('initialItems={poSelection?.items || linkedRecommendation?.items || []}'));
   assert.ok(purchaseOrders.includes('onLoadQuotes={onLoadQuotes}'));
   assert.ok(pageContent.includes('onLoadQuotes={actions.onLoadQuotes}'));
+});
+
+test('purchase order supplier action emails the saved signed PO directly', () => {
+  const app = source('../src/App.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
+  const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
+
+  assert.ok(app.includes('sendPurchaseOrderToSupplier: (id, form = {}) => mutate(`/purchase-orders/${id}/send-to-supplier`, form)'));
+  assert.ok(pageContent.includes('sendPurchaseOrderToSupplier={actions.sendPurchaseOrderToSupplier}'));
+  assert.ok(!pageContent.includes('sendPurchaseOrderToSuppliers={'));
+  assert.ok(purchaseOrders.includes('async function sendOfficialPurchaseOrder(order, payload = {})'));
+  assert.ok(purchaseOrders.includes('await sendPurchaseOrderToSupplier(id, payload)'));
+  assert.ok(purchaseOrders.includes('async function emailPurchaseOrder(order)'));
+  assert.ok(purchaseOrders.includes('onClick={() => { void emailPurchaseOrder(order); }}'));
+  assert.ok(purchaseOrders.includes('onClick={() => { void emailPurchaseOrder(detail); }}'));
+  assert.ok(purchaseOrders.includes('Save & Send PO'));
+
+  // The RFQ/pricing-form invitation modal is no longer part of this action.
+  assert.ok(!purchaseOrders.includes('SupplierSelectionModal'));
+  assert.ok(!purchaseOrders.includes('__sendToSuppliers'));
 });
 
 test('supplier pricing request blocks a past submission deadline before sending', () => {
@@ -116,6 +160,16 @@ test('supplier pricing form opens with prefilled prices and only a comments inpu
   ]) {
     assert.ok(!pricing.includes(removed), `supplier pricing form still renders ${removed}`);
   }
+});
+
+test('supplier pricing form shows the created official purchase order with signatures', () => {
+  const pricing = source('../src/components/portals/SupplierPricingPage.jsx');
+
+  assert.match(pricing, /import PurchaseOrderDocument from '..\/documents\/PurchaseOrderDocument\.jsx';/);
+  assert.match(pricing, /Official purchase order · \$\{request\.purchaseOrder\.reference/);
+  assert.match(pricing, /<PurchaseOrderDocument order=\{request\.purchaseOrder\} \/>/);
+  assert.match(pricing, /The purchase order created by Procurement, including the official signatures\./);
+  assert.doesNotMatch(pricing, /<PageCard title="Supplier Information"/);
 });
 
 test('supplier pricing form loads once and allows a single submission', () => {
@@ -239,7 +293,13 @@ test('received-request and RFQ registers keep their tools without top summary ca
   const rfqs = source('../src/pages/RfqsPage.jsx');
   assert.doesNotMatch(received, /SUMMARY_CARDS|aria-label="Received request summary"/);
   assert.match(received, /Received requests register/);
-  assert.match(received, /<DateRangeFilter/);
+  assert.match(received, /<DateRangeFilter\s+fromToOnly/);
+  assert.match(received, /label="Search request"/);
+  assert.match(received, /placeholder="Search request"/);
+  assert.doesNotMatch(received, /Search requester/);
+  assert.doesNotMatch(received, /Search department/);
+  assert.doesNotMatch(received, /All statuses/);
+  assert.doesNotMatch(received, /Submission \/ forwarding/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="pdf"/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="xlsx"/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="csv"/);
@@ -339,4 +399,63 @@ test('Procurement can resend a working response link for an already-sent form', 
   assert.match(documentView, /localhost link\. Resend a form/);
   assert.match(app, /getRequisitionForms: \(id\) => api\(`\/email\/requisitions\/\$\{id\}\/forms`\)/);
   assert.match(app, /resendRequisitionForm: \(id, threadId\) => mutate\(`\/email\/requisitions\/\$\{id\}\/forms\/\$\{threadId\}\/resend`, \{\}\)/);
+});
+
+test('forwarded request can send requested items to another user', () => {
+  const documentView = source('../src/components/portals/ProcurementDocumentView.jsx');
+  const app = source('../src/App.jsx');
+
+  assert.match(documentView, /const \[sendOpen, setSendOpen\] = useState\(false\)/);
+  assert.match(documentView, /function openSendModal\(\)/);
+  assert.match(documentView, /function sendToAnotherUser\(event\)/);
+  assert.match(documentView, /<Send size=\{14\} \/>Send to another user/);
+  assert.match(documentView, /<Modal title="Send requested items to another user"/);
+  assert.match(documentView, /portalApi\.sendRequisitionEmail\(id, \{/);
+  assert.match(documentView, /to: recipientEmail/);
+  assert.match(documentView, /recipientPhone: recipientPhone\.trim\(\)/);
+  assert.match(documentView, /message: senderNote\.trim\(\)/);
+  assert.match(documentView, /\{busy \? 'Sending…' : 'Send by email'\}/);
+  assert.match(documentView, /Sent response forms \(\$\{sentForms\.length\}\)/);
+  assert.match(app, /sendRequisitionEmail: \(id, payload\) => api\(`\/email\/requisitions\/\$\{id\}\/send`, \{ method: 'POST', body: JSON\.stringify\(payload\) \}\)/);
+});
+
+test('page containers fill the available width and stay left aligned everywhere', () => {
+  const shells = [
+    '../src/components/layout/AppLayout.jsx',
+    '../src/components/portals/PortalLayout.jsx'
+  ];
+  for (const path of shells) {
+    const shell = source(path);
+    assert.match(shell, /className="w-full max-w-none px-5 pb-10 pt-7 sm:px-8"/);
+    assert.doesNotMatch(shell, /mx-auto max-w-\[1440px\]/);
+  }
+
+  const publicPages = [
+    '../src/components/portals/CommitteeReviewPage.jsx',
+    '../src/components/portals/PurchaseOrderApprovalPage.jsx',
+    '../src/components/portals/RequestResponsePage.jsx',
+    '../src/components/portals/SupplierRfqPage.jsx',
+    '../src/components/portals/SupplierPricingPage.jsx'
+  ];
+  for (const path of publicPages) {
+    const page = source(path);
+    assert.match(page, /w-full max-w-none/);
+    assert.doesNotMatch(page, /mx-auto[^"]*max-w-(?:5|6)xl/);
+  }
+});
+
+test('date range filter can show only From and To inputs', () => {
+  const dateFilter = source('../src/components/ui/DateRangeFilter.jsx');
+
+  assert.match(dateFilter, /fromToOnly = false/);
+  const fromToOnlyStart = dateFilter.indexOf('if (fromToOnly)');
+  const compactStart = dateFilter.indexOf('if (compact)');
+  assert.ok(fromToOnlyStart > -1);
+  assert.ok(compactStart > fromToOnlyStart);
+  const simpleBlock = dateFilter.slice(fromToOnlyStart, compactStart);
+
+  assert.match(simpleBlock, /label="From"/);
+  assert.match(simpleBlock, /label="To"/);
+  assert.doesNotMatch(simpleBlock, /Preset/);
+  assert.doesNotMatch(simpleBlock, /Clear dates/);
 });

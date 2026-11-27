@@ -93,6 +93,30 @@ export function buildSupplierPricingEmail({
   };
 }
 
+// The supplier receives the actual official purchase order, not the RFQ or the
+// pricing form. The PDF is attached by the caller; this builder only formats
+// the message body.
+export function buildPurchaseOrderEmail({
+  supplierName, recipientEmail, reference, purchaseOrderReference,
+  total, deliveryDate, message = ''
+}) {
+  const lines = [
+    `Dear ${supplierName || 'Supplier'},`,
+    `Please find the official purchase order ${purchaseOrderReference}${reference && reference !== purchaseOrderReference ? ` (${reference})` : ''} attached.`,
+    deliveryDate ? `Expected delivery date: ${deliveryDate}.` : '',
+    total ? `Purchase order total: ${total}.` : '',
+    message ? `Message from Procurement: ${message}` : '',
+    'The attached signed document is the authoritative purchase order. Please keep it for your records.'
+  ].filter(Boolean);
+  return {
+    to: recipientEmail,
+    subject: `Official purchase order ${purchaseOrderReference} · Hope Haven`,
+    text: `${lines.join('\n\n')}\n`,
+    html: wrapHtml(`Official purchase order ${purchaseOrderReference}`, lines, null,
+      'This purchase order was sent to the registered supplier contact. Please keep the attached signed document for your records.')
+  };
+}
+
 export function procurementWorkspaceLink() {
   return appUrl('/#/admin/Procurement%20Processing');
 }
@@ -220,12 +244,20 @@ export async function sendEmail(message, override = null) {
 
   try {
     const transporter = getTransporter(override);
+    const attachments = (Array.isArray(message.attachments) ? message.attachments : [])
+      .filter((attachment) => Buffer.isBuffer(attachment?.content) && attachment.content.length)
+      .map((attachment) => ({
+        filename: String(attachment.filename || 'document').replace(/[\r\n]/g, '_'),
+        contentType: String(attachment.contentType || 'application/octet-stream').replace(/[\r\n]/g, ''),
+        content: attachment.content
+      }));
     const info = await transporter.sendMail({
       from: { name: config.fromName, address: config.from },
       to: recipient,
       subject: message.subject,
       text: message.text,
-      html: message.html
+      html: message.html,
+      ...(attachments.length ? { attachments } : {})
     });
     const accepted = Array.isArray(info?.accepted) ? info.accepted.map(normalizeEmail) : [];
     const rejected = Array.isArray(info?.rejected) ? info.rejected.map(normalizeEmail) : [];

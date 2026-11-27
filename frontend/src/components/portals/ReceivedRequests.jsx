@@ -16,16 +16,6 @@ import { dateLabel, dateTimeLabel } from '../../utils/format.js';
 import { RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 import { dateQueryForFilter, reportForPage } from '../../utils/reportFields.js';
 
-const STATUS_OPTIONS = [
-  'Forwarded to Procurement',
-  'Under Procurement Review',
-  'Procurement Approved',
-  'Procurement Rejected',
-  'Processing',
-  'Completed',
-  'Cancelled'
-];
-
 // Labels carry the exact status while dots keep each row easy to scan.
 const RECEIVED_STATUS_DOT = {
   'Forwarded to Procurement': 'bg-black/45',
@@ -58,11 +48,6 @@ export default function ReceivedRequests({
   const report = reportForPage(RECEIVED_REQUESTS_PAGE);
   const [filters, setFilters] = useState({
     reference: query.reference || '',
-    requester: query.requester || '',
-    departmentQuery: query.departmentQuery || '',
-    department: query.department || '',
-    status: query.status || '',
-    statusGroup: query.statusGroup || '',
     sort: query.sort || 'submittedAt',
     direction: query.direction || 'desc',
     page: Number(query.page) || 1,
@@ -84,11 +69,6 @@ export default function ReceivedRequests({
   };
   const listParams = {
     reference: filters.reference,
-    requester: filters.requester,
-    departmentQuery: filters.departmentQuery,
-    department: filters.department,
-    status: filters.status,
-    statusGroup: filters.statusGroup,
     sort: filters.sort,
     direction: filters.direction,
     ...dateParams
@@ -130,11 +110,7 @@ export default function ReceivedRequests({
   }
 
   function clearFilters() {
-    setFilters((current) => ({
-      ...current,
-      reference: '', requester: '', departmentQuery: '', department: '', status: '', statusGroup: '',
-      page: 1
-    }));
+    setFilters((current) => ({ ...current, reference: '', page: 1 }));
     onDateFilterChange?.({ preset: '', from: '', to: '', dateField: report.defaultField });
   }
 
@@ -176,9 +152,7 @@ export default function ReceivedRequests({
 
   const requisitions = result?.requisitions || [];
   const pagination = result?.pagination;
-  const dateFieldChanged = Boolean(dateFilter?.dateField && dateFilter.dateField !== report.defaultField);
-  const hasFilters = Boolean(filters.reference || filters.requester || filters.departmentQuery || filters.department
-    || filters.status || filters.statusGroup || dateFilter?.preset || dateQuery.from || dateQuery.to || dateFieldChanged);
+  const hasFilters = Boolean(filters.reference || dateQuery.from || dateQuery.to);
   const scopeLabel = hasFilters ? 'records matching the active filters' : 'forwarded requests';
   const exportedTotal = pagination?.total ?? 0;
 
@@ -241,36 +215,21 @@ export default function ReceivedRequests({
         <RefreshCw size={13} />Refresh
       </button>}>
       <div className="border-b border-subtle bg-white px-4 py-4 sm:px-5">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <FilterField label="Request reference" className="w-full">
+        <div className="grid gap-3 md:grid-cols-3">
+          <FilterField label="Search request" className="w-full">
             <input value={filters.reference} onChange={(event) => updateFilter('reference', event.target.value)}
-              placeholder="e.g. PR-2026-ABC123" aria-label="Request reference" className="field" />
+              placeholder="Search request" aria-label="Search request" className="field" />
           </FilterField>
-          <FilterField label="Requester name" className="w-full">
-            <input value={filters.requester} onChange={(event) => updateFilter('requester', event.target.value)}
-              placeholder="Search requester" aria-label="Requester name" className="field" />
-          </FilterField>
-          <FilterField label="Department" className="w-full">
-            <input value={filters.departmentQuery} onChange={(event) => updateFilter('departmentQuery', event.target.value)}
-              placeholder="Search department" aria-label="Department" className="field" />
-          </FilterField>
-          <FilterField label="Request status" className="w-full">
-            <select value={filters.status} onChange={(event) => setFilters((current) => ({
-              ...current, status: event.target.value, statusGroup: '', page: 1
-            }))} aria-label="Request status" className="field">
-              <option value="">All statuses</option>
-              {STATUS_OPTIONS.map((status) => <option key={status} value={status}>{status}</option>)}
-            </select>
-          </FilterField>
-        </div>
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-3 border-t border-subtle pt-4">
           <DateRangeFilter
+            fromToOnly
             value={{ ...dateFilter, dateField: dateFilter.dateField || report.defaultField }}
             fields={report.fields}
             onChange={onDateFilterChange}
-            label="Submission / forwarding"
-            className="w-full"
+            label="Date"
+            className="w-full md:col-span-2"
           />
+        </div>
+        <div className="mt-3 flex justify-end">
           <button type="button" onClick={clearFilters} disabled={!hasFilters}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40">
             <X size={12} />Clear Filters

@@ -87,7 +87,7 @@ export default function CommitteeReviewPage({ token }) {
 
   return <div className="min-h-screen bg-canvas">
     <header className="border-b bg-white">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
+      <div className="flex w-full max-w-none flex-wrap items-center justify-between gap-3 px-4 py-4">
         <BrandLogo />
         <span className="rounded-full bg-emerald-50 px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">
           Committee decision form
@@ -95,7 +95,7 @@ export default function CommitteeReviewPage({ token }) {
       </div>
     </header>
 
-    <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
+    <main className="w-full max-w-none space-y-5 px-4 py-8">
       {loading && <div className="rounded-xl border bg-white p-8 text-center text-sm text-black">Opening your decision form…</div>}
       {!loading && error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm font-semibold text-black">{error}</div>}
       {!loading && notice && <div role="status" className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-black">

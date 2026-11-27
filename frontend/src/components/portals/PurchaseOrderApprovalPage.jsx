@@ -103,12 +103,12 @@ export default function PurchaseOrderApprovalPage({ token }) {
 
   return <div className="min-h-screen bg-canvas">
     <header className="no-print border-b bg-white">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
+      <div className="flex w-full max-w-none flex-wrap items-center justify-between gap-3 px-4 py-4">
         <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Secure approval link</span>
       </div>
     </header>
 
-    <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
+    <main className="w-full max-w-none space-y-5 px-4 py-8">
       {loading && <div className="flex items-center justify-center gap-2 rounded-xl border bg-white p-10 text-sm text-black"><Loader2 size={16} className="animate-spin" />Opening secure purchase order…</div>}
       {!loading && error && <div className="flex items-start gap-2 rounded-xl border border-brand bg-white p-5 text-sm font-semibold text-black"><AlertCircle size={17} className="mt-0.5 shrink-0" />{error}</div>}
       {!loading && notice && <div className="flex items-start gap-2 rounded-xl border border-brand bg-white p-5 text-sm font-semibold text-black"><CheckCircle2 size={17} className="mt-0.5 shrink-0" />{notice}</div>}

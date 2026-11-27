@@ -22,7 +22,7 @@ export default function AppLayout({ user, page, counts = {}, notifications, mobi
       onNavigate={onNavigate} onClose={onCloseMenu} onToggleCollapse={() => setSidebarCollapsed((value) => !value)} />
     <main className={`min-h-screen ${sidebarCollapsed ? 'lg:pl-20' : 'lg:pl-[248px]'}`}>
       <Topbar page={page} user={user} notifications={notifications} open={notificationsOpen} onToggle={onToggleNotifications} onMenu={onOpenMenu} onNotification={onNotification} onLogout={onLogout} onProfile={() => onNavigate(PROFILE_PAGE)} />
-      <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
+      <div className="w-full max-w-none px-5 pb-10 pt-7 sm:px-8">
         {page !== RECEIVED_REQUESTS_PAGE && page !== 'RFQs' && (isOverview ? <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
             <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] font-bold uppercase tracking-[.14em] text-black">

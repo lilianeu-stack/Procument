@@ -253,6 +253,38 @@ async function gmailRequest(path, token, options = {}) {
   return data;
 }
 
+function base64Lines(buffer) {
+  return buffer.toString('base64').match(/.{1,76}/g)?.join('\r\n') || '';
+}
+
+function attachmentFilename(value) {
+  return String(value || 'document').replace(/[\r\n"\\]/g, '_').slice(0, 120);
+}
+
+function normalizedAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  const attachments = value.map((attachment) => {
+    const content = Buffer.isBuffer(attachment?.content) ? attachment.content : null;
+    if (!content?.length) {
+      const error = new Error('An email attachment is empty.');
+      error.code = 'INVALID_EMAIL_MESSAGE';
+      throw error;
+    }
+    return {
+      filename: attachmentFilename(attachment.filename),
+      contentType: String(attachment.contentType || 'application/octet-stream').replace(/[\r\n]/g, ''),
+      content
+    };
+  });
+  const totalBytes = attachments.reduce((sum, attachment) => sum + attachment.content.length, 0);
+  if (totalBytes > 20 * 1024 * 1024) {
+    const error = new Error('Email attachments must be 20 MB or smaller.');
+    error.code = 'INVALID_EMAIL_MESSAGE';
+    throw error;
+  }
+  return attachments;
+}
+
 export async function sendGoogleEmail(message) {
   const config = requireGoogleConfig();
   const to = normalizeEmail(message.to);
@@ -285,35 +317,84 @@ export async function sendGoogleEmail(message) {
     'MIME-Version: 1.0'
   ];
   const html = String(message.html || '').trim();
+  const attachments = normalizedAttachments(message.attachments);
   let rawMessage;
 
-  if (html) {
-    const boundary = `----HopeHavenBoundary${randomBytes(12).toString('hex')}`;
-    rawMessage = [
-      ...headers,
-      `Content-Type: multipart/alternative; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/plain; charset=UTF-8',
-      'Content-Transfer-Encoding: base64',
-      '',
-      Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64'),
-      `--${boundary}`,
-      'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: base64',
-      '',
-      Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64'),
-      `--${boundary}--`,
-      ''
-    ].join('\r\n');
+  if (!attachments.length) {
+    if (html) {
+      const boundary = `----HopeHavenBoundary${randomBytes(12).toString('hex')}`;
+      rawMessage = [
+        ...headers,
+        `Content-Type: multipart/alternative; boundary="${boundary}"`,
+        '',
+        `--${boundary}`,
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
+        `--${boundary}`,
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8')),
+        `--${boundary}--`,
+        ''
+      ].join('\r\n');
+    } else {
+      rawMessage = [
+        ...headers,
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
+        ''
+      ].join('\r\n');
+    }
   } else {
-    rawMessage = [
+    const mixedBoundary = `----HopeHavenMixed${randomBytes(12).toString('hex')}`;
+    const alternativeBoundary = `----HopeHavenAlternative${randomBytes(12).toString('hex')}`;
+    const parts = [
       ...headers,
-      'Content-Type: text/plain; charset=UTF-8',
-      'Content-Transfer-Encoding: base64',
+      `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
       '',
-      Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64')
-    ].join('\r\n');
+      `--${mixedBoundary}`
+    ];
+    if (html) {
+      parts.push(
+        `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+        '',
+        `--${alternativeBoundary}`,
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
+        `--${alternativeBoundary}`,
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8')),
+        `--${alternativeBoundary}--`
+      );
+    } else {
+      parts.push(
+        'Content-Type: text/plain; charset=UTF-8',
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8'))
+      );
+    }
+    for (const attachment of attachments) {
+      parts.push(
+        `--${mixedBoundary}`,
+        `Content-Type: ${attachment.contentType}; name="${attachment.filename}"`,
+        `Content-Disposition: attachment; filename="${attachment.filename}"`,
+        'Content-Transfer-Encoding: base64',
+        '',
+        base64Lines(attachment.content)
+      );
+    }
+    parts.push(`--${mixedBoundary}--`, '');
+    rawMessage = parts.join('\r\n');
   }
   const result = await gmailRequest('/messages/send', await accessToken('gmail.send'), {
     method: 'POST',

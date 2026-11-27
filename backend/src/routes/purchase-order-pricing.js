@@ -3,7 +3,8 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { allowRoles } from '../middleware/auth.js';
-import { buildSupplierPricingEmail, sendEmail } from '../services/email.js';
+import { buildPurchaseOrderEmail, buildSupplierPricingEmail, sendEmail } from '../services/email.js';
+import { fetchRecord, renderRecordPdf } from '../services/exports.js';
 import { getSettings } from '../services/settings.js';
 import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
 import { businessDate } from '../utils/dates.js';
@@ -212,6 +213,16 @@ async function responseItems(executor, responseId) {
   return rows;
 }
 
+async function purchaseOrderDocumentItems(executor, purchaseOrderId) {
+  const [rows] = await executor.execute(
+    `SELECT id, item_name AS itemName, description, quantity, unit,
+        unit_price AS unitPrice, line_total AS lineTotal
+       FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id`,
+    [purchaseOrderId]
+  );
+  return rows;
+}
+
 async function findResponseByToken(token, executor = pool, lock = false) {
   if (!isValidSupplierPricingTokenFormat(token)) return null;
   const [rows] = await executor.execute(
@@ -222,10 +233,23 @@ async function findResponseByToken(token, executor = pool, lock = false) {
        req.requisition_id AS requisitionId,
        p.reference AS purchaseOrderReference, p.type AS purchaseOrderType,
        DATE_FORMAT(p.created_at, '%Y-%m-%d') AS purchaseOrderDate,
-       DATE_FORMAT(p.delivery_date, '%Y-%m-%d') AS deliveryDate
+       DATE_FORMAT(p.delivery_date, '%Y-%m-%d') AS deliveryDate,
+       p.status AS purchaseOrderStatus,
+       s.name AS purchaseOrderSupplier,
+       p.supplier_contact AS purchaseOrderSupplierContact,
+       p.supplier_address AS purchaseOrderSupplierAddress,
+       p.subtotal AS purchaseOrderSubtotal, p.vat_rate AS purchaseOrderVatRate,
+       p.vat_amount AS purchaseOrderVatAmount, p.total AS purchaseOrderTotal,
+       p.amount_in_words AS purchaseOrderAmountInWords,
+       p.prepared_signature AS preparedSignature, p.approved_signature AS approvedSignature,
+       DATE_FORMAT(p.approved_at, '%Y-%m-%d') AS approvedAt,
+       creator.name AS preparedBy, reviewer.name AS approvedBy
       FROM purchase_order_pricing_responses r
       JOIN purchase_order_pricing_requests req ON req.id = r.request_id
       JOIN purchase_orders p ON p.id = r.purchase_order_id
+      JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN users creator ON creator.id = p.created_by
+       LEFT JOIN users reviewer ON reviewer.id = p.reviewed_by
      WHERE r.token_hash = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
     [hashSupplierPricingToken(token)]
   );
@@ -354,6 +378,65 @@ async function persistQuotation(connection, response, lines, totals, body, statu
 // ---------------------------------------------------------------------------
 // Protected Procurement / Committee APIs
 // ---------------------------------------------------------------------------
+
+protectedRouter.post('/purchase-orders/:id/send-to-supplier', allowRoles(...procurementRoles), async (req, res, next) => {
+  try {
+    const purchaseOrderId = positiveId(req.params.id);
+    if (!purchaseOrderId) throw httpError(400, 'Invalid purchase order identifier.');
+    const message = boundedText(req.body.message, 1000, 'Message');
+
+    // Reuse the exact record and renderer behind Download official PDF, so the
+    // supplier receives the created purchase order with its signatures rather
+    // than an RFQ or a pricing form.
+    const record = await fetchRecord('purchaseOrder', purchaseOrderId, req.user);
+    const supplierEmail = normalizeEmail(record.row.supplierEmail);
+    if (!validEmail(supplierEmail)) {
+      throw httpError(400, 'The registered supplier does not have a valid email address.');
+    }
+    if (!record.row.preparedSignature || !record.row.approvedSignature) {
+      throw httpError(409, 'Upload both official signatures before sending the purchase order.');
+    }
+
+    const pdf = await renderRecordPdf(record);
+    const filename = `${String(record.reference || `PO-${purchaseOrderId}`).replace(/[^A-Za-z0-9._-]+/g, '_')}.pdf`;
+    const email = buildPurchaseOrderEmail({
+      supplierName: record.row.supplier,
+      recipientEmail: supplierEmail,
+      reference: record.reference,
+      purchaseOrderReference: record.reference,
+      total: record.row.total ? `RWF ${Number(record.row.total).toFixed(2)}` : '',
+      deliveryDate: record.row.deliveryDate ? String(record.row.deliveryDate).slice(0, 10) : '',
+      message
+    });
+    const result = await sendEmail({
+      ...email,
+      attachments: [{ filename, contentType: 'application/pdf', content: pdf }]
+    });
+    await writeAudit(pool, req.user.id, 'purchase_order_email_sent', 'purchase_order', purchaseOrderId, {
+      recipientEmail: supplierEmail,
+      reference: record.reference,
+      emailStatus: result.status,
+      reason: result.reason || null
+    });
+
+    if (!result.ok) {
+      return res.status(result.reason === 'not_configured' ? 503 : 502).json({
+        message: result.error?.message || 'Email provider could not accept the purchase order.',
+        emailDelivery: { total: 1, accepted: 0, failed: result.reason === 'not_configured' ? 0 : 1, skipped: result.reason === 'not_configured' ? 1 : 0 }
+      });
+    }
+    return res.json({
+      message: `Official purchase order ${record.reference} sent to ${supplierEmail}.`,
+      status: result.status,
+      recipientEmail: supplierEmail,
+      providerMessageId: result.providerMessageId || null,
+      emailDelivery: { total: 1, accepted: 1, failed: 0, skipped: 0 }
+    });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    return next(error);
+  }
+});
 
 protectedRouter.post('/purchase-orders/:id/send-to-suppliers', allowRoles(...procurementRoles), async (req, res, next) => {
   let connection;
@@ -1003,6 +1086,7 @@ publicRouter.get('/supplier-pricing/:token', async (req, res, next) => {
     }
 
     const rows = await responseItems(pool, response.id);
+    const officialItems = await purchaseOrderDocumentItems(pool, response.purchaseOrderId);
     const isSubmitted = response.status === 'Submitted';
     return res.json({
       pricingRequest: {
@@ -1034,6 +1118,32 @@ publicRouter.get('/supplier-pricing/:token', async (req, res, next) => {
         status: response.status,
         isSubmitted,
         expiresAt: response.expiresAt
+      },
+      // The exact purchase order created by Procurement, including the
+      // Prepared by and Approved by signatures, is shown to the supplier.
+      purchaseOrder: {
+        id: response.purchaseOrderId,
+        reference: response.purchaseOrderReference,
+        type: response.purchaseOrderType,
+        status: response.purchaseOrderStatus,
+        createdAt: response.purchaseOrderDate,
+        date: response.purchaseOrderDate,
+        deliveryDate: response.deliveryDate,
+        supplier: response.purchaseOrderSupplier,
+        supplierContact: response.purchaseOrderSupplierContact,
+        supplierAddress: response.purchaseOrderSupplierAddress,
+        paymentTerms: '100%',
+        subtotal: Number(response.purchaseOrderSubtotal) || 0,
+        vatRate: Number(response.purchaseOrderVatRate) || 0,
+        vatAmount: Number(response.purchaseOrderVatAmount) || 0,
+        total: Number(response.purchaseOrderTotal) || 0,
+        amountInWords: response.purchaseOrderAmountInWords,
+        preparedBy: response.preparedBy,
+        preparedSignature: response.preparedSignature,
+        approvedBy: response.approvedBy,
+        approvedAt: response.approvedAt,
+        approvedSignature: response.approvedSignature,
+        items: officialItems
       },
       // Only the line snapshots and the supplier's own quoted figures are sent.
       items: rows.map((row) => ({

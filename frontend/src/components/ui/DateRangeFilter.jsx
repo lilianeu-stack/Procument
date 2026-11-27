@@ -120,7 +120,7 @@ function DateField({ label, value, onChange, min, max, invalid }) {
 }
 
 export default function DateRangeFilter({
-  value = {}, fields = [], onChange, label = 'Date', className = '', compact = false
+  value = {}, fields = [], onChange, label = 'Date', className = '', compact = false, fromToOnly = false
 }) {
   const current = {
     preset: value.preset || '',
@@ -139,6 +139,10 @@ export default function DateRangeFilter({
 
   function update(patch) {
     onChange?.({ ...current, ...patch });
+  }
+
+  function updateSimple(patch) {
+    onChange?.({ ...current, ...patch, preset: '' });
   }
 
   function choosePreset(key) {
@@ -196,6 +200,28 @@ export default function DateRangeFilter({
       {error || rangeLabel}
     </span>
   </div>;
+
+  if (fromToOnly) {
+    return <div className={`no-print min-w-0 ${className}`}>
+      <div className="grid grid-cols-2 gap-2">
+        <DateField
+          label="From"
+          value={current.from}
+          onChange={(from) => updateSimple({ from })}
+          max={current.to || undefined}
+          invalid={Boolean(error)}
+        />
+        <DateField
+          label="To"
+          value={current.to}
+          onChange={(to) => updateSimple({ to })}
+          min={current.from || undefined}
+          invalid={Boolean(error)}
+        />
+      </div>
+      {error && <div role="alert" className="mt-2 text-[10px] font-semibold text-black">{error}</div>}
+    </div>;
+  }
 
   if (compact) {
     return <div className={`no-print min-w-0 ${className}`}>

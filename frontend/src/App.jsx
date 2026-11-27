@@ -617,6 +617,7 @@ export default function App() {
     sendPurchaseOrderForApproval: (id, form) => mutate(`/purchase-orders/${id}/send-for-approval`, form),
     revokePurchaseOrderApproval: (id, approvalId) => mutate(`/purchase-orders/${id}/approvals/${approvalId}/revoke`, {}, 'PATCH'),
     sendPurchaseOrderToSuppliers: (id, form) => mutate(`/purchase-orders/${id}/send-to-suppliers`, form),
+    sendPurchaseOrderToSupplier: (id, form = {}) => mutate(`/purchase-orders/${id}/send-to-supplier`, form),
     getPurchaseOrderSupplierResponses: (id) => api(`/purchase-orders/${id}/supplier-responses`),
     getSupplierQuoteComparison: (requestId) => api(`/purchase-order-pricing/requests/${requestId}/comparison`),
     revokeSupplierPricingResponse: (id) => mutate(`/purchase-order-pricing/responses/${id}/revoke`, {}, 'PATCH'),
