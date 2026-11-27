@@ -77,6 +77,30 @@ test('official purchase order follows the supplied template and requires image s
   assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
 });
 
+test('official purchase order uses the supplied design palette with large signatures', () => {
+  const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
+  const css = source('../src/index.css');
+
+  assert.match(documentSource, /src="\/procurement-logo\.png"/);
+  assert.match(documentSource, /<strong>HOPE HAVEN<\/strong>/);
+  assert.match(css, /--pims-document-page:\s*#F4F7F6/);
+  assert.match(css, /--pims-document-teal:\s*#123D3A/);
+  assert.match(css, /\.official-header \{[\s\S]*?background:\s*var\(--pims-document-teal\)/);
+  assert.match(css, /\.official-header,[\s\S]*?\.official-header \* \{[\s\S]*?color:\s*#FFFFFF\s*!important/);
+
+  const signatureRule = /\.official-po-signature-image img \{([^}]*)\}/.exec(css);
+  assert.ok(signatureRule, 'the purchase-order signature image rule should exist');
+  assert.match(signatureRule[1], /height:\s*56px/);
+
+  const fieldRule = /\.official-po-field \{([^}]*)\}/.exec(css);
+  assert.ok(fieldRule, 'the purchase-order field rule should exist');
+  assert.doesNotMatch(fieldRule[1], /border-bottom/);
+
+  const valueRule = /\.official-po-field \.official-value \{([^}]*)\}/.exec(css);
+  assert.ok(valueRule, 'the purchase-order value rule should exist');
+  assert.doesNotMatch(valueRule[1], /border-bottom/);
+});
+
 test('create purchase order uses supplier-entered quotation lines without a financial summary', () => {
   const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
   const pageContent = source('../src/pages/PageContent.jsx');

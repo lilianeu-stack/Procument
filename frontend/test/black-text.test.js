@@ -107,3 +107,9 @@ test('print and PDF output force black text with a color-only rule', () => {
   assert.match(printBlock, /color: var\(--text-primary\) !important/);
   assert.match(css, /\.official-document \{[\s\S]*?color: var\(--text-primary\)/);
 });
+
+test('official document palette exceptions stay scoped to the document surface', () => {
+  const css = read('../src/index.css');
+  assert.match(css, /\.official-document,\s*\.official-document \* \{[\s\S]*?color:\s*var\(--pims-document-navy\)\s*!important/);
+  assert.match(css, /\.official-header,\s*\.official-header \* \{[\s\S]*?color:\s*#FFFFFF\s*!important/);
+});

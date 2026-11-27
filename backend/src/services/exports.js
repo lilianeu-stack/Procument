@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import PDFDocument from 'pdfkit';
 import ExcelJS from 'exceljs';
+import sharp from 'sharp';
 import pool from '../config/db.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import { amountInWords } from '../utils/money.js';
@@ -15,6 +16,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOGO_CANDIDATES = [
   process.env.BRAND_LOGO_PATH,
+  path.resolve(__dirname, '../../public/procurement-logo.png'),
   path.resolve(__dirname, '../../../frontend/public/procurement-logo.png'),
   path.resolve(__dirname, '../../../../frontend/public/procurement-logo.png')
 ].filter(Boolean);
@@ -24,7 +26,21 @@ const BRAND = {
   title: 'Procurement Management System',
   caption: 'PROCUREMENT & STORES'
 };
-const THEME = { brand: '#FFFFFF', surface: '#FFFFFF', ink: '#000000', border: '#000000' };
+const THEME = {
+  brand: '#FFFFFF',
+  surface: '#FFFFFF',
+  ink: '#000000',
+  border: '#000000',
+  // Palette sampled from the supplied design image.
+  page: '#F4F7F6',
+  card: '#FFFFFF',
+  teal: '#123D3A',
+  navy: '#172A39',
+  muted: '#475569',
+  rule: '#CFD0D1',
+  stripe: '#F8FAFC',
+  stripeStrong: '#F1F5F9'
+};
 const XLSX_INK = 'FF000000';
 const XLSX_HEADER_FILL = 'FFF2F2F2';
 const XLSX_BORDER = 'FFD9D9D9';
@@ -846,11 +862,21 @@ export async function fetchRecord(type, id, user) {
   };
 }
 
+function paintDocumentPage(doc) {
+  const inset = 24;
+  doc.save().rect(0, 0, doc.page.width, doc.page.height).fill(THEME.page).restore();
+  doc.save()
+    .rect(inset, inset, doc.page.width - inset * 2, doc.page.height - inset * 2)
+    .fill(THEME.card)
+    .restore();
+  return inset;
+}
+
 function recordFooter(doc) {
   const pages = doc.bufferedPageRange();
   for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     doc.switchToPage(index);
-    doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+    doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
       .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, doc.page.height - 34);
     doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, doc.page.height - 34, {
       width: doc.page.width - 80, align: 'right'
@@ -877,28 +903,37 @@ function moneyText(value) {
 }
 
 function officialHeader(doc, record, title) {
+  const inset = paintDocumentPage(doc);
   const margin = 40;
-  const logo = logoPath();
-  if (logo) doc.image(logo, margin, 30, { width: 48, height: 48, fit: [48, 48], contain: true });
-  const textX = logo ? margin + 58 : margin;
-  doc.font('Helvetica-Bold').fontSize(12).fillColor(THEME.ink)
-    .text(BRAND.organization, textX, 40, { width: 260, lineBreak: false, ellipsis: true });
-  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
-    .text(BRAND.caption, textX, 60, { width: 260, lineBreak: false, ellipsis: true });
-  doc.moveTo(margin, 88).lineTo(doc.page.width - margin, 88).strokeColor(THEME.border).stroke();
+  doc.save()
+    .rect(inset, inset, doc.page.width - inset * 2, 70)
+    .fill(THEME.teal)
+    .restore();
 
-  doc.font('Helvetica-Bold').fontSize(16).fillColor(THEME.ink)
-    .text(title, margin, 104, { width: doc.page.width - 80, align: 'center', lineBreak: false });
+  const logo = logoPath();
+  if (logo) {
+    try {
+      doc.image(logo, margin, 32, { width: 48, height: 48, fit: [48, 48], contain: true });
+    } catch { /* Branding is optional if the asset cannot be read. */ }
+  }
+  const textX = logo ? margin + 58 : margin;
+  doc.font('Helvetica-Bold').fontSize(14).fillColor(THEME.card)
+    .text(BRAND.organization, textX, 39, { width: 260, lineBreak: false, ellipsis: true });
+  doc.font('Helvetica').fontSize(8).fillColor('#D8DFDF')
+    .text(BRAND.caption, textX, 61, { width: 260, lineBreak: false, ellipsis: true });
+
+  doc.font('Helvetica-Bold').fontSize(16).fillColor(THEME.navy)
+    .text(title, margin, 106, { width: doc.page.width - 80, align: 'center', lineBreak: false });
   const meta = [
     `Reference: ${documentValue(record.reference)}`,
     `Status: ${documentValue(record.row.status)}`,
     `Date: ${documentDate(record.row.submittedAt || record.row.createdAt)}`
   ].filter((part) => !part.endsWith(': '));
-  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
     .text(meta.join('  |  '), margin, 132, {
       width: doc.page.width - 80, align: 'center', lineBreak: false, ellipsis: true
     });
-  doc.moveTo(margin, 150).lineTo(doc.page.width - margin, 150).strokeColor(THEME.border).stroke();
+  doc.moveTo(margin, 150).lineTo(doc.page.width - margin, 150).strokeColor(THEME.rule).stroke();
   return 166;
 }
 
@@ -913,34 +948,45 @@ function ensureSpace(doc, y, height, pageStart) {
 }
 
 function drawOfficialField(doc, label, value, x, y, width) {
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
     .text(label, x, y, { width, lineBreak: false });
-  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
     .text(documentValue(value), x, y + 14, { width, lineBreak: false, ellipsis: true });
-  doc.moveTo(x, y + 29).lineTo(x + width - 8, y + 29).strokeColor(THEME.border).stroke();
 }
 
-function signatureBuffer(value) {
-  const match = typeof value === 'string' ? value.match(/^data:image\/[a-z]+;base64,([\s\S]+)$/i) : null;
-  if (!match) return null;
+async function signatureBuffer(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(/^data:image\/([a-z0-9.+-]+);base64,([\s\S]+)$/i);
+  const base64 = match ? match[2] : value.trim();
+  if (!base64 || !/^[A-Za-z0-9+/=\s]+$/.test(base64)) return null;
+  let buffer;
   try {
-    const buffer = Buffer.from(match[1], 'base64');
-    return buffer.length ? buffer : null;
+    buffer = Buffer.from(base64, 'base64');
+  } catch { return null; }
+  if (!buffer.length) return null;
+  const mime = match ? match[1].toLowerCase() : '';
+  if (mime === 'image/png' || mime === 'image/jpeg') return buffer;
+  // Signature pads upload WebP, which PDFKit cannot embed directly.
+  try {
+    return await sharp(buffer).png().toBuffer();
   } catch { return null; }
 }
 
-function drawSignatureField(doc, label, value, signature, x, y, width) {
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
-    .text(label, x, y, { width, lineBreak: false });
-  const image = signatureBuffer(signature);
+async function drawSignatureField(doc, label, value, signature, x, y, width) {
+  const panelHeight = 92;
+  doc.save().rect(x - 8, y - 8, width, panelHeight).fill(THEME.stripe).restore();
+  doc.save().rect(x - 8, y - 8, 3, panelHeight).fill(THEME.teal).restore();
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
+    .text(label, x, y, { width: width - 16, lineBreak: false });
+  const image = await signatureBuffer(signature);
   if (image) {
     try {
-      doc.image(image, x + 2, y + 13, { fit: [width - 12, 18], align: 'left', valign: 'bottom' });
+      doc.image(image, x, y + 14, { fit: [width - 24, 52], align: 'left', valign: 'bottom' });
     } catch { /* a corrupt cached signature must not block the document */ }
   }
-  doc.moveTo(x, y + 33).lineTo(x + width - 8, y + 33).strokeColor(THEME.border).stroke();
-  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
-    .text(documentValue(value), x, y + 36, { width, lineBreak: false, ellipsis: true });
+  doc.moveTo(x, y + 70).lineTo(x + width - 16, y + 70).strokeColor(THEME.rule).stroke();
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.navy)
+    .text(documentValue(value), x, y + 74, { width: width - 16, lineBreak: false, ellipsis: true });
 }
 
 function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, rowHeight = 22 }) {
@@ -951,10 +997,10 @@ function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, ro
   let currentY = y;
 
   function drawHeader() {
-    doc.save().rect(margin, currentY, width, 22).fill(THEME.brand).restore();
+    doc.save().rect(margin, currentY, width, 22).fill(THEME.stripeStrong).restore();
     let x = margin;
     columns.forEach((column, index) => {
-      doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.ink)
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.navy)
         .text(column.label, x + 5, currentY + 7, {
           width: widths[index] - 10, align: column.align || 'left', lineBreak: false, ellipsis: true
         });
@@ -964,17 +1010,17 @@ function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, ro
   }
 
   function drawRow(values, shaded) {
-    if (shaded) doc.save().rect(margin, currentY, width, rowHeight).fill(THEME.surface).restore();
+    if (shaded) doc.save().rect(margin, currentY, width, rowHeight).fill(THEME.stripe).restore();
     let x = margin;
     columns.forEach((column, index) => {
-      doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
+      doc.font('Helvetica').fontSize(8).fillColor(THEME.navy)
         .text(documentValue(values[column.key]), x + 5, currentY + 6, {
           width: widths[index] - 10, align: column.align || 'left', lineBreak: false, ellipsis: true
         });
       x += widths[index];
     });
     doc.moveTo(margin, currentY + rowHeight).lineTo(margin + width, currentY + rowHeight)
-      .strokeColor(THEME.border).stroke();
+      .strokeColor(THEME.rule).stroke();
     currentY += rowHeight;
   }
 
@@ -1052,7 +1098,7 @@ function drawRequisitionDocument(doc, record) {
   }
 }
 
-function drawPurchaseOrderDocument(doc, record) {
+async function drawPurchaseOrderDocument(doc, record) {
   const row = record.row;
   const pageStart = officialPageStart(record, 'PURCHASE ORDER');
   let y = pageStart(doc);
@@ -1074,14 +1120,15 @@ function drawPurchaseOrderDocument(doc, record) {
   drawOfficialField(doc, 'Date of Delivery:', documentDate(row.deliveryDate), 40, y, columnWidth);
   drawOfficialField(doc, 'Payment Modalities:', '100%', secondColumnX, y, columnWidth);
   y += 34;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
-    .text('Gentlemen:', 40, y, { width: doc.page.width - 80, lineBreak: false });
-  y += 13;
-  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
-    .text('Please furnish this office the following articles subject to the terms and conditions contained herein.', 40, y, {
-      width: doc.page.width - 80, lineBreak: false, ellipsis: true
+  doc.save().rect(40, y, doc.page.width - 80, 34).fill(THEME.stripe).restore();
+  doc.save().rect(40, y, 3, 34).fill(THEME.teal).restore();
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
+    .text('Gentlemen:', 48, y + 5, { width: doc.page.width - 96, lineBreak: false });
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
+    .text('Please furnish this office the following articles subject to the terms and conditions contained herein.', 48, y + 18, {
+      width: doc.page.width - 96, lineBreak: false, ellipsis: true
     });
-  y += 22;
+  y += 44;
 
   const itemRows = record.items.map((item, index) => ({
     number: String(index + 1),
@@ -1101,45 +1148,47 @@ function drawPurchaseOrderDocument(doc, record) {
       { key: 'lineTotal', label: 'Total Price', weight: 1.1, align: 'right' }
     ],
     rows: itemRows,
-    emptyRows: Math.max(0, 7 - itemRows.length),
+    emptyRows: 0,
     y,
     pageStart
   });
 
-  y = ensureSpace(doc, y, 120, pageStart);
+  y = ensureSpace(doc, y, 132, pageStart);
   const valueX = doc.page.width - 40 - 210;
   const totalValue = `${moneyText(row.total)} RWF`;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+  doc.save().rect(valueX - 12, y - 8, 222, 48).fill(THEME.stripe).restore();
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
     .text('VAT:', valueX, y, { width: 90, align: 'right', lineBreak: false });
-  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
     .text(`${documentValue(row.vatRate) || '0'}% - ${moneyText(row.vatAmount)} RWF`, valueX + 96, y, {
       width: 114, align: 'right', lineBreak: false
     });
   y += 18;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
     .text('Total Amount:', valueX, y, { width: 90, align: 'right', lineBreak: false });
-  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
     .text(totalValue, valueX + 96, y, { width: 114, align: 'right', lineBreak: false });
-  y += 24;
+  y += 30;
 
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
-    .text('Total Amount in Words: Rwandan Francs', 40, y, {
-      width: doc.page.width - 80, lineBreak: false
+  doc.save().rect(40, y - 8, doc.page.width - 80, 46).fill(THEME.stripeStrong).restore();
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
+    .text('Total Amount in Words: Rwandan Francs', 48, y, {
+      width: doc.page.width - 96, lineBreak: false
     });
   y += 15;
-  doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
-    .text(documentValue(row.amountInWords) || amountInWords(row.total), 40, y, {
-      width: doc.page.width - 80, lineBreak: false, ellipsis: true
+  doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
+    .text(documentValue(row.amountInWords) || amountInWords(row.total), 48, y, {
+      width: doc.page.width - 96, lineBreak: false, ellipsis: true
     });
   y += 17;
-  doc.font('Helvetica').fontSize(8).fillColor(THEME.ink)
-    .text('Currency: Rwandan Francs (RWF)', 40, y, { width: doc.page.width - 80, lineBreak: false });
+  doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
+    .text('Currency: Rwandan Francs (RWF)', 48, y, { width: doc.page.width - 96, lineBreak: false });
   y += 26;
 
-  y = ensureSpace(doc, y, 80, pageStart);
+  y = ensureSpace(doc, y, 110, pageStart);
   const approved = Boolean(row.approvedAt && row.approvedBy);
-  drawSignatureField(doc, 'Prepared By:', row.preparedBy, row.preparedSignature, 40, y, columnWidth);
-  drawSignatureField(
+  await drawSignatureField(doc, 'Prepared By:', row.preparedBy, row.preparedSignature, 40, y, columnWidth);
+  await drawSignatureField(
     doc, 'Approved By:',
     approved ? `${row.approvedBy} - ${documentDate(row.approvedAt)}` : '',
     row.approvedSignature, secondColumnX, y, columnWidth
@@ -1248,7 +1297,7 @@ export async function renderRecordPdf(record) {
   });
 
   if (record.type === 'requisition') drawRequisitionDocument(doc, record);
-  else if (record.type === 'purchaseOrder') drawPurchaseOrderDocument(doc, record);
+  else if (record.type === 'purchaseOrder') await drawPurchaseOrderDocument(doc, record);
   else await drawGenericRecordDocument(doc, record);
   recordFooter(doc);
   doc.end();

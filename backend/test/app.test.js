@@ -2,6 +2,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
@@ -38,6 +39,13 @@ async function imageSignature() {
     create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
   }).png().toBuffer();
   return `data:image/png;base64,${buffer.toString('base64')}`;
+}
+
+async function webpSignature() {
+  const buffer = await sharp({
+    create: { width: 240, height: 80, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }
+  }).webp().toBuffer();
+  return `data:image/webp;base64,${buffer.toString('base64')}`;
 }
 
 async function request(path, { method = 'GET', user, body } = {}) {
@@ -2361,6 +2369,40 @@ test('official requisition and purchase order PDFs render the supplied form temp
   assert.equal(approvedOrderPdf.response.status, 200);
   assert.ok(pdfText(approvedOrderPdf.buffer).includes(admin.name),
     'Approved By must show the approver after approval');
+});
+
+test('official purchase order PDF embeds large WebP signatures with the supplied design palette', async () => {
+  const context = await createAwardedPurchaseOrder('PDFWEBP');
+  const signature = await webpSignature();
+  await pool.execute(
+    'UPDATE purchase_orders SET prepared_signature = ?, approved_signature = ? WHERE id = ?',
+    [signature, signature, context.purchaseOrder.id]
+  );
+
+  const pdf = await binaryRequest(
+    `/exports/record/purchaseOrder/${context.purchaseOrder.id}/pdf`, users.procurement
+  );
+  assert.equal(pdf.response.status, 200);
+  assertPdfIncludes(pdf.buffer, 'PURCHASE ORDER', 'Hope Haven', 'Prepared By:', 'Approved By:');
+
+  const raw = pdf.buffer.toString('latin1');
+  const imageCount = (raw.match(/\/Subtype\s*\/Image/g) || []).length;
+  assert.ok(imageCount >= 3,
+    `the logo and both WebP signatures should be embedded (found ${imageCount} image objects)`);
+  assert.match(raw, /0\.070\d*\s+0\.239\d*\s+0\.227\d*\s+(?:scn|SCN)/,
+    'the masthead and accents should use the deep teal from the design reference');
+  assert.match(raw, /0\.956\d*\s+0\.968\d*\s+0\.964\d*\s+(?:scn|SCN)/,
+    'the page should use the light gray outer background from the design reference');
+  assert.equal((raw.match(/\/Type\s*\/Page\b/g) || []).length, 1,
+    'the enlarged signatures must still fit on one page');
+
+  const renderer = readFileSync(new URL('../src/services/exports.js', import.meta.url), 'utf8');
+  assert.match(renderer, /fit: \[width - 24, 52\]/,
+    'both signatures should be embedded at the enlarged size');
+  const purchaseRenderer = renderer.slice(renderer.indexOf('async function drawPurchaseOrderDocument'));
+  assert.match(purchaseRenderer, /emptyRows: 0/,
+    'the purchase order must not add blank item rows below the real items');
+  assert.doesNotMatch(purchaseRenderer, /emptyRows: Math\.max\(0, 7 - itemRows\.length\)/);
 });
 
 test('supplier RFQ email delivery, secure links, statuses and retry use the real SMTP path', async () => {

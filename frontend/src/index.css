@@ -32,6 +32,16 @@
   --pims-interaction-focus: rgb(var(--pims-interaction-green-rgb) / 0.85);
   --pims-interaction-ring: rgb(var(--pims-interaction-green-rgb) / 0.28);
 
+  /* Official document palette sampled from the supplied design reference. */
+  --pims-document-page: #F4F7F6;
+  --pims-document-card: #FFFFFF;
+  --pims-document-teal: #123D3A;
+  --pims-document-navy: #172A39;
+  --pims-document-muted: #475569;
+  --pims-document-rule: #CFD0D1;
+  --pims-document-stripe: #F8FAFC;
+  --pims-document-stripe-strong: #F1F5F9;
+
   --tw-ring-color: var(--pims-border);
   --tw-ring-offset-color: var(--pims-surface);
   color: var(--text-primary);
@@ -318,25 +328,33 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   max-width: 210mm;
   margin: 0 auto;
   padding: 14mm 12mm;
-  background: var(--pims-surface);
+  background: var(--pims-document-card);
   color: var(--text-primary);
   font-family: 'DM Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   font-size: 10pt;
   line-height: 1.35;
 }
 
-.official-header { display: flex; align-items: center; gap: 12px; border-bottom: 2px solid var(--pims-border); padding-bottom: 10px; }
+.official-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: -14mm -12mm 18px;
+  padding: 8mm 12mm;
+  background: var(--pims-document-teal);
+  border-bottom: 0;
+}
 .official-logo { width: 54px; height: 54px; object-fit: contain; }
 .official-header-text { display: flex; flex: 1; flex-direction: column; line-height: 1.2; }
-.official-header-text strong { font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 15pt; letter-spacing: .02em; }
-.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: var(--text-primary); }
-.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: var(--text-primary); }
-.official-title { margin: 18px 0 16px; text-align: center; font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 16pt; font-weight: 800; letter-spacing: .08em; }
+.official-header-text strong { font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 15pt; letter-spacing: .02em; color: #FFFFFF; }
+.official-header-text span { font-size: 8pt; font-weight: 700; letter-spacing: .12em; color: #D8DFDF; }
+.official-header-meta { display: flex; flex-direction: column; align-items: flex-end; font-size: 9pt; color: #D8DFDF; }
+.official-title { margin: 0 0 18px; padding-bottom: 12px; border-bottom: 1px solid var(--pims-document-rule); text-align: center; font-family: 'Manrope', 'Segoe UI', sans-serif; font-size: 16pt; font-weight: 800; letter-spacing: .08em; color: var(--pims-document-navy); }
 
-.official-label { display: block; font-size: 9pt; font-weight: 800; color: var(--text-primary); }
-.official-value { display: block; min-height: 18px; font-size: 10pt; font-weight: 600; }
+.official-label { display: block; font-size: 9pt; font-weight: 800; color: var(--pims-document-navy); }
+.official-value { display: block; min-height: 18px; font-size: 10pt; font-weight: 600; color: var(--pims-document-navy); }
 .official-strong { font-weight: 800; }
-.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: var(--text-primary); white-space: pre-wrap; }
+.official-subtext { display: block; margin-top: 2px; font-size: 8.5pt; font-weight: 400; color: var(--pims-document-muted); white-space: pre-wrap; }
 .official-center { text-align: center; }
 .official-right { text-align: right; }
 
@@ -345,8 +363,9 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .official-field .official-value { border-bottom: 1px solid var(--pims-border); }
 
 .official-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.official-table th, .official-table td { border: 1px solid var(--pims-border); padding: 6px 7px; font-size: 9pt; vertical-align: top; }
-.official-table th { background: var(--pims-surface); font-weight: 800; text-align: left; text-transform: none; }
+.official-table th, .official-table td { border: 1px solid var(--pims-document-rule); padding: 6px 7px; font-size: 9pt; vertical-align: top; color: var(--pims-document-navy); }
+.official-table th { background: var(--pims-document-stripe-strong); font-weight: 800; text-align: left; text-transform: none; }
+.official-table tbody tr:nth-child(even) td { background: var(--pims-document-stripe); }
 .official-blank-row td { height: 24px; }
 
 .official-purpose { margin-top: 14px; border: 1px solid var(--pims-border); }
@@ -357,25 +376,26 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid var(--pims-border); border-bottom: 1px solid var(--pims-border); }
 .official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid var(--pims-border); }
 
-.official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 10px; }
-.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--pims-border); }
+.official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
+.official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 4px 0; }
 .official-po-field-wide { grid-column: 1 / -1; }
-.official-po-field .official-value { border-bottom: 1px solid var(--pims-border); }
-.official-po-notice { margin: 4px 0 10px; font-size: 9pt; line-height: 1.4; }
+.official-po-field .official-value { min-width: 0; }
+.official-po-notice { margin: 4px 0 14px; padding: 8px 10px; border-left: 3px solid var(--pims-document-teal); background: var(--pims-document-stripe); font-size: 9pt; line-height: 1.4; }
 .official-po-notice p { margin: 2px 0 0; }
 .official-po-table { margin-top: 4px; }
 .official-po-totals { margin-top: 14px; margin-left: auto; width: 75%; }
-.official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px solid var(--pims-border); }
-.official-po-totals .official-po-words { display: block; }
+.official-po-totals > div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 10px; background: var(--pims-document-stripe); border-bottom: 1px solid var(--pims-document-rule); }
+.official-po-totals .official-po-words { display: block; background: var(--pims-document-stripe-strong); }
 .official-po-totals .official-po-words .official-value { margin-top: 3px; font-weight: 700; }
-.official-po-terms { margin: 14px 0 0; font-size: 8.5pt; }
-.official-po-approval { margin-top: 20px; }
-.official-po-signoff { margin: 0 0 12px; font-weight: 800; }
+.official-po-terms { margin: 14px 0 0; padding: 8px 10px; background: var(--pims-document-stripe-strong); font-size: 8.5pt; color: var(--pims-document-muted); }
+.official-po-approval { margin-top: 20px; padding-top: 14px; border-top: 2px solid var(--pims-document-teal); }
+.official-po-signoff { margin: 0 0 12px; font-weight: 800; color: var(--pims-document-navy); }
 .official-po-signature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.official-po-signature-line { display: flex; min-height: 58px; flex-direction: column; gap: 3px; }
-.official-po-signature-image { display: flex; min-height: 30px; align-items: flex-end; }
-.official-po-signature-image img { max-height: 30px; max-width: 100%; object-fit: contain; }
-.official-po-signature-date { font-size: 8pt; color: var(--pims-ink); }
+.official-po-signature-line { display: flex; min-height: 96px; flex-direction: column; gap: 4px; padding: 8px 10px; border-left: 3px solid var(--pims-document-teal); background: var(--pims-document-stripe); }
+.official-po-signature-image { display: flex; min-height: 56px; align-items: flex-end; }
+.official-po-signature-image img { height: 56px; max-height: 56px; max-width: 100%; object-fit: contain; object-position: left bottom; }
+.official-po-signature-line .official-signature-line { border-bottom: 1px solid var(--pims-document-rule); }
+.official-po-signature-date { font-size: 8pt; color: var(--pims-document-muted); }
 
 @media print {
   /* When an official form modal is open, only its print copy reaches the PDF. */
@@ -389,7 +409,9 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
     box-shadow: none !important;
     border: 0;
   }
-  .official-document th, .official-document td { border: 1px solid var(--pims-border); }
+  body:has(.official-print-root) { background: var(--pims-document-page) !important; }
+  .official-print-root { padding: 8mm; background: var(--pims-document-page); }
+  .official-document th, .official-document td { border: 1px solid var(--pims-document-rule); }
   .official-document tr, .official-document .official-purpose, .official-document .official-approval-grid > div { break-inside: avoid; page-break-inside: avoid; }
   .official-title { break-after: avoid; page-break-after: avoid; }
 }
@@ -417,6 +439,58 @@ input::placeholder, textarea::placeholder {
     -webkit-text-fill-color: var(--text-primary) !important;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+  }
+}
+
+/* Official documents follow the supplied design palette. These scoped
+   exceptions sit after the global black-text rule so only the document
+   masthead and its content adopt the sampled teal/navy colors. */
+.official-document,
+.official-document * {
+  color: var(--pims-document-navy) !important;
+  -webkit-text-fill-color: var(--pims-document-navy) !important;
+}
+
+.official-header,
+.official-header * {
+  color: #FFFFFF !important;
+  -webkit-text-fill-color: #FFFFFF !important;
+}
+
+.official-header-text span,
+.official-header-meta,
+.official-header-meta * {
+  color: #D8DFDF !important;
+  -webkit-text-fill-color: #D8DFDF !important;
+}
+
+.official-subtext,
+.official-po-signature-date,
+.official-po-terms {
+  color: var(--pims-document-muted) !important;
+  -webkit-text-fill-color: var(--pims-document-muted) !important;
+}
+
+@media print {
+  .official-document,
+  .official-document * {
+    color: var(--pims-document-navy) !important;
+    -webkit-text-fill-color: var(--pims-document-navy) !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .official-header,
+  .official-header * {
+    color: #FFFFFF !important;
+    -webkit-text-fill-color: #FFFFFF !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .official-header-text span,
+  .official-header-meta,
+  .official-header-meta * {
+    color: #D8DFDF !important;
+    -webkit-text-fill-color: #D8DFDF !important;
   }
 }
 
