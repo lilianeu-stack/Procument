@@ -35,7 +35,7 @@ export default function PortalLayout({
         onLogout={onLogout}
         onProfile={() => onNavigate(PROFILE_PAGE)}
       />
-      <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
+      <div className="w-full max-w-none px-5 pb-10 pt-7 sm:px-8">
         {!hidePageHeading && <div className="mb-6">
           <div className="mb-1 text-[11px] font-semibold text-black">
             {formatDate(new Date())}

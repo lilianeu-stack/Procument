@@ -36,17 +36,21 @@ function WorkspaceStatCard({ label, value, note, icon: Icon, page, onClick, acce
   </button>;
 }
 
-function useRecentRequests(portalApi, portal) {
+function useRecentRequests(portalApi, portal, enabled = true) {
   const [state, setState] = useState({ requests: [], loading: true, error: '' });
   const [token, setToken] = useState(0);
   useEffect(() => {
+    if (!enabled) {
+      setState({ requests: [], loading: false, error: '' });
+      return undefined;
+    }
     let active = true;
     const getter = portal === 'supervisor' ? portalApi.getSupervisorRequests : portalApi.getRequesterRequests;
     getter({ page: 1, limit: 6, status: '' })
       .then((response) => { if (active) setState({ requests: response.requisitions || [], loading: false, error: '' }); })
       .catch((exception) => { if (active) setState({ requests: [], loading: false, error: exception.message || 'Recent requests could not be loaded.' }); });
     return () => { active = false; };
-  }, [portalApi, portal, token]);
+  }, [portalApi, portal, token, enabled]);
   return { ...state, reload: () => setToken((value) => value + 1) };
 }
 
@@ -90,7 +94,7 @@ export default function RoleBasedDashboard({
   const department = summary?.department || {};
   const stats = summary?.stats || {};
   const departmentName = department.name || user?.department || 'No Department assigned';
-  const recent = useRecentRequests(portalApi, portal);
+  const recent = useRecentRequests(portalApi, portal, !isSupervisor);
   const unreadNotifications = stats.unreadNotifications ?? notifications.filter((item) => !item.isRead).length ?? 0;
   const unreadMessages = stats.unreadMessages ?? 0;
   const requestsPage = isSupervisor ? 'Procurement Requests' : 'My Procurement Requests';
@@ -115,6 +119,17 @@ export default function RoleBasedDashboard({
     { label: 'Unread messages', value: unreadMessages, note: 'From your Supervisor', icon: MessageSquare, tone: 'indigo', page: messagesPage },
     { label: 'Unread notices', value: unreadNotifications, note: 'Notifications', icon: Bell, tone: 'emerald', page: 'Notifications' }
   ];
+
+  // Supervisor overview is intentionally cards-only: no hero, tables, notice
+  // list or footer beneath the metrics.
+  if (isSupervisor) return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    {cards.map((card) => <WorkspaceStatCard
+      key={card.label}
+      {...card}
+      accent={card.tone}
+      onClick={() => onNavigate(card.page, card.query)}
+    />)}
+  </div>;
 
   return <div className="space-y-6">
     <Hero portal={portal} user={user} departmentName={departmentName} />

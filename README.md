@@ -134,6 +134,7 @@ Run the API and role-navigation tests with `npm test --prefix backend` and `npm 
 - Supplier award, purchase-order approval, PO-linked/direct goods receipts, and stock movement records
 - Inventory catalogue, categories, reorder thresholds, receipt tracking, and low-stock dashboard
 - Store requests with approval and transactional stock issue (issues fail rather than allowing negative stock)
+- Storekeeper pre-delivery review of purchase-order items after the signed official PO is sent to the supplier; accepted lines create one stock receipt, rejected lines never enter stock
 - Invoice submission after a goods receipt, finance approval/rejection, and paid status
 - Departments, audit log records, and notification inbox
 - Three role-based portals with protected layouts, dashboards, sidebars, and role-specific pages
@@ -152,6 +153,10 @@ Sign-in routes each account to a portal derived from its current database role a
 Every Department can have one active Supervisor and one or more Requesters. A Supervisor or Requester must be assigned to the Department they work in. Administrators manage these assignments from Users Management; attempting to create a second active Supervisor for a Department is rejected unless **Replace existing Supervisor** is selected, which deactivates the former Supervisor. `procurement` signs into the Administrator shell with page restrictions; `approver`, `storekeeper`, `finance`, and `committee` also use Administrator-side pages allowed for their role.
 
 Supervisor approval only records the Supervisor decision. The separate **Forward to Procurement** action is the only route into Procurement; forwarded requests are identified by both the forwarding marker and `forwarded_at`, never by status alone. Direct URLs to another portal are blocked in the UI, and the API independently rejects unauthorized roles and Department IDs. Supervisor and Requester accounts can access `/auth/me`, notifications, their portal endpoints, and their own role-scoped exports, but not the legacy management/workflow APIs.
+
+The Storekeeper portal has `Dashboard`, `List of Requesters`, `Notification`, `Display before delivery`, `Bin Card`, and `Profile`. Submitting the official purchase order send action queues every ordered line in `Display before delivery` and notifies Storekeepers; this internal handoff is not blocked by an offline or unconfigured email provider. Accepting a line creates or matches an inventory catalogue item, increases its quantity, and records a `Receipt`/`In` movement; rejecting a line records the reason and actor only, with no catalogue item or stock movement. Decisions are final and audited.
+
+The Goods receipts workspace shows suppliers as soon as their purchase orders are sent. Selecting a supplier displays its registered contact, telephone, email, address, and sent purchase orders. Each order must first be **Allow**ed or **Denie**d: a denied order is removed from the workspace, while an allowed order unlocks **Create GRN**. That action opens a Good Received Note form matching the official layout (`Receiving Department`, `Tel. No.`, `Supplied by`, `Quantity`, `Unit`, `Description item received`, `Comment`, `Received by`, `Verified by`, and `Date`) prefilled from the sent purchase order. Upload a signature photo under both **Received by:** and **Verified by:**; the images are required, normalised to compact WebP, stored with the GRN, and embedded in the generated PDF. Rejected lines are never included; pending and accepted lines can be documented. The GRN records the document and its comments without adding stock — Storekeeper acceptance remains the only stock movement — then emails the generated GRN PDF to the supplier's registered address. A failed or unconfigured email provider is reported in the form without rolling back the GRN.
 
 ## Dates, printing and downloads
 
@@ -189,6 +194,9 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `GET`, `POST` | `/purchase-orders` | Signed in / Admin, procurement |
 | `PATCH` | `/purchase-orders/:id/decision` | Admin, approver |
 | `GET`, `POST` | `/goods-receipts` | Signed in / Admin, storekeeper, procurement |
+| `GET` | `/goods-receipts/sent-suppliers` | Admin, storekeeper, procurement |
+| `POST` | `/goods-receipts/supplier-decision` | Admin, storekeeper, procurement |
+| `POST` | `/goods-receipts/from-supplier` | Admin, storekeeper, procurement |
 | `GET` | `/inventory`, `/inventory/categories` | Signed in |
 | `POST` | `/inventory/items` | Admin, storekeeper |
 | `PATCH` | `/inventory/items/:id` | Admin, storekeeper |
@@ -196,6 +204,9 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `GET`, `POST` | `/store-requests` | Signed in |
 | `PATCH` | `/store-requests/:id/decision` | Admin, approver |
 | `POST` | `/store-requests/:id/issue` | Admin, storekeeper |
+| `GET` | `/portal/stockkeeper/deliveries`, `/portal/stockkeeper/deliveries/:id` | Storekeeper |
+| `POST` | `/portal/stockkeeper/deliveries/:id/accept` | Storekeeper |
+| `POST` | `/portal/stockkeeper/deliveries/:id/reject` | Storekeeper |
 | `GET`, `POST` | `/invoices` | Signed in / Admin, procurement |
 | `PATCH` | `/invoices/:id/decision` | Admin, finance |
 | `GET` | `/notifications` | Signed in |
@@ -207,6 +218,8 @@ All endpoints are prefixed with `/api`. Except for sign-in and `/health`, reques
 | `GET` | `/exports/available` | Signed in (role-scoped list) |
 | `GET` | `/exports/:key/:format` | Signed in (role-scoped report: `pdf`, `xlsx`, `csv`) |
 | `GET` | `/exports/record/:type/:id/:format` | Signed in (record visibility checked) |
+
+The purchase order send endpoint returns `deliveryQueued: true` whenever the Storekeeper handoff is complete, including when email delivery itself fails.
 
 ## Project structure
 
@@ -244,7 +257,11 @@ The browser UI calls `/api` on the same origin as the page; Vite proxies that pa
 
 Admin → Users is organised as **Department → Subdepartment → User**:
 
-- Top-level departments: `Administration`, `Education`, `Facilities`, `Finance`.
-- Add subdepartments inside a department (for example `IT` and `Stores` inside `Facilities`, `Procurement` and `Administration Office` inside `Administration`).
+- The only departments and subdepartments are:
+  - `Administration` → `Procurement`
+  - `Education`
+  - `Facility` → `IT`
+  - `Stores` → `StoreKeeper`
+- The startup seeder creates these rows and removes anything else from an existing database. Linked users and historical records from removed departments are reassigned to `Procurement`; nothing is deleted.
 - Add users only inside a subdepartment. The API rejects assigning a user directly to a top-level department.
 - Deleting a department with subdepartments is blocked until those subdepartments are moved or deleted.

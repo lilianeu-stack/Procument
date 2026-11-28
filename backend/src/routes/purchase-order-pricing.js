@@ -3,7 +3,8 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { allowRoles } from '../middleware/auth.js';
-import { buildSupplierPricingEmail, sendEmail } from '../services/email.js';
+import { buildPurchaseOrderEmail, buildSupplierPricingEmail, sendEmail } from '../services/email.js';
+import { fetchRecord, renderRecordPdf } from '../services/exports.js';
 import { getSettings } from '../services/settings.js';
 import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
 import { businessDate } from '../utils/dates.js';
@@ -103,6 +104,68 @@ async function notifyProcurement(connection, requisitionId, title, body) {
   for (const user of users) {
     await createNotification(connection, user.id, title, body, notificationLink(requisitionId), 'supplier_pricing');
   }
+}
+
+const DELIVERY_PAGE_LINK = '#/stockkeeper/Display%20before%20delivery';
+
+// Sending the signed official purchase order is the handoff point: from here
+// the Storekeeper owns each ordered line until it is accepted into stock or
+// explicitly rejected. INSERT IGNORE makes resends safe and preserves any
+// decision already recorded by the Storekeeper.
+async function queuePurchaseOrderDelivery(connection, purchaseOrderId, user) {
+  const [lines] = await connection.execute(
+    `SELECT poi.id AS purchaseOrderItemId, poi.item_name AS itemName, poi.description,
+        poi.quantity, poi.unit, poi.unit_price AS unitPrice, poi.line_total AS lineTotal,
+        p.id AS purchaseOrderId, p.reference AS poReference, p.delivery_date AS deliveryDate,
+        s.name AS supplierName, s.email AS supplierEmail,
+        r.id AS requisitionId, r.reference AS requisitionReference,
+        r.department_id AS departmentId, d.name AS departmentName
+       FROM purchase_order_items poi
+       JOIN purchase_orders p ON p.id = poi.purchase_order_id
+       JOIN suppliers s ON s.id = p.supplier_id
+       JOIN rfqs f ON f.id = p.rfq_id
+       JOIN requisitions r ON r.id = f.requisition_id
+       LEFT JOIN departments d ON d.id = r.department_id
+      WHERE poi.purchase_order_id = ?
+      ORDER BY poi.id`,
+    [purchaseOrderId]
+  );
+  for (const line of lines) {
+    await connection.execute(
+      `INSERT IGNORE INTO purchase_order_delivery_items
+         (purchase_order_id, purchase_order_item_id, po_reference, supplier_name,
+          supplier_email, requisition_id, requisition_reference, department_id,
+          department_name, item_name, description, quantity, unit, unit_price,
+          line_total, delivery_date, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+      [
+        line.purchaseOrderId, line.purchaseOrderItemId, line.poReference,
+        line.supplierName, line.supplierEmail || null, line.requisitionId || null,
+        line.requisitionReference || null, line.departmentId || null, line.departmentName || null,
+        line.itemName, line.description || null, line.quantity, line.unit,
+        line.unitPrice, line.lineTotal, line.deliveryDate || null
+      ]
+    );
+  }
+  await writeAudit(connection, user.id, 'purchase_order_delivery_queued', 'purchase_order', purchaseOrderId, {
+    reference: lines[0]?.poReference || null,
+    lines: lines.length
+  });
+  const [storekeepers] = await connection.execute(
+    "SELECT id FROM users WHERE role = 'storekeeper' AND active = TRUE"
+  );
+  const reference = lines[0]?.poReference || `PO-${purchaseOrderId}`;
+  for (const storekeeper of storekeepers) {
+    await createNotification(
+      connection,
+      storekeeper.id,
+      'Purchase order ready for delivery review',
+      `${reference} has been sent to ${lines[0]?.supplierName || 'the supplier'}. Review ${lines.length} item${lines.length === 1 ? '' : 's'} before accepting them into stock.`,
+      DELIVERY_PAGE_LINK,
+      'purchase_order_delivery'
+    );
+  }
+  return lines.length;
 }
 
 function emailErrorDetails(delivery) {
@@ -212,6 +275,16 @@ async function responseItems(executor, responseId) {
   return rows;
 }
 
+async function purchaseOrderDocumentItems(executor, purchaseOrderId) {
+  const [rows] = await executor.execute(
+    `SELECT id, item_name AS itemName, description, quantity, unit,
+        unit_price AS unitPrice, line_total AS lineTotal
+       FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id`,
+    [purchaseOrderId]
+  );
+  return rows;
+}
+
 async function findResponseByToken(token, executor = pool, lock = false) {
   if (!isValidSupplierPricingTokenFormat(token)) return null;
   const [rows] = await executor.execute(
@@ -222,10 +295,23 @@ async function findResponseByToken(token, executor = pool, lock = false) {
        req.requisition_id AS requisitionId,
        p.reference AS purchaseOrderReference, p.type AS purchaseOrderType,
        DATE_FORMAT(p.created_at, '%Y-%m-%d') AS purchaseOrderDate,
-       DATE_FORMAT(p.delivery_date, '%Y-%m-%d') AS deliveryDate
+       DATE_FORMAT(p.delivery_date, '%Y-%m-%d') AS deliveryDate,
+       p.status AS purchaseOrderStatus,
+       s.name AS purchaseOrderSupplier,
+       p.supplier_contact AS purchaseOrderSupplierContact,
+       p.supplier_address AS purchaseOrderSupplierAddress,
+       p.subtotal AS purchaseOrderSubtotal, p.vat_rate AS purchaseOrderVatRate,
+       p.vat_amount AS purchaseOrderVatAmount, p.total AS purchaseOrderTotal,
+       p.amount_in_words AS purchaseOrderAmountInWords,
+       p.prepared_signature AS preparedSignature, p.approved_signature AS approvedSignature,
+       DATE_FORMAT(p.approved_at, '%Y-%m-%d') AS approvedAt,
+       creator.name AS preparedBy, reviewer.name AS approvedBy
       FROM purchase_order_pricing_responses r
       JOIN purchase_order_pricing_requests req ON req.id = r.request_id
       JOIN purchase_orders p ON p.id = r.purchase_order_id
+      JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN users creator ON creator.id = p.created_by
+       LEFT JOIN users reviewer ON reviewer.id = p.reviewed_by
      WHERE r.token_hash = ? LIMIT 1${lock ? ' FOR UPDATE' : ''}`,
     [hashSupplierPricingToken(token)]
   );
@@ -354,6 +440,84 @@ async function persistQuotation(connection, response, lines, totals, body, statu
 // ---------------------------------------------------------------------------
 // Protected Procurement / Committee APIs
 // ---------------------------------------------------------------------------
+
+protectedRouter.post('/purchase-orders/:id/send-to-supplier', allowRoles(...procurementRoles), async (req, res, next) => {
+  try {
+    const purchaseOrderId = positiveId(req.params.id);
+    if (!purchaseOrderId) throw httpError(400, 'Invalid purchase order identifier.');
+    const message = boundedText(req.body.message, 1000, 'Message');
+
+    // Reuse the exact record and renderer behind Download official PDF, so the
+    // supplier receives the created purchase order with its signatures rather
+    // than an RFQ or a pricing form.
+    const record = await fetchRecord('purchaseOrder', purchaseOrderId, req.user);
+    const supplierEmail = normalizeEmail(record.row.supplierEmail);
+    if (!validEmail(supplierEmail)) {
+      throw httpError(400, 'The registered supplier does not have a valid email address.');
+    }
+    if (!record.row.preparedSignature || !record.row.approvedSignature) {
+      throw httpError(409, 'Upload both official signatures before sending the purchase order.');
+    }
+
+    const pdf = await renderRecordPdf(record);
+    const filename = `${String(record.reference || `PO-${purchaseOrderId}`).replace(/[^A-Za-z0-9._-]+/g, '_')}.pdf`;
+    const email = buildPurchaseOrderEmail({
+      supplierName: record.row.supplier,
+      recipientEmail: supplierEmail,
+      reference: record.reference,
+      purchaseOrderReference: record.reference,
+      total: record.row.total ? `RWF ${Number(record.row.total).toFixed(2)}` : '',
+      deliveryDate: record.row.deliveryDate ? String(record.row.deliveryDate).slice(0, 10) : '',
+      message
+    });
+
+    // The send action itself is the handoff to the Storekeeper queue. Queue the
+    // lines before attempting delivery so an offline/unconfigured email provider
+    // cannot block the internal pre-delivery workflow.
+    const deliveryConnection = await pool.getConnection();
+    try {
+      await deliveryConnection.beginTransaction();
+      await queuePurchaseOrderDelivery(deliveryConnection, purchaseOrderId, req.user);
+      await deliveryConnection.commit();
+    } catch (error) {
+      await deliveryConnection.rollback();
+      throw error;
+    } finally {
+      deliveryConnection.release();
+    }
+
+    const result = await sendEmail({
+      ...email,
+      attachments: [{ filename, contentType: 'application/pdf', content: pdf }]
+    });
+    await writeAudit(pool, req.user.id, 'purchase_order_email_sent', 'purchase_order', purchaseOrderId, {
+      recipientEmail: supplierEmail,
+      reference: record.reference,
+      emailStatus: result.status,
+      reason: result.reason || null
+    });
+
+    if (!result.ok) {
+      return res.status(result.reason === 'not_configured' ? 503 : 502).json({
+        message: result.error?.message || 'Email provider could not accept the purchase order.',
+        emailDelivery: { total: 1, accepted: 0, failed: result.reason === 'not_configured' ? 0 : 1, skipped: result.reason === 'not_configured' ? 1 : 0 },
+        deliveryQueued: true
+      });
+    }
+
+    return res.json({
+      message: `Official purchase order ${record.reference} sent to ${supplierEmail}.`,
+      status: result.status,
+      recipientEmail: supplierEmail,
+      providerMessageId: result.providerMessageId || null,
+      emailDelivery: { total: 1, accepted: 1, failed: 0, skipped: 0 },
+      deliveryQueued: true
+    });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ message: error.message });
+    return next(error);
+  }
+});
 
 protectedRouter.post('/purchase-orders/:id/send-to-suppliers', allowRoles(...procurementRoles), async (req, res, next) => {
   let connection;
@@ -1003,6 +1167,7 @@ publicRouter.get('/supplier-pricing/:token', async (req, res, next) => {
     }
 
     const rows = await responseItems(pool, response.id);
+    const officialItems = await purchaseOrderDocumentItems(pool, response.purchaseOrderId);
     const isSubmitted = response.status === 'Submitted';
     return res.json({
       pricingRequest: {
@@ -1034,6 +1199,32 @@ publicRouter.get('/supplier-pricing/:token', async (req, res, next) => {
         status: response.status,
         isSubmitted,
         expiresAt: response.expiresAt
+      },
+      // The exact purchase order created by Procurement, including the
+      // Prepared by and Approved by signatures, is shown to the supplier.
+      purchaseOrder: {
+        id: response.purchaseOrderId,
+        reference: response.purchaseOrderReference,
+        type: response.purchaseOrderType,
+        status: response.purchaseOrderStatus,
+        createdAt: response.purchaseOrderDate,
+        date: response.purchaseOrderDate,
+        deliveryDate: response.deliveryDate,
+        supplier: response.purchaseOrderSupplier,
+        supplierContact: response.purchaseOrderSupplierContact,
+        supplierAddress: response.purchaseOrderSupplierAddress,
+        paymentTerms: '100%',
+        subtotal: Number(response.purchaseOrderSubtotal) || 0,
+        vatRate: Number(response.purchaseOrderVatRate) || 0,
+        vatAmount: Number(response.purchaseOrderVatAmount) || 0,
+        total: Number(response.purchaseOrderTotal) || 0,
+        amountInWords: response.purchaseOrderAmountInWords,
+        preparedBy: response.preparedBy,
+        preparedSignature: response.preparedSignature,
+        approvedBy: response.approvedBy,
+        approvedAt: response.approvedAt,
+        approvedSignature: response.approvedSignature,
+        items: officialItems
       },
       // Only the line snapshots and the supplier's own quoted figures are sent.
       items: rows.map((row) => ({

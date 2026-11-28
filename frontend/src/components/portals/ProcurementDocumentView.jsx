@@ -13,7 +13,7 @@ import {
   primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
-import { dateLabel, dateTimeLabel } from '../../utils/format.js';
+import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
 import { downloadBinary, previewBinary } from '../../utils/attachments.js';
 import { PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 
@@ -74,6 +74,11 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const [recipientEmail, setRecipientEmail] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [senderNote, setSenderNote] = useState('');
+  const [sendError, setSendError] = useState('');
   const [sentForms, setSentForms] = useState([]);
   const [showOfficial, setShowOfficial] = useState(false);
 
@@ -138,6 +143,31 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
     navigate(PROCUREMENT_PROCESSING_PAGE, { request: id, tab: 'rfqs' });
   }
 
+  function openSendModal() {
+    setRecipientEmail('');
+    setRecipientPhone('');
+    setSenderNote('');
+    setSendError('');
+    setSendOpen(true);
+  }
+
+  async function sendToAnotherUser(event) {
+    event.preventDefault();
+    setBusy(true); setSendError(''); setNotice('');
+    try {
+      const result = await portalApi.sendRequisitionEmail(id, {
+        to: recipientEmail,
+        recipientPhone: recipientPhone.trim(),
+        message: senderNote.trim()
+      });
+      setNotice(result.message || 'Request sent successfully.');
+      setSendOpen(false);
+      await load();
+    } catch (exception) {
+      setSendError(exception.message || 'The request could not be sent.');
+    } finally { setBusy(false); }
+  }
+
   if (loading && !request) return <LoadingState label="Opening request document…" />;
   if (error || !request) return <>
     <ErrorState message={error} onRetry={load} />
@@ -149,6 +179,9 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   const items = request.items || [];
   const attachments = request.attachments || [];
   const title = hasValue(request.title) ? request.title : `Request ${request.reference}`;
+  const sendTotal = items.reduce((sum, item) => sum + Number(
+    item.lineTotal ?? (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0)
+  ), 0);
 
   return <div className="space-y-5">
     <PrintHeader
@@ -185,6 +218,9 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           </button>
           <DownloadButton type="requisition" id={id} format="pdf" label="Download PDF" />
           <PrintButton label="Print Document" />
+          <button type="button" onClick={openSendModal} disabled={busy} className={secondaryButtonClass('disabled:opacity-50')}>
+            <Send size={14} />Send to another user
+          </button>
         </div>
         <button type="button" onClick={continueProcessing} className={primaryButtonClass()}>
           <FileCheck2 size={14} />Continue Procurement Processing
@@ -367,6 +403,69 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
         <FileCheck2 size={14} />Continue Procurement Processing
       </button>
     </div>
+
+    {sendOpen && <Modal title="Send requested items to another user" size="lg" onClose={() => !busy && setSendOpen(false)}>
+      <form onSubmit={sendToAnotherUser} className="space-y-5">
+        {sendError && <p role="alert" className="rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{sendError}</p>}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-xs font-bold">
+            Email address *
+            <input type="email" required value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)}
+              placeholder="recipient@example.com" className="field" />
+          </label>
+          <label className="block text-xs font-bold">
+            Phone number
+            <input type="tel" value={recipientPhone} onChange={(event) => setRecipientPhone(event.target.value)}
+              placeholder="Phone number" className="field" />
+          </label>
+        </div>
+        <label className="block text-xs font-bold">
+          Message to recipient (optional)
+          <textarea rows="3" maxLength={2000} value={senderNote} onChange={(event) => setSenderNote(event.target.value)}
+            placeholder="Add a short note, for example: Please confirm the quantities and comment if anything needs changing."
+            className="field h-auto py-2" />
+        </label>
+
+        <Section title={`Requested items (${items.length})`} icon={FileText}>
+          {items.length ? <TableScroll minWidth={700}>
+            <table className="w-full text-left text-xs">
+              <thead className="text-[10px] uppercase text-black">
+                <tr>
+                  {['Item', 'Quantity', 'Unit price', 'Total'].map((heading) =>
+                    <th key={heading} className="whitespace-nowrap border-b border-subtle px-3 py-2.5 font-extrabold">{heading}</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-subtle">
+                {items.map((item) => <tr key={item.id}>
+                  <td className="px-3 py-3 font-bold text-black">{item.itemName || '—'}</td>
+                  <td className="whitespace-nowrap px-3 py-3">{item.quantity ?? '—'} {item.unit || 'unit'}</td>
+                  <td className="whitespace-nowrap px-3 py-3">{currency(item.estimatedUnitCost)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-right font-bold">
+                    {currency(item.lineTotal ?? (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0))}
+                  </td>
+                </tr>)}
+              </tbody>
+            </table>
+          </TableScroll> : <EmptyState title="No items recorded" />}
+          <div className="mt-3 flex justify-end border-t border-subtle pt-3 text-sm font-extrabold">
+            <span>Total</span><span className="ml-3">{currency(sendTotal)}</span>
+          </div>
+        </Section>
+
+        <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-black">
+          The recipient will receive this as a table with quantities and a private response link.
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" disabled={busy} onClick={() => setSendOpen(false)} className={secondaryButtonClass('disabled:opacity-50')}>
+            Cancel
+          </button>
+          <button type="submit" disabled={busy || !recipientEmail.trim()} className={primaryButtonClass()}>
+            <Send size={14} />{busy ? 'Sending…' : 'Send by email'}
+          </button>
+        </div>
+      </form>
+    </Modal>}
 
     {showOfficial && <Modal title="Official material request form" size="xl" onClose={() => setShowOfficial(false)}>
       <div className="no-print mb-4 flex flex-wrap justify-end gap-2">

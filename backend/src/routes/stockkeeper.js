@@ -154,6 +154,289 @@ async function recordMovement(connection, {
   return result.insertId;
 }
 
+const DELIVERY_STATUSES = new Set(['Pending', 'Accepted', 'Rejected']);
+const DELIVERY_PAGE_LINK = '#/stockkeeper/Display%20before%20delivery';
+const DELIVERY_SORT_FIELDS = {
+  delivered: 'd.created_at',
+  reference: 'd.po_reference',
+  item: 'd.item_name',
+  supplier: 'd.supplier_name',
+  status: 'd.status',
+  quantity: 'd.quantity',
+  decided: 'd.decided_at'
+};
+
+const DELIVERY_SELECT = `
+  SELECT d.id, d.purchase_order_id AS purchaseOrderId,
+      d.purchase_order_item_id AS purchaseOrderItemId, d.po_reference AS poReference,
+      d.supplier_name AS supplierName, d.supplier_email AS supplierEmail,
+      d.requisition_id AS requisitionId, d.requisition_reference AS requisitionReference,
+      d.department_id AS departmentId, d.department_name AS departmentName,
+      d.item_name AS itemName, d.description, d.quantity, d.unit,
+      d.unit_price AS unitPrice, d.line_total AS lineTotal,
+      d.delivery_date AS deliveryDate, d.status, d.decision_reason AS decisionReason,
+      d.decided_by AS decidedBy, d.decided_by_name AS decidedByName, d.decided_at AS decidedAt,
+      d.inventory_item_id AS inventoryItemId, d.inventory_movement_id AS inventoryMovementId,
+      d.created_at AS createdAt, d.updated_at AS updatedAt,
+      i.name AS stockItemName, i.quantity AS stockBalance,
+      m.reference_no AS movementReference
+    FROM purchase_order_delivery_items d
+    LEFT JOIN items i ON i.id = d.inventory_item_id
+    LEFT JOIN inventory_movements m ON m.id = d.inventory_movement_id`;
+
+function decisionReason(body, decision) {
+  const reason = text(body.reason, 1000);
+  if (decision === 'Rejected' && !reason) {
+    throw httpError(400, 'Enter a reason before rejecting this item.');
+  }
+  return reason || null;
+}
+
+async function deliveryForUpdate(connection, id) {
+  const [rows] = await connection.execute(`${DELIVERY_SELECT} WHERE d.id = ? FOR UPDATE`, [id]);
+  return rows[0] || null;
+}
+
+async function notifyDeliveryDecision(connection, delivery, decision, reason) {
+  const title = decision === 'Accepted'
+    ? 'Purchase order item accepted into stock'
+    : 'Purchase order item rejected';
+  const body = `${delivery.itemName} · ${delivery.poReference}${reason ? ` — ${reason}` : ''}`;
+  await notifyStorekeepers(connection, title, body, DELIVERY_PAGE_LINK, 'purchase_order_delivery');
+}
+
+router.get('/deliveries', async (req, res, next) => {
+  try {
+    const paged = pagination(req.query, 'delivered', DELIVERY_SORT_FIELDS);
+    if (paged.error) return res.status(400).json({ message: paged.error });
+
+    const status = String(req.query.status || '');
+    if (status && !DELIVERY_STATUSES.has(status)) {
+      return res.status(400).json({ message: 'Choose a supported delivery status.' });
+    }
+    const search = text(req.query.search, 180);
+    const where = [];
+    const params = [];
+    if (status) {
+      where.push('d.status = ?');
+      params.push(status);
+    }
+    if (search) {
+      where.push(`(
+        d.item_name LIKE ? OR d.po_reference LIKE ? OR d.supplier_name LIKE ?
+        OR COALESCE(d.department_name, '') LIKE ? OR COALESCE(d.description, '') LIKE ?
+      )`);
+      const term = `%${search}%`;
+      params.push(term, term, term, term, term);
+    }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const [deliveries] = await pool.execute(
+      `${DELIVERY_SELECT} ${whereSql}
+        ORDER BY ${paged.sortColumn} ${paged.direction}, d.id DESC
+        LIMIT ? OFFSET ?`,
+      [...params, paged.limit, (paged.page - 1) * paged.limit]
+    );
+    const [[totals]] = await pool.execute(
+      `SELECT COUNT(*) AS total,
+          COALESCE(SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END), 0) AS pending,
+          COALESCE(SUM(CASE WHEN status = 'Accepted' THEN 1 ELSE 0 END), 0) AS accepted,
+          COALESCE(SUM(CASE WHEN status = 'Rejected' THEN 1 ELSE 0 END), 0) AS rejected
+         FROM purchase_order_delivery_items`
+    );
+    return res.json({
+      deliveries,
+      counts: {
+        all: Number(totals?.total) || 0,
+        Pending: Number(totals?.pending) || 0,
+        Accepted: Number(totals?.accepted) || 0,
+        Rejected: Number(totals?.rejected) || 0
+      },
+      pagination: {
+        page: paged.page,
+        limit: paged.limit,
+        pages: Math.max(1, Math.ceil((Number(totals?.total) || 0) / paged.limit)),
+        total: Number(totals?.total) || 0
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/deliveries/:id', async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ message: 'Invalid delivery item identifier.' });
+    const [rows] = await pool.execute(`${DELIVERY_SELECT} WHERE d.id = ?`, [id]);
+    if (!rows[0]) return res.status(404).json({ message: 'Delivery item not found.' });
+    return res.json({ delivery: rows[0] });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/deliveries/:id/accept', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid delivery item identifier.' });
+  let reason;
+  try {
+    reason = decisionReason(req.body, 'Accepted');
+  } catch (error) {
+    return res.status(error.status || 400).json({ message: error.message });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const delivery = await deliveryForUpdate(connection, id);
+    if (!delivery) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Delivery item not found.' });
+    }
+    if (delivery.status !== 'Pending') {
+      await connection.rollback();
+      return res.status(409).json({ message: `This item was already ${delivery.status.toLowerCase()}.` });
+    }
+
+    const [matches] = await connection.execute(
+      'SELECT id, name, quantity FROM items WHERE name = ? AND unit = ? ORDER BY id LIMIT 1 FOR UPDATE',
+      [delivery.itemName, delivery.unit]
+    );
+    let itemId;
+    let balance;
+    if (matches[0]) {
+      itemId = Number(matches[0].id);
+      balance = Number(matches[0].quantity) + Number(delivery.quantity);
+    } else {
+      const sku = `PO-${Number(delivery.purchaseOrderItemId)}-${randomBytes(3).toString('hex').toUpperCase()}`;
+      const [created] = await connection.execute(
+        `INSERT INTO items (department_id, sku, name, category, unit, quantity, reorder_level, unit_cost)
+         VALUES (?, ?, ?, 'Purchased', ?, 0, 10, ?)`,
+        [
+          delivery.departmentId || null, sku, delivery.itemName,
+          delivery.unit, Number(delivery.unitPrice) || 0
+        ]
+      );
+      itemId = Number(created.insertId);
+      balance = Number(delivery.quantity);
+    }
+    if (balance > 4294967295) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'The resulting stock balance exceeds the supported limit.' });
+    }
+    await connection.execute('UPDATE items SET quantity = ?, unit_cost = ? WHERE id = ?', [
+      balance, Number(delivery.unitPrice) || 0, itemId
+    ]);
+
+    const referenceNo = `PO-DEL-${id}-${randomBytes(3).toString('hex').toUpperCase()}`;
+    const movementDate = businessDate(new Date().toISOString().slice(0, 10), 'Receipt date');
+    const movementId = await recordMovement(connection, {
+      itemId,
+      userId: req.user.id,
+      type: 'Receipt',
+      direction: 'In',
+      quantity: Number(delivery.quantity),
+      referenceNo,
+      source: delivery.supplierName || 'Purchase order',
+      description: `Accepted from purchase order ${delivery.poReference}${reason ? ` · ${reason}` : ''}`,
+      departmentId: delivery.departmentId || null,
+      idempotencyKey: `PO-DELIVERY-${id}`,
+      balance,
+      movementAt: toUtcDateTime(movementDate)
+    });
+
+    await connection.execute(
+      `UPDATE purchase_order_delivery_items
+          SET status = 'Accepted', decision_reason = ?, decided_by = ?, decided_by_name = ?,
+              decided_at = UTC_TIMESTAMP(), inventory_item_id = ?, inventory_movement_id = ?
+        WHERE id = ?`,
+      [reason, req.user.id, req.user.name || 'Storekeeper', itemId, movementId, id]
+    );
+    await writeAudit(connection, req.user.id, 'purchase_order_delivery_accepted', 'purchase_order_delivery_item', id, {
+      purchaseOrderId: delivery.purchaseOrderId,
+      purchaseOrderItemId: delivery.purchaseOrderItemId,
+      itemId,
+      quantity: Number(delivery.quantity),
+      referenceNo
+    });
+    await notifyDeliveryDecision(connection, delivery, 'Accepted', reason);
+    await connection.commit();
+    return res.status(201).json({
+      id: Number(id),
+      status: 'Accepted',
+      itemId,
+      itemName: delivery.itemName,
+      balance,
+      movementId: Number(movementId),
+      referenceNo,
+      message: `${delivery.itemName} was accepted into stock.`
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'This delivery item has already been recorded.' });
+    }
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+router.post('/deliveries/:id/reject', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid delivery item identifier.' });
+  let reason;
+  try {
+    reason = decisionReason(req.body, 'Rejected');
+  } catch (error) {
+    return res.status(error.status || 400).json({ message: error.message });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const delivery = await deliveryForUpdate(connection, id);
+    if (!delivery) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Delivery item not found.' });
+    }
+    if (delivery.status !== 'Pending') {
+      await connection.rollback();
+      return res.status(409).json({ message: `This item was already ${delivery.status.toLowerCase()}.` });
+    }
+
+    // A rejection deliberately stops here: no catalogue row, quantity change,
+    // or inventory movement is created for the rejected line.
+    await connection.execute(
+      `UPDATE purchase_order_delivery_items
+          SET status = 'Rejected', decision_reason = ?, decided_by = ?, decided_by_name = ?,
+              decided_at = UTC_TIMESTAMP()
+        WHERE id = ?`,
+      [reason, req.user.id, req.user.name || 'Storekeeper', id]
+    );
+    await writeAudit(connection, req.user.id, 'purchase_order_delivery_rejected', 'purchase_order_delivery_item', id, {
+      purchaseOrderId: delivery.purchaseOrderId,
+      purchaseOrderItemId: delivery.purchaseOrderItemId,
+      reason
+    });
+    await notifyDeliveryDecision(connection, delivery, 'Rejected', reason);
+    await connection.commit();
+    return res.json({
+      id: Number(id),
+      status: 'Rejected',
+      itemName: delivery.itemName,
+      reason,
+      message: `${delivery.itemName} was rejected and was not added to stock.`
+    });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
 router.get('/summary', async (req, res, next) => {
   try {
     const [[stats]] = await pool.execute(

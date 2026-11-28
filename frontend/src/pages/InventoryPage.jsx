@@ -6,7 +6,6 @@ import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { currency, dateLabel } from '../utils/format.js';
 
 const addItemButtonClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-brand bg-white px-4 py-2.5 text-xs font-semibold text-black transition-colors hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2';
-const recordReceiptButtonClass = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-black bg-reference px-4 py-2.5 text-xs font-semibold text-black transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2';
 const MOVEMENT_ICONS = { Receipt: ArrowDownToLine, Issue: ArrowUpFromLine, Adjustment: ArrowLeftRight };
 
 function InventoryItemForm({ onClose, onSubmit }) {
@@ -33,28 +32,9 @@ function InventoryItemForm({ onClose, onSubmit }) {
   </form></Modal>;
 }
 
-function ReceiptForm({ items, onClose, onSubmit }) {
-  const [form, setForm] = useState({ itemId: '', quantity: '1', source: '' });
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  async function submit(event) {
-    event.preventDefault(); setBusy(true); setError('');
-    try { await onSubmit({ ...form, itemId: Number(form.itemId), quantity: Number(form.quantity) }); onClose(); }
-    catch (exception) { setError(exception.message); }
-    finally { setBusy(false); }
-  }
-  return <Modal title="Record stock receipt" onClose={onClose}><form onSubmit={submit} className="space-y-4">
-    <label className="block text-xs font-bold">Item<select required value={form.itemId} onChange={(event) => setForm({ ...form, itemId: event.target.value })} className="field"><option value="">Select an item…</option>{items.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.sku}</option>)}</select></label>
-    <label className="block text-xs font-bold">Quantity<input required min="1" type="number" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} className="field" /></label>
-    <label className="block text-xs font-bold">Source<input required value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} className="field" /></label>
-    <ErrorMessage>{error}</ErrorMessage><FormActions busy={busy} close={onClose} label="Confirm receipt" />
-  </form></Modal>;
-}
-
-export default function InventoryPage({ page, items, movements, user, search, query = {}, onAddItem, onReceive }) {
+export default function InventoryPage({ page, items, movements, user, search, query = {}, onAddItem }) {
   const [dialog, setDialog] = useState('');
   const canEdit = ['admin', 'storekeeper'].includes(user.role);
-  const canReceive = ['admin', 'storekeeper', 'procurement'].includes(user.role);
   const filtered = items.filter((item) => `${item.name} ${item.sku} ${item.category}`.toLowerCase().includes(search.toLowerCase()));
   const lowStock = filtered.filter((item) => item.quantity <= item.reorderLevel);
   const lowStockOnly = query.lowStock === 'true' || query.lowStock === '1';
@@ -121,7 +101,6 @@ export default function InventoryPage({ page, items, movements, user, search, qu
       description={`${visibleItems.length} of ${items.length} items · ${lowStock.length} below reorder level${lowStockOnly ? ' · Low stock only' : ''}`}
       action={<div className="flex flex-wrap gap-2">
         {canEdit && <button type="button" onClick={() => setDialog('item')} className={addItemButtonClass}><Plus size={15} />Add item</button>}
-        {canReceive && <button type="button" onClick={() => setDialog('receipt')} className={recordReceiptButtonClass}><Plus size={15} />Record receipt</button>}
       </div>}
     >
       {visibleItems.length ? <div className="overflow-x-auto">
@@ -178,6 +157,5 @@ export default function InventoryPage({ page, items, movements, user, search, qu
       </EmptyState>}
     </PageCard>}
     {dialog === 'item' && <InventoryItemForm onClose={() => setDialog('')} onSubmit={onAddItem} />}
-    {dialog === 'receipt' && <ReceiptForm items={items} onClose={() => setDialog('')} onSubmit={onReceive} />}
   </>;
 }

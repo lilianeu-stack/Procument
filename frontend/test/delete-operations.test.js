@@ -12,6 +12,7 @@ const adminRoutes = readFileSync(new URL('../../backend/src/routes/admin.js', im
 
 test('department dependency policy covers every related historical record', () => {
   const department = {
+    childCount: 7,
     userCount: 2,
     requisitionCount: 1,
     storeRequestCount: 3,
@@ -19,13 +20,15 @@ test('department dependency policy covers every related historical record', () =
     stockMovementCount: 5,
     messageCount: 6
   };
-  assert.equal(departmentDependencyCounts(department).length, 6);
+  assert.equal(departmentDependencyCounts(department).length, 7);
   assert.equal(requiresDepartmentReassignment(department), true);
   const text = departmentDependencyText(department);
-  for (const fragment of ['2 user(s)', '1 requisition(s)', '3 store request(s)', '4 inventory item(s)', '5 stock movement(s)', '6 message(s)']) {
+  for (const fragment of ['7 subdepartment(s)', '2 user(s)', '1 requisition(s)', '3 store request(s)', '4 inventory item(s)', '5 stock movement(s)', '6 message(s)']) {
     assert.ok(text.includes(fragment), `${fragment} must be shown before deletion`);
   }
   assert.equal(requiresDepartmentReassignment({ userCount: 0, messageCount: 0 }), false);
+  assert.equal(requiresDepartmentReassignment({ childCount: 1 }), false);
+  assert.match(departmentDependencyText({ childCount: 1 }), /must be moved or deleted first/);
 });
 
 test('confirmation dialogs are explicit, error-aware, and single-flight', () => {
@@ -56,6 +59,7 @@ test('delete actions call the correct backend endpoints and refresh data', () =>
 
 test('backend department deletion reassigns all dependencies and blocks conflicts', () => {
   assert.ok(adminRoutes.includes("['users', 'requisitions', 'store_requests', 'items', 'inventory_movements', 'messages']"));
+  assert.ok(adminRoutes.includes('subdepartment(s)'));
   assert.ok(adminRoutes.includes('UPDATE ${table} SET department_id = ? WHERE department_id = ?'));
   assert.ok(adminRoutes.includes('departmentDependencyMessage(usage)'));
   assert.ok(adminRoutes.includes("role = 'supervisor' AND active = TRUE"));

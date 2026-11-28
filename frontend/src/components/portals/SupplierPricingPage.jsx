@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Save, Send } from 'lucide-react';
 import PageCard, { EmptyState } from '../ui/PageCard.jsx';
+import PurchaseOrderDocument from '../documents/PurchaseOrderDocument.jsx';
 import Modal from '../ui/Modal.jsx';
 import PublicPrintToolbar from '../ui/PublicPrintToolbar.jsx';
 import { ErrorState, LoadingState } from './PortalUi.jsx';
@@ -64,13 +65,19 @@ export default function SupplierPricingPage({ token }) {
   const [submitOpen, setSubmitOpen] = useState(false);
   const [submitConfirmed, setSubmitConfirmed] = useState(false);
   const [locked, setLocked] = useState(false);
+  // StrictMode and parent re-renders can run this effect more than once. Load
+  // each token only once so the form never resets itself while being edited.
+  const loadedTokenRef = useRef(null);
+  const submitAttemptedRef = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!token) {
       setError('This supplier pricing link is missing its access token.');
       setLoading(false);
       return;
     }
+    if (!force && loadedTokenRef.current === token) return;
+    loadedTokenRef.current = token;
     setLoading(true);
     setError('');
     try {
@@ -165,8 +172,12 @@ export default function SupplierPricingPage({ token }) {
   }
 
   async function submitQuotation() {
+    // A quotation can be submitted only once: block repeat clicks while the
+    // request is in flight and after a successful submission.
+    if (submitAttemptedRef.current || busy || locked) return;
     const problem = validate();
     if (problem) { setSubmitOpen(false); setValidationError(problem); return; }
+    submitAttemptedRef.current = true;
     setBusy(true); setError(''); setValidationError(''); setNotice('');
     try {
       const response = await api(`/supplier-pricing/${encodeURIComponent(token)}/submit`, {
@@ -183,6 +194,9 @@ export default function SupplierPricingPage({ token }) {
       setSubmitConfirmed(false);
       setNotice(response.message || 'Your quotation was submitted. Procurement will review it privately.');
     } catch (exception) {
+      // A transport failure can be retried; a completed submission cannot.
+      if (exception?.status === 409) setLocked(true);
+      else submitAttemptedRef.current = false;
       setError(friendlyError(exception));
     } finally {
       setBusy(false);
@@ -190,17 +204,16 @@ export default function SupplierPricingPage({ token }) {
   }
 
   const details = request?.pricingRequest || {};
-  const organization = details.organization || {};
   const response = request?.response || {};
 
   return <div className="min-h-screen bg-canvas">
     <header className="no-print border-b bg-white">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-4">
+      <div className="flex w-full max-w-none flex-wrap items-center justify-between gap-3 px-4 py-4">
         <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-black">Supplier pricing portal</span>
       </div>
     </header>
 
-    <main className="mx-auto max-w-6xl space-y-5 px-4 py-8">
+    <main className="w-full max-w-none space-y-5 px-4 py-8">
       {details.reference && <PublicPrintToolbar
         title="Supplier pricing response"
         reference={details.reference}
@@ -216,7 +229,7 @@ export default function SupplierPricingPage({ token }) {
       </div>
 
       {loading && <PageCard title="Opening pricing request"><LoadingState label="Opening your pricing request…" /></PageCard>}
-      {!loading && error && !request && <PageCard title="Pricing link"><ErrorState message={error} onRetry={load} /></PageCard>}
+      {!loading && error && !request && <PageCard title="Pricing link"><ErrorState message={error} onRetry={() => load(true)} /></PageCard>}
       {!loading && error && request && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{error}</div>}
       {validationError && <div role="alert" className="rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black">{validationError}</div>}
       {notice && <div className="flex items-start gap-2 rounded-lg border border-brand bg-white px-4 py-3 text-xs font-semibold text-black"><CheckCircle2 size={16} className="mt-0.5 shrink-0" />{notice}</div>}
@@ -226,33 +239,17 @@ export default function SupplierPricingPage({ token }) {
       </div>}
 
       {!loading && request && <>
-        <PageCard title="Purchase Order Details" description="Details of the request you are pricing.">
-          <dl className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Purchase order reference</dt><dd className="mt-1 text-sm font-extrabold">{details.purchaseOrderReference || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Request reference</dt><dd className="mt-1 text-sm font-bold">{details.reference || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Type</dt><dd className="mt-1 text-sm font-bold">{details.purchaseOrderType || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.date)}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Delivery date</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.deliveryDate)}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Submission deadline</dt><dd className="mt-1 text-sm font-bold">{dateLabel(details.submissionDeadline)}</dd></div>
-            <div className="sm:col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Requesting organization</dt>
-              <dd className="mt-1 text-sm font-bold">{organization.name || '—'}</dd>
-              {(organization.caption || organization.title) && <dd className="mt-0.5 text-xs text-black">{[organization.caption, organization.title].filter(Boolean).join(' · ')}</dd>}
-              {[organization.address, [organization.city, organization.country].filter(Boolean).join(', '),
-                organization.phone, organization.email].filter(Boolean).map((value, index) =>
-                <dd key={`organization-${index}`} className="mt-0.5 text-xs text-black">{value}</dd>)}
+        {request.purchaseOrder && <PageCard
+          title={`Official purchase order · ${request.purchaseOrder.reference || details.purchaseOrderReference || ''}`}
+          description="The purchase order created by Procurement, including the official signatures.">
+          <div className="space-y-3 p-5">
+            {details.submissionDeadline && <p className="text-[11px] font-bold text-black">Submission deadline: {dateLabel(details.submissionDeadline)}</p>}
+            {details.message && <p className="rounded-lg border border-brand bg-white p-3 text-xs leading-5 text-black"><strong>Message from Procurement:</strong> {details.message}</p>}
+            <div className="max-h-[70vh] overflow-auto rounded-lg border border-brand bg-white p-3">
+              <PurchaseOrderDocument order={request.purchaseOrder} />
             </div>
-            {details.message && <div className="sm:col-span-3 rounded-lg border border-brand bg-white p-4 text-xs leading-5 text-black"><dt className="text-[10px] font-extrabold uppercase tracking-wide text-black">Message from Procurement</dt><dd className="mt-1 whitespace-pre-wrap">{details.message}</dd></div>}
-          </dl>
-        </PageCard>
-
-        <PageCard title="Supplier Information" description="Registered details for this pricing request.">
-          <dl className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Supplier name</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.name || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Contact person</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.contactName || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Email</dt><dd className="mt-1 break-all text-sm font-bold">{details.supplier?.email || '—'}</dd></div>
-            <div><dt className="text-[10px] font-bold uppercase tracking-wide text-black">Address</dt><dd className="mt-1 text-sm font-bold">{details.supplier?.address || '—'}</dd></div>
-          </dl>
-        </PageCard>
+          </div>
+        </PageCard>}
 
         <PageCard title="Requested Items" description="Enter your own unit prices. Requested quantities and descriptions cannot be changed.">
           {items.length ? <div className="overflow-x-auto">

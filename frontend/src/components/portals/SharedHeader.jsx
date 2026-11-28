@@ -41,12 +41,13 @@ export default function SharedHeader({
         {open && <div className="absolute right-0 top-11 z-50 w-[320px] rounded-xl border border-strong bg-white p-3">
           <div className="mb-2 flex items-center justify-between px-1">
             <span className="text-xs font-bold">Notifications</span>
-            <span className="text-[10px] text-black">{unread} unread</span>
+            <span data-testid="notification-unread-count" className="pims-notification-unread-text text-[10px] font-bold">{unread} unread</span>
           </div>
           <div className="max-h-80 overflow-y-auto">
             {notifications.length ? notifications.map((notice) => (
-              <button key={notice.id} onClick={() => onNotification(notice)} className={`mb-1 block w-full rounded-lg p-2 text-left transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${notice.isRead ? '' : 'bg-white'}`}>
-                <span className="block text-xs font-bold">{notice.title}</span>
+              <button key={notice.id} onClick={() => onNotification(notice)} className={`mb-1 block w-full rounded-lg border-l-2 p-2 text-left transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus ${notice.isRead ? 'border-transparent bg-white' : 'border-reference bg-accent-tint'}`}>
+                <span className={`block text-xs font-bold ${notice.isRead ? '' : 'pims-notification-unread-title'}`}>{notice.title}</span>
+                {!notice.isRead && <span data-testid="notification-unread-marker" className="pims-notification-unread-label mt-1 inline-flex rounded bg-white px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide">New</span>}
                 <span className="mt-1 block text-[11px] leading-4 text-black">{notice.body}</span>
                 <span className="mt-1 block text-[9px] text-black">{dateLabel(notice.createdAt)}</span>
               </button>

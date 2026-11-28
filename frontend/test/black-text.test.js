@@ -112,4 +112,8 @@ test('official document palette exceptions stay scoped to the document surface',
   const css = read('../src/index.css');
   assert.match(css, /\.official-document,\s*\.official-document \* \{[\s\S]*?color:\s*var\(--pims-document-navy\)\s*!important/);
   assert.match(css, /\.official-header,\s*\.official-header \* \{[\s\S]*?color:\s*#FFFFFF\s*!important/);
+<<<<<<< HEAD
+=======
+  assert.doesNotMatch(css, /\.official-header-text strong \{[^}]*pims-interaction-green/);
+>>>>>>> origin/master
 });

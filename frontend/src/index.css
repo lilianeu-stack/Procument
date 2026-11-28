@@ -246,6 +246,12 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   color: #FFFFFF !important;
 }
 
+/* The Email Inbox nav also names its unread count; this is the only text
+   opted into the selected green so the message count stays visible. */
+.pims-sidebar-unread-text {
+  color: var(--pims-reference) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :where(
     a[href], button, summary,
@@ -374,7 +380,7 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 
 .official-approval-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; margin-top: 16px; border-top: 1px solid var(--pims-border); border-left: 1px solid var(--pims-border); }
 .official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid var(--pims-border); border-bottom: 1px solid var(--pims-border); }
-.official-signature-line { display: block; min-height: 14px; border-bottom: 1px solid var(--pims-border); }
+.official-signature-line { display: block; min-height: 14px; }
 
 .official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
 .official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 4px 0; }
@@ -499,4 +505,25 @@ input::placeholder, textarea::placeholder {
 #root [role='button'],
 #root [role='button'] * {
   color: #000000 !important;
+}
+
+/* Keep the unread Email Inbox count green while the global button text token
+   stays untouched. This scoped exception must follow the button rule above. */
+#root button .pims-sidebar-unread-text,
+#root [role='button'] .pims-sidebar-unread-text {
+  color: var(--pims-reference) !important;
+  -webkit-text-fill-color: var(--pims-reference) !important;
+}
+
+/* The notification bell card keeps its unread count and unread-item markers
+   green. These scoped exceptions also follow the global button text rule. */
+.pims-notification-unread-text,
+.pims-notification-unread-title,
+.pims-notification-unread-label,
+#root button .pims-notification-unread-title,
+#root button .pims-notification-unread-label,
+#root [role='button'] .pims-notification-unread-title,
+#root [role='button'] .pims-notification-unread-label {
+  color: var(--pims-reference) !important;
+  -webkit-text-fill-color: var(--pims-reference) !important;
 }

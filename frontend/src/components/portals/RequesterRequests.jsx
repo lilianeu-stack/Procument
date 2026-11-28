@@ -278,9 +278,6 @@ export default function RequesterRequests({
           </h1>
           <p data-testid="requests-context" className="mt-1 text-xs text-black">{roleName} · {departmentName}</p>
         </div>
-        <p className="max-w-sm text-[11px] leading-5 text-black">
-          Showing only requests created by your account. Filter the register to review or export a specific result set.
-        </p>
       </div>
     </section>
 

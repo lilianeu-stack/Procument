@@ -7,7 +7,6 @@ import PrintButton from '../components/ui/PrintButton.jsx';
 import PurchaseOrderDocument from '../components/documents/PurchaseOrderDocument.jsx';
 import SupplierPricingAwardSummary from '../components/documents/SupplierPricingAwardSummary.jsx';
 import SendForApprovalModal from '../components/portals/SendForApprovalModal.jsx';
-import SupplierSelectionModal from '../components/portals/SupplierSelectionModal.jsx';
 import StatusBadge from '../components/ui/StatusBadge.jsx';
 import SignatureUpload from '../components/ui/SignatureUpload.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
@@ -308,7 +307,7 @@ export function OrderForm({
     setError('');
     setBusy(true);
     try {
-      if (!onSendIntent) throw new Error('Supplier pricing requests are not available.');
+      if (!onSendIntent) throw new Error('Sending the official purchase order is not available.');
       await onSendIntent({
         id: null,
         reference: 'New purchase order',
@@ -316,8 +315,7 @@ export function OrderForm({
         type: form.type,
         total: calculatePurchaseTotals(lines, configuredVatRate()).total,
         deliveryDate: form.deliveryDate,
-        __createPayload: formPayload(),
-        __sendToSuppliers: true
+        __createPayload: formPayload()
       });
     } catch (exception) {
       setError(exception.message || 'The Purchase Order could not be saved.');
@@ -392,7 +390,7 @@ export function OrderForm({
         <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
         <button type="submit" disabled={busy}
           className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
-          <Send size={14} />{busy ? 'Saving Purchase Order…' : 'Send to Suppliers'}
+          <Send size={14} />{busy ? 'Saving & Sending PO…' : 'Save & Send PO'}
         </button>
       </div>
     </form>
@@ -439,11 +437,10 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
     setError('');
     setBusy(true);
     try {
-      if (!onSendIntent) throw new Error('Supplier pricing requests are not available.');
+      if (!onSendIntent) throw new Error('Sending the official purchase order is not available.');
       await onSendIntent({
         ...order,
-        __updatePayload: formPayload(),
-        __sendToSuppliers: true
+        __updatePayload: formPayload()
       });
     } catch (exception) {
       setError(exception.message || 'The Purchase Order could not be saved.');
@@ -493,7 +490,7 @@ export function OrderEditForm({ order, onClose, onSubmit, onSendIntent }) {
         <button type="button" onClick={onClose} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold">Cancel</button>
         <button type="submit" disabled={busy}
           className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black disabled:opacity-60">
-          <Send size={14} />{busy ? 'Saving Purchase Order…' : 'Send to Suppliers'}
+          <Send size={14} />{busy ? 'Saving & Sending PO…' : 'Save & Send PO'}
         </button>
       </div>
     </form>
@@ -591,7 +588,7 @@ export default function PurchaseOrdersPage({
   orders = [], rfqs = [], items = [], suppliers = [], user = {}, requisition = null,
   query = {}, navigate, onCreate, onDecision, onReceive, getPurchaseOrder, updatePurchaseOrder,
   loadApprovers, onLoadCommitteeRecommendations, onLoadQuotes, onSendForApproval, onRevokeApproval,
-  sendPurchaseOrderToSuppliers, onSaveSignatures
+  sendPurchaseOrderToSupplier, onSaveSignatures
 }) {
   const [creating, setCreating] = useState(false);
   const [poSelection, setPoSelection] = useState(null);
@@ -599,6 +596,7 @@ export default function PurchaseOrdersPage({
   const [recommendationDetail, setRecommendationDetail] = useState(null);
   const [receiving, setReceiving] = useState(null);
   const [sendOrder, setSendOrder] = useState(null);
+  const [sendBusy, setSendBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [detail, setDetail] = useState(null);
@@ -772,7 +770,7 @@ export default function PurchaseOrdersPage({
       saved = normalizeDetail(await updatePurchaseOrder(preview.id, preview.__updatePayload));
       closeDetail();
     } else {
-      throw new Error('Save the Purchase Order before selecting Suppliers.');
+      throw new Error('Save the Purchase Order before sending it to the supplier.');
     }
 
     const id = saved?.id ?? saved?.purchaseOrder?.id ?? preview.id;
@@ -780,15 +778,7 @@ export default function PurchaseOrdersPage({
     if (!id || !reference || reference === 'New purchase order') {
       throw new Error('The saved Purchase Order reference could not be confirmed.');
     }
-    setSendOrder({
-      ...preview,
-      ...(saved?.purchaseOrder || saved),
-      id,
-      reference,
-      __createPayload: undefined,
-      __updatePayload: undefined,
-      __sendToSuppliers: true
-    });
+    await sendOfficialPurchaseOrder({ id, reference });
   }
 
   async function refreshDetail(id) {
@@ -802,26 +792,41 @@ export default function PurchaseOrdersPage({
     } catch { /* the list refresh already reports broader API failures */ }
   }
 
+  // The supplier receives the saved official purchase order PDF itself, never
+  // the RFQ or the supplier-pricing form. The backend attaches the same signed
+  // document produced by Download official PDF.
+  async function sendOfficialPurchaseOrder(order, payload = {}) {
+    if (!sendPurchaseOrderToSupplier) throw new Error('Sending the official purchase order is not available.');
+    const id = Number(order?.id);
+    if (!Number.isInteger(id) || id < 1) {
+      throw new Error('Save the Purchase Order before sending it to the supplier.');
+    }
+    setSendBusy(true); setError(''); setNotice('');
+    try {
+      const response = await sendPurchaseOrderToSupplier(id, payload);
+      const accepted = Number(response?.emailDelivery?.accepted) || 0;
+      const failed = Number(response?.emailDelivery?.failed) || 0;
+      setNotice(failed && !accepted
+        ? `${response.deliveryQueued ? 'Items were queued for Storekeeper review, but ' : ''}the official purchase order was not delivered. Check the email delivery status and try again.`
+        : response.message || `Official purchase order ${order?.reference || ''} sent to the registered supplier.`);
+      await refreshDetail(id);
+      return response;
+    } finally { setSendBusy(false); }
+  }
+
+  async function emailPurchaseOrder(order) {
+    try { await sendOfficialPurchaseOrder(order); }
+    catch (exception) { setError(exception.message || 'The purchase order could not be sent.'); }
+  }
+
   async function saveAndSend(order, payload) {
-    const toSuppliers = Boolean(order.__sendToSuppliers);
-    if (toSuppliers && !sendPurchaseOrderToSuppliers) throw new Error('Sending supplier pricing requests is not available.');
-    if (!toSuppliers && !onSendForApproval) throw new Error('Sending purchase orders is not available.');
+    if (!onSendForApproval) throw new Error('Sending purchase orders is not available.');
     const id = Number(order.id);
     if (!Number.isInteger(id) || id < 1 || order.__createPayload || order.__updatePayload) {
-      throw new Error('Save the Purchase Order before confirming Supplier invitations.');
+      throw new Error('Save the Purchase Order before confirming approval.');
     }
-    const response = toSuppliers
-      ? await sendPurchaseOrderToSuppliers(id, payload)
-      : await onSendForApproval(id, payload);
-    const missing = response?.emailDelivery?.missing;
-    const failed = Number(response?.emailDelivery?.failed) || 0;
-    if (toSuppliers) {
-      setNotice(missing?.length || (failed > 0 && !response?.emailDelivery?.accepted)
-        ? 'Pricing request saved, but messages were NOT delivered. Check email delivery from Supplier responses.'
-        : response.message || 'Pricing request sent to the selected suppliers.');
-    } else {
-      setNotice(response.message || 'Purchase order sent for approval.');
-    }
+    const response = await onSendForApproval(id, payload);
+    setNotice(response.message || 'Purchase order sent for approval.');
     setError('');
     return response;
   }
@@ -942,8 +947,8 @@ export default function PurchaseOrdersPage({
                     <Mail size={12} />Send for approval
                   </button>}
                   {canCreate && order.status === 'Pending approval' && order.supplierPricingStatus !== 'Awarded' && <button type="button"
-                    onClick={() => { setNotice(''); setSendOrder({ ...order, __sendToSuppliers: true }); }} className={rowActionClass}>
-                    <Send size={12} />Send to Suppliers
+                    onClick={() => { void emailPurchaseOrder(order); }} disabled={sendBusy} className={rowActionClass}>
+                    <Send size={12} />{sendBusy ? 'Sending…' : 'Send to Suppliers'}
                   </button>}
                   {canApprove && order.status === 'Pending approval' && canSendForApproval(order) && <div className="grid grid-cols-2 gap-1.5">
                     <button type="button" onClick={() => decide(order.id, 'Approved')}
@@ -968,8 +973,7 @@ export default function PurchaseOrdersPage({
       onClose={() => { setCreating(false); setPoSelection(null); }} onSubmit={onCreate}
       onSendIntent={async (preview) => { setNotice(''); await prepareSupplierRequest(preview); }} />}
     {receiving && <ReceiptForm order={receiving} items={items} onClose={() => setReceiving(null)} onSubmit={onReceive} />}
-    {sendOrder?.__sendToSuppliers && <SupplierSelectionModal order={sendOrder} suppliers={suppliers} onSend={saveAndSend} onClose={closeSendModal} />}
-    {sendOrder && !sendOrder.__sendToSuppliers && <SendForApprovalModal order={sendOrder} loadApprovers={loadApprovers} onSend={saveAndSend} onClose={closeSendModal} />}
+    {sendOrder && <SendForApprovalModal order={sendOrder} loadApprovers={loadApprovers} onSend={saveAndSend} onClose={closeSendModal} />}
 
     {recommendationDetail && <RecommendedSupplierDetail entry={recommendationDetail} canCreate={canCreate}
       onClose={() => setRecommendationDetail(null)} onViewPurchaseOrder={viewRecommendedPurchaseOrder}
@@ -985,7 +989,7 @@ export default function PurchaseOrdersPage({
         <div className="flex flex-wrap gap-2">
           {canEditPurchaseOrder(detail, user) && <button type="button" onClick={() => setDetailMode('edit')} className="inline-flex items-center gap-1.5 rounded-lg border border-brand px-3 py-2 text-xs font-bold text-black"><Pencil size={14} />Edit</button>}
           {canCreate && detail.status === 'Pending approval' && canSendForApproval(detail) && <button type="button" onClick={() => { setNotice(''); setSendOrder(detail); }} className="inline-flex items-center gap-1.5 rounded-lg border border-brand bg-white px-3 py-2 text-xs font-bold text-black"><Mail size={14} />Send for approval</button>}
-          {canCreate && detail.status === 'Pending approval' && detail.supplierPricingStatus !== 'Awarded' && <button type="button" onClick={() => { setNotice(''); setSendOrder({ ...detail, __sendToSuppliers: true }); }} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"><Send size={14} />Send to Suppliers</button>}
+          {canCreate && detail.status === 'Pending approval' && detail.supplierPricingStatus !== 'Awarded' && <button type="button" onClick={() => { void emailPurchaseOrder(detail); }} disabled={sendBusy} className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-bold text-black"><Send size={14} />{sendBusy ? 'Sending…' : 'Send to Suppliers'}</button>}
           <button type="button" onClick={closeDetail} className="rounded-lg border border-brand px-3 py-2 text-xs font-bold">Close</button>
         </div>
       </div>

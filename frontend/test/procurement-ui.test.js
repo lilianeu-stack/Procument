@@ -29,7 +29,7 @@ test('Purchase orders surfaces Procurement-recommended suppliers with clickable 
   assert.match(app, /onLoadCommitteeRecommendations: \(\) => api\('\/committee-recommendations'\)/);
   assert.match(pageContent, /suppliers=\{data\.suppliers\}/);
   assert.match(pageContent, /onLoadCommitteeRecommendations=\{actions\.onLoadCommitteeRecommendations\}/);
-  assert.match(pageContent, /sendPurchaseOrderToSuppliers=\{actions\.sendPurchaseOrderToSuppliers\}/);
+  assert.match(pageContent, /sendPurchaseOrderToSupplier=\{actions\.sendPurchaseOrderToSupplier\}/);
   assert.match(purchaseOrders, /Recommended suppliers/);
   assert.match(purchaseOrders, /click a supplier to see the quotation, reason and response/);
   assert.match(purchaseOrders, /View recommended supplier \$\{entry\.recommendedSupplier\}/);
@@ -77,7 +77,11 @@ test('official purchase order follows the supplied template and requires image s
   assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
 });
 
+<<<<<<< HEAD
 test('official purchase order uses the supplied design palette with large signatures', () => {
+=======
+test('official purchase order document uses the supplied design palette with large signatures', () => {
+>>>>>>> origin/master
   const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
   const css = source('../src/index.css');
 
@@ -113,6 +117,26 @@ test('create purchase order uses supplier-entered quotation lines without a fina
   assert.ok(pageContent.includes('onLoadQuotes={actions.onLoadQuotes}'));
 });
 
+test('purchase order supplier action emails the saved signed PO directly', () => {
+  const app = source('../src/App.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
+  const purchaseOrders = source('../src/pages/PurchaseOrdersPage.jsx');
+
+  assert.ok(app.includes('sendPurchaseOrderToSupplier: (id, form = {}) => mutate(`/purchase-orders/${id}/send-to-supplier`, form)'));
+  assert.ok(pageContent.includes('sendPurchaseOrderToSupplier={actions.sendPurchaseOrderToSupplier}'));
+  assert.ok(!pageContent.includes('sendPurchaseOrderToSuppliers={'));
+  assert.ok(purchaseOrders.includes('async function sendOfficialPurchaseOrder(order, payload = {})'));
+  assert.ok(purchaseOrders.includes('await sendPurchaseOrderToSupplier(id, payload)'));
+  assert.ok(purchaseOrders.includes('async function emailPurchaseOrder(order)'));
+  assert.ok(purchaseOrders.includes('onClick={() => { void emailPurchaseOrder(order); }}'));
+  assert.ok(purchaseOrders.includes('onClick={() => { void emailPurchaseOrder(detail); }}'));
+  assert.ok(purchaseOrders.includes('Save & Send PO'));
+
+  // The RFQ/pricing-form invitation modal is no longer part of this action.
+  assert.ok(!purchaseOrders.includes('SupplierSelectionModal'));
+  assert.ok(!purchaseOrders.includes('__sendToSuppliers'));
+});
+
 test('supplier pricing request blocks a past submission deadline before sending', () => {
   const modal = source('../src/components/portals/SupplierSelectionModal.jsx');
 
@@ -140,6 +164,31 @@ test('supplier pricing form opens with prefilled prices and only a comments inpu
   ]) {
     assert.ok(!pricing.includes(removed), `supplier pricing form still renders ${removed}`);
   }
+});
+
+test('supplier pricing form shows the created official purchase order with signatures', () => {
+  const pricing = source('../src/components/portals/SupplierPricingPage.jsx');
+
+  assert.match(pricing, /import PurchaseOrderDocument from '..\/documents\/PurchaseOrderDocument\.jsx';/);
+  assert.match(pricing, /Official purchase order · \$\{request\.purchaseOrder\.reference/);
+  assert.match(pricing, /<PurchaseOrderDocument order=\{request\.purchaseOrder\} \/>/);
+  assert.match(pricing, /The purchase order created by Procurement, including the official signatures\./);
+  assert.doesNotMatch(pricing, /<PageCard title="Supplier Information"/);
+});
+
+test('supplier pricing form loads once and allows a single submission', () => {
+  const pricing = source('../src/components/portals/SupplierPricingPage.jsx');
+
+  assert.match(pricing, /useRef, useState/);
+  assert.match(pricing, /const loadedTokenRef = useRef\(null\)/);
+  assert.match(pricing, /if \(!force && loadedTokenRef\.current === token\) return;/);
+  assert.match(pricing, /onRetry=\{\(\) => load\(true\)\}/);
+
+  assert.match(pricing, /const submitAttemptedRef = useRef\(false\)/);
+  assert.match(pricing, /if \(submitAttemptedRef\.current \|\| busy \|\| locked\) return;/);
+  assert.match(pricing, /submitAttemptedRef\.current = true;/);
+  assert.match(pricing, /if \(exception\?\.status === 409\) setLocked\(true\);/);
+  assert.match(pricing, /disabled=\{busy \|\| !submitConfirmed\}/);
 });
 
 test('RFQ form has only start/deadline dates and a searchable multi-supplier dropdown', () => {
@@ -243,12 +292,61 @@ test('procurement overview groups every live metric into its business section', 
   assert.doesNotMatch(overview, /Keep every request moving/);
 });
 
+test('Procurement dashboard hides the requested status cards only for Procurement users', () => {
+  const overview = source('../src/pages/OverviewPage.jsx');
+  for (const label of [
+    'Rejected Requests', 'Under Review', 'Processing', 'Rejected', 'Draft RFQs', 'Awarded RFQs'
+  ]) {
+    assert.match(overview, new RegExp(`'${label}'`));
+  }
+  assert.match(overview, /role === 'procurement'/);
+  assert.match(overview, /section\.metrics\.filter\(\(metric\) => !PROCUREMENT_HIDDEN_METRICS\.has\(metric\.label\)\)/);
+});
+
+test('Stock movements page hides its page header above the register controls', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+
+  assert.match(layout, /page !== 'Stock movements'/);
+  assert.match(layout, /Review recorded receipts, issues, and inventory balance changes/);
+});
+
+test('Goods receipts and Email Inbox hide their large page headers', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+  assert.match(layout, /page !== 'Goods receipts'/);
+  assert.match(layout, /page !== 'Email Inbox'/);
+});
+
+test('Stock overview hides its page header and has no Record receipt button', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+  const inventory = source('../src/pages/InventoryPage.jsx');
+  assert.match(layout, /page !== 'Stock overview'/);
+  assert.doesNotMatch(inventory, /Record receipt|recordReceiptButtonClass|canReceive/);
+});
+
+test('Procurement sidebar hides Goods receipts without hiding it for other roles', () => {
+  const sidebar = source('../src/components/layout/Sidebar.jsx');
+  assert.match(sidebar, /user\.role === 'procurement' && name === 'Goods receipts'/);
+  assert.match(sidebar, /canAccessPage\(user\.role, name\)/);
+});
+
+test('Invoices is absent from the shared sidebar for all roles', () => {
+  const sidebar = source('../src/components/layout/Sidebar.jsx');
+  assert.doesNotMatch(sidebar, /\{ name: 'Invoices', icon: BriefcaseBusiness \}/);
+  assert.doesNotMatch(sidebar, /name === 'Invoices'/);
+});
+
 test('received-request and RFQ registers keep their tools without top summary cards', () => {
   const received = source('../src/components/portals/ReceivedRequests.jsx');
   const rfqs = source('../src/pages/RfqsPage.jsx');
   assert.doesNotMatch(received, /SUMMARY_CARDS|aria-label="Received request summary"/);
   assert.match(received, /Received requests register/);
-  assert.match(received, /<DateRangeFilter/);
+  assert.match(received, /<DateRangeFilter\s+fromToOnly/);
+  assert.match(received, /label="Search request"/);
+  assert.match(received, /placeholder="Search request"/);
+  assert.doesNotMatch(received, /Search requester/);
+  assert.doesNotMatch(received, /Search department/);
+  assert.doesNotMatch(received, /All statuses/);
+  assert.doesNotMatch(received, /Submission \/ forwarding/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="pdf"/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="xlsx"/);
   assert.match(received, /DownloadButton exportKey=\{report\.exportKey\} format="csv"/);
@@ -348,4 +446,82 @@ test('Procurement can resend a working response link for an already-sent form', 
   assert.match(documentView, /localhost link\. Resend a form/);
   assert.match(app, /getRequisitionForms: \(id\) => api\(`\/email\/requisitions\/\$\{id\}\/forms`\)/);
   assert.match(app, /resendRequisitionForm: \(id, threadId\) => mutate\(`\/email\/requisitions\/\$\{id\}\/forms\/\$\{threadId\}\/resend`, \{\}\)/);
+});
+
+test('forwarded request can send requested items to another user', () => {
+  const documentView = source('../src/components/portals/ProcurementDocumentView.jsx');
+  const app = source('../src/App.jsx');
+
+  assert.match(documentView, /const \[sendOpen, setSendOpen\] = useState\(false\)/);
+  assert.match(documentView, /function openSendModal\(\)/);
+  assert.match(documentView, /function sendToAnotherUser\(event\)/);
+  assert.match(documentView, /<Send size=\{14\} \/>Send to another user/);
+  assert.match(documentView, /<Modal title="Send requested items to another user"/);
+  assert.match(documentView, /portalApi\.sendRequisitionEmail\(id, \{/);
+  assert.match(documentView, /to: recipientEmail/);
+  assert.match(documentView, /recipientPhone: recipientPhone\.trim\(\)/);
+  assert.match(documentView, /message: senderNote\.trim\(\)/);
+  assert.match(documentView, /\{busy \? 'Sending…' : 'Send by email'\}/);
+  assert.match(documentView, /Sent response forms \(\$\{sentForms\.length\}\)/);
+  assert.match(app, /sendRequisitionEmail: \(id, payload\) => api\(`\/email\/requisitions\/\$\{id\}\/send`, \{ method: 'POST', body: JSON\.stringify\(payload\) \}\)/);
+});
+
+test('page containers fill the available width and stay left aligned everywhere', () => {
+  const shells = [
+    '../src/components/layout/AppLayout.jsx',
+    '../src/components/portals/PortalLayout.jsx'
+  ];
+  for (const path of shells) {
+    const shell = source(path);
+    assert.match(shell, /className="w-full max-w-none px-5 pb-10 pt-7 sm:px-8"/);
+    assert.doesNotMatch(shell, /mx-auto max-w-\[1440px\]/);
+  }
+
+  const publicPages = [
+    '../src/components/portals/CommitteeReviewPage.jsx',
+    '../src/components/portals/PurchaseOrderApprovalPage.jsx',
+    '../src/components/portals/RequestResponsePage.jsx',
+    '../src/components/portals/SupplierRfqPage.jsx',
+    '../src/components/portals/SupplierPricingPage.jsx'
+  ];
+  for (const path of publicPages) {
+    const page = source(path);
+    assert.match(page, /w-full max-w-none/);
+    assert.doesNotMatch(page, /mx-auto[^"]*max-w-(?:5|6)xl/);
+  }
+});
+
+test('date range filter can show only From and To inputs', () => {
+  const dateFilter = source('../src/components/ui/DateRangeFilter.jsx');
+
+  assert.match(dateFilter, /fromToOnly = false/);
+  const fromToOnlyStart = dateFilter.indexOf('if (fromToOnly)');
+  const compactStart = dateFilter.indexOf('if (compact)');
+  assert.ok(fromToOnlyStart > -1);
+  assert.ok(compactStart > fromToOnlyStart);
+  const simpleBlock = dateFilter.slice(fromToOnlyStart, compactStart);
+
+  assert.match(simpleBlock, /label="From"/);
+  assert.match(simpleBlock, /label="To"/);
+  assert.doesNotMatch(simpleBlock, /Preset/);
+  assert.doesNotMatch(simpleBlock, /Clear dates/);
+});
+
+test('Goods receipts page exposes only the role-gated supplier Create GRN action', () => {
+  const page = source('../src/pages/GoodsReceiptsPage.jsx');
+  const form = source('../src/components/ui/GoodsReceiptForm.jsx');
+  const pageCard = source('../src/components/ui/PageCard.jsx');
+  const inventory = source('../src/pages/InventoryPage.jsx');
+
+  assert.match(page, /Create GRN/);
+  assert.match(page, /\['admin', 'storekeeper', 'procurement'\]\.includes\(user\?\.role\)/);
+  assert.match(page, /onClick=\{\(\) => openSupplierGRN\(order\)\}/);
+  assert.doesNotMatch(page, /Receipt register/);
+  assert.doesNotMatch(page, /<GoodsReceiptForm/);
+  assert.match(form, /itemId: Number\(form\.itemId\), quantity: Number\(form\.quantity\)/);
+  assert.match(form, /FormActions busy=\{busy\} disabled=\{!items\.length\}/);
+  assert.match(pageCard, /disabled=\{busy \|\| disabled\}/);
+  // Stock receipts stay on the purchase-order workflow; Stock overview no
+  // longer exposes a second stock-moving form.
+  assert.doesNotMatch(inventory, /GoodsReceiptForm|onReceive|Record receipt/);
 });

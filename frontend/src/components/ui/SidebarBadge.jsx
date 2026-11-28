@@ -1,14 +1,23 @@
 import { badgeLabel } from '../../services/sidebarCounts.js';
 
-export default function SidebarBadge({ count, floating = false }) {
+export default function SidebarBadge({ count, floating = false, showText = false }) {
   const label = badgeLabel(count);
   if (!label) return null;
 
-  return <span
-    className={`pims-sidebar-badge inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full border border-brand bg-success px-1 text-[10px] font-bold leading-none text-black ${floating ? 'absolute right-1 top-1 lg:right-0.5 lg:top-0.5' : 'ml-auto'}`}
-    aria-label={`${Number(count)} unread`}
-    title={`${Number(count)} unread`}
-  >
-    {label}
-  </span>;
+  return <>
+    <span
+      className={`pims-sidebar-badge inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full border border-brand bg-success px-1 text-[10px] font-bold leading-none text-black ${floating ? 'absolute right-1 top-1 lg:right-0.5 lg:top-0.5' : 'ml-auto'}`}
+      aria-label={`${Number(count)} unread`}
+      title={`${Number(count)} unread`}
+    >
+      {label}
+    </span>
+    {showText && <span
+      data-testid="email-inbox-unread-text"
+      className={`pims-sidebar-unread-text ml-1 shrink-0 text-[10px] font-bold ${floating ? 'lg:hidden' : ''}`}
+      title={`${Number(count)} unread email messages in Email Inbox`}
+    >
+      {label} unread
+    </span>}
+  </>;
 }

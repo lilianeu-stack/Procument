@@ -9,8 +9,10 @@ import {
 import { PROCUREMENT_READY_STATUSES, REQUISITION_STATUS } from '../utils/requisition-status.js';
 import { createRfqEmailDeliveries, listRfqDeliveries, sendRfqDeliveries } from '../services/rfq-email.js';
 import {
-  buildPurchaseOrderDecisionEmail, buildPurchaseOrderReviewEmail, sendEmail
+  buildGoodReceivedNoteEmail, buildPurchaseOrderDecisionEmail,
+  buildPurchaseOrderReviewEmail, sendEmail
 } from '../services/email.js';
+import { fetchRecord, renderRecordPdf } from '../services/exports.js';
 import { getSettings } from '../services/settings.js';
 import { emailConfigStatus } from '../utils/email-config.js';
 import { amountInWords, calculatePurchaseTotals, roundMoney } from '../utils/money.js';
@@ -1877,6 +1879,416 @@ router.post('/goods-receipts', allowRoles(...stores), async (req, res, next) => 
   }, res, next);
 });
 
+function composedSupplierAddress(row) {
+  if (row?.supplierAddress) return String(row.supplierAddress);
+  if (row?.poSupplierAddress) return String(row.poSupplierAddress);
+  return [row?.city, row?.district, row?.sector, row?.cell].filter(Boolean).join(', ');
+}
+
+// Procurement's Allow/Deny gate for the GRN workspace. A denied order is hidden
+// from sent suppliers; only an allowed order can produce a Good Received Note.
+router.post('/goods-receipts/supplier-decision', allowRoles(...stores), async (req, res, next) => {
+  const purchaseOrderId = Number(req.body.purchaseOrderId);
+  const decision = String(req.body.decision || '').trim();
+  if (!Number.isInteger(purchaseOrderId) || purchaseOrderId < 1 ||
+      !['Allowed', 'Denied'].includes(decision)) {
+    return res.status(400).json({ message: 'Choose a sent purchase order and an Allow or Deny decision.' });
+  }
+  const reason = text(req.body.reason, 2000);
+
+  return transaction(async (connection) => {
+    const [[order]] = await connection.execute(
+      `SELECT p.id, p.reference, s.name AS supplierName
+         FROM purchase_orders p LEFT JOIN suppliers s ON s.id = p.supplier_id
+        WHERE p.id = ?`,
+      [purchaseOrderId]
+    );
+    if (!order) throw httpError(404, 'Purchase order not found.');
+    const [[queued]] = await connection.execute(
+      'SELECT COUNT(*) AS total FROM purchase_order_delivery_items WHERE purchase_order_id = ?',
+      [purchaseOrderId]
+    );
+    if (!Number(queued.total)) {
+      throw httpError(409, 'This purchase order has not been sent to a supplier yet.');
+    }
+
+    await connection.execute(
+      `INSERT INTO grn_supplier_decisions
+         (purchase_order_id, status, reason, decided_by, decided_by_name)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         status = VALUES(status), reason = VALUES(reason),
+         decided_by = VALUES(decided_by), decided_by_name = VALUES(decided_by_name)`,
+      [purchaseOrderId, decision, decision === 'Denied' ? reason || null : null,
+        req.user.id, req.user.name || null]
+    );
+    await writeAudit(
+      connection, req.user.id,
+      decision === 'Allowed' ? 'grn_supplier_allowed' : 'grn_supplier_denied',
+      'purchase_order', purchaseOrderId,
+      {
+        reference: order.reference, supplier: order.supplierName || null,
+        decision, reason: decision === 'Denied' ? reason || null : null
+      },
+      { newStatus: decision }
+    );
+    await createNotification(
+      connection, null, `Supplier ${decision.toLowerCase()} for a Good Received Note`,
+      `${order.reference} (${order.supplierName || 'supplier'}) was ${decision.toLowerCase()} for GRN creation.`,
+      '/goods-receipts', 'grn_supplier_decision'
+    );
+
+    return {
+      status: 200,
+      body: {
+        purchaseOrderId,
+        decision,
+        message: decision === 'Allowed'
+          ? 'Supplier allowed. You can now create a Good Received Note.'
+          : 'Supplier denied. This purchase order was removed from the GRN workspace.'
+      }
+    };
+  }, res, next);
+});
+
+// Purchase orders become visible to the GRN workspace at the moment they are
+// sent to the supplier. The delivery queue is therefore the source of truth for
+// "sent" and for the Storekeeper decision that is allowed into stock.
+router.get('/goods-receipts/sent-suppliers', allowRoles(...stores), async (req, res, next) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT d.purchase_order_id AS purchaseOrderId, d.purchase_order_item_id AS purchaseOrderItemId,
+         d.po_reference AS poReference, d.item_name AS itemName, d.description, d.quantity,
+         d.unit, d.unit_price AS unitPrice, d.line_total AS lineTotal, d.delivery_date AS deliveryDate,
+         d.status AS deliveryStatus, d.inventory_item_id AS itemId,
+         d.department_id AS departmentId, d.department_name AS departmentName,
+         d.supplier_name AS queueSupplierName, d.supplier_email AS queueSupplierEmail,
+         p.reference AS orderReference, p.status AS purchaseOrderStatus,
+         p.supplier_id AS supplierId, p.supplier_contact AS poSupplierContact,
+         p.supplier_address AS poSupplierAddress,
+         s.name AS supplierName, s.contact_name AS supplierContact,
+         s.email AS supplierEmail, s.phone AS supplierPhone,
+         s.address AS supplierAddress, s.city, s.district, s.sector, s.cell,
+         gd.status AS grnDecision, gd.reason AS decisionReason,
+         COALESCE(gr.receivedQuantity, 0) AS receivedQuantity
+        FROM purchase_order_delivery_items d
+        JOIN purchase_orders p ON p.id = d.purchase_order_id
+        LEFT JOIN suppliers s ON s.id = p.supplier_id
+        LEFT JOIN grn_supplier_decisions gd ON gd.purchase_order_id = d.purchase_order_id
+        LEFT JOIN (
+          SELECT gr.purchase_order_id, gri.item_id, SUM(gri.quantity) AS receivedQuantity
+          FROM goods_receipts gr
+          JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+          WHERE gr.purchase_order_id IS NOT NULL
+          GROUP BY gr.purchase_order_id, gri.item_id
+        ) gr ON gr.purchase_order_id = d.purchase_order_id AND gr.item_id = d.inventory_item_id
+        WHERE gd.status IS NULL OR gd.status <> 'Denied'
+        ORDER BY d.supplier_name, p.reference, d.purchase_order_item_id`
+    );
+
+    const suppliers = new Map();
+    for (const row of rows) {
+      const supplierKey = row.supplierId ? `id-${row.supplierId}` : `name-${row.queueSupplierName}`;
+      if (!suppliers.has(supplierKey)) {
+        suppliers.set(supplierKey, {
+          supplierId: row.supplierId || null,
+          supplierName: row.supplierName || row.queueSupplierName,
+          supplierContact: row.supplierContact || row.poSupplierContact || '',
+          supplierEmail: row.supplierEmail || row.queueSupplierEmail || '',
+          supplierPhone: row.supplierPhone || '',
+          supplierAddress: composedSupplierAddress(row),
+          purchaseOrders: []
+        });
+      }
+      const supplier = suppliers.get(supplierKey);
+      let order = supplier.purchaseOrders.find((entry) => entry.id === Number(row.purchaseOrderId));
+      if (!order) {
+        order = {
+          id: Number(row.purchaseOrderId),
+          reference: row.orderReference || row.poReference,
+          status: row.purchaseOrderStatus,
+          deliveryDate: row.deliveryDate ? String(row.deliveryDate).slice(0, 10) : '',
+          departmentName: row.departmentName || '',
+          grnDecision: row.grnDecision || '',
+          decisionReason: row.decisionReason || '',
+          lines: []
+        };
+        supplier.purchaseOrders.push(order);
+      }
+      const quantity = Number(row.quantity) || 0;
+      const receivedQuantity = Number(row.receivedQuantity) || 0;
+      order.lines.push({
+        purchaseOrderItemId: Number(row.purchaseOrderItemId),
+        itemId: row.itemId ? Number(row.itemId) : null,
+        itemName: row.itemName,
+        description: row.description || '',
+        quantity,
+        unit: row.unit,
+        unitPrice: Number(row.unitPrice) || 0,
+        lineTotal: Number(row.lineTotal) || 0,
+        deliveryStatus: row.deliveryStatus,
+        receivedQuantity,
+        outstandingQuantity: Math.max(0, quantity - receivedQuantity)
+      });
+    }
+    return res.json({ sentSuppliers: [...suppliers.values()] });
+  } catch (error) { return next(error); }
+});
+
+// The official Good Received Note is a document produced from lines the
+// Storekeeper already accepted into stock. It must not add stock a second time.
+router.post('/goods-receipts/from-supplier', allowRoles(...stores), async (req, res, next) => {
+  const purchaseOrderId = Number(req.body.purchaseOrderId);
+  if (!Number.isInteger(purchaseOrderId) || purchaseOrderId < 1) {
+    return res.status(400).json({ message: 'Choose the sent purchase order for this Good Received Note.' });
+  }
+  const requestedLines = Array.isArray(req.body.lines) ? req.body.lines : [];
+  if (!requestedLines.length) {
+    return res.status(400).json({ message: 'Choose at least one accepted item for the Good Received Note.' });
+  }
+  const aggregated = new Map();
+  for (const raw of requestedLines) {
+    const purchaseOrderItemId = Number(raw?.purchaseOrderItemId);
+    const quantity = Number(raw?.quantity);
+    if (!Number.isInteger(purchaseOrderItemId) || purchaseOrderItemId < 1 ||
+        !Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ message: 'Every Good Received Note line needs a valid item and quantity.' });
+    }
+    const current = aggregated.get(purchaseOrderItemId) || { quantity: 0, comments: [] };
+    current.quantity += quantity;
+    const comment = text(raw?.comment, 500);
+    if (comment) current.comments.push(comment);
+    aggregated.set(purchaseOrderItemId, current);
+  }
+
+  let grnDate;
+  try {
+    grnDate = businessDate(req.body.grnDate || new Date().toISOString().slice(0, 10), 'Received date');
+  } catch (error) {
+    return res.status(error.status || 400).json({ message: error.message });
+  }
+  const receivedByName = text(req.body.receivedByName, 150);
+  const verifiedByName = text(req.body.verifiedByName, 150);
+
+  return transaction(async (connection) => {
+    const [orders] = await connection.execute(
+      `SELECT p.id, p.reference, p.supplier_id,
+         p.supplier_address AS poSupplierAddress,
+         s.name AS supplierName, s.contact_name AS supplierContact,
+         s.phone AS supplierPhone, s.email AS supplierEmail,
+         s.address AS supplierAddress, s.city, s.district, s.sector, s.cell,
+         d.department_name AS departmentName
+        FROM purchase_orders p
+        LEFT JOIN suppliers s ON s.id = p.supplier_id
+        LEFT JOIN purchase_order_delivery_items d ON d.purchase_order_id = p.id
+        WHERE p.id = ?
+        ORDER BY d.id
+        LIMIT 1`,
+      [purchaseOrderId]
+    );
+    const order = orders[0];
+    if (!order) throw httpError(404, 'Purchase order not found.');
+    const [[decision]] = await connection.execute(
+      'SELECT status FROM grn_supplier_decisions WHERE purchase_order_id = ?',
+      [purchaseOrderId]
+    );
+    if (decision?.status !== 'Allowed') {
+      throw httpError(409, 'Allow this supplier before creating a Good Received Note.');
+    }
+
+    // Normalising inside the transaction keeps the Allow/Deny gate ahead of
+    // upload validation and never stores untrusted browser bytes verbatim.
+    const receivedBySignature = await normalizeSignature(req.body.receivedBySignature, 'Received by');
+    const verifiedBySignature = await normalizeSignature(req.body.verifiedBySignature, 'Verified by');
+    if (!receivedBySignature) throw httpError(400, 'Upload the Received by signature image.');
+    if (!verifiedBySignature) throw httpError(400, 'Upload the Verified by signature image.');
+
+    const preparedLines = [];
+    for (const [purchaseOrderItemId, requested] of aggregated) {
+      const [deliveries] = await connection.execute(
+        `SELECT d.* FROM purchase_order_delivery_items d
+         WHERE d.purchase_order_id = ? AND d.purchase_order_item_id = ? FOR UPDATE`,
+        [purchaseOrderId, purchaseOrderItemId]
+      );
+      const delivery = deliveries[0];
+      if (!delivery) throw httpError(404, 'That purchase order item was not sent to the supplier.');
+      if (delivery.status === 'Rejected') {
+        throw httpError(409, `Rejected items cannot appear on a Good Received Note. ${delivery.itemName} was rejected.`);
+      }
+
+      let itemId = delivery.inventory_item_id ? Number(delivery.inventory_item_id) : null;
+      if (!itemId) {
+        // A pending delivery has no catalogue item yet. Resolve or create one
+        // with zero balance so the GRN can document the line without adding
+        // stock; Storekeeper acceptance remains the only stock movement.
+        const [matches] = await connection.execute(
+          'SELECT id FROM items WHERE name = ? AND unit = ? ORDER BY id LIMIT 1 FOR UPDATE',
+          [delivery.item_name, delivery.unit]
+        );
+        if (matches[0]) {
+          itemId = Number(matches[0].id);
+        } else {
+          const sku = `PO-${Number(delivery.purchase_order_item_id)}-${randomBytes(3).toString('hex').toUpperCase()}`;
+          const [created] = await connection.execute(
+            `INSERT INTO items (department_id, sku, name, category, unit, quantity, reorder_level, unit_cost)
+             VALUES (?, ?, ?, 'Purchased', ?, 0, 10, ?)`,
+            [delivery.department_id || null, sku, delivery.item_name,
+              delivery.unit, Number(delivery.unit_price) || 0]
+          );
+          itemId = Number(created.insertId);
+        }
+        await connection.execute(
+          'UPDATE purchase_order_delivery_items SET inventory_item_id = ? WHERE id = ?',
+          [itemId, delivery.id]
+        );
+      }
+      const [[documented]] = await connection.execute(
+        `SELECT COALESCE(SUM(gri.quantity), 0) AS quantity
+         FROM goods_receipt_items gri
+         JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+         WHERE gr.purchase_order_id = ? AND gri.item_id = ?`,
+        [purchaseOrderId, itemId]
+      );
+      if (Number(documented.quantity) + requested.quantity > Number(delivery.quantity)) {
+        throw httpError(409, `The Good Received Note quantity for ${delivery.itemName} exceeds the ordered quantity.`);
+      }
+      preparedLines.push({
+        delivery,
+        itemId,
+        quantity: requested.quantity,
+        comment: requested.comments.join(' · ')
+      });
+    }
+
+    const supplierAddress = composedSupplierAddress(order);
+    const suppliedBy = text([
+      order.supplierName, order.supplierContact, order.supplierPhone,
+      order.supplierEmail, supplierAddress, req.body.suppliedBy
+    ].filter(Boolean).join(' · '), 190);
+    const source = text(req.body.source, 180) || `${order.reference || `PO-${purchaseOrderId}`} · ${order.supplierName || 'supplier'}`;
+    const grnReference = await configuredReference('goods_receipt_prefix', 'GRN');
+    const [receipt] = await connection.execute(
+      `INSERT INTO goods_receipts
+         (reference, purchase_order_id, source, received_by, expected_at,
+          supplier_id, supplied_by, receiving_department, received_by_name,
+          verified_by_name, received_signature, verified_signature, grn_date)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        grnReference, purchaseOrderId, source, req.user.id, toUtcDateTime(grnDate),
+        order.supplier_id || null, suppliedBy || null, order.departmentName || null,
+        receivedByName || null, verifiedByName || null,
+        receivedBySignature, verifiedBySignature, grnDate
+      ]
+    );
+    for (const line of preparedLines) {
+      await connection.execute(
+        'INSERT INTO goods_receipt_items (goods_receipt_id, item_id, quantity, comment) VALUES (?, ?, ?, ?)',
+        [receipt.insertId, line.itemId, line.quantity, line.comment || null]
+      );
+    }
+
+    const [queue] = await connection.execute(
+      'SELECT status, quantity, inventory_item_id FROM purchase_order_delivery_items WHERE purchase_order_id = ?',
+      [purchaseOrderId]
+    );
+    const [documentedRows] = await connection.execute(
+      `SELECT gri.item_id, SUM(gri.quantity) AS quantity
+       FROM goods_receipt_items gri
+       JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+       WHERE gr.purchase_order_id = ?
+       GROUP BY gri.item_id`,
+      [purchaseOrderId]
+    );
+    const documentedByItem = new Map(documentedRows.map((row) => [Number(row.item_id), Number(row.quantity)]));
+    const fullyReceived = queue.length > 0 && queue.every((row) =>
+      row.status === 'Accepted' && row.inventory_item_id &&
+      (documentedByItem.get(Number(row.inventory_item_id)) || 0) >= Number(row.quantity)
+    );
+    await connection.execute(
+      'UPDATE purchase_orders SET status = ? WHERE id = ?',
+      [fullyReceived ? 'Received' : 'Partially received', purchaseOrderId]
+    );
+
+    await writeAudit(
+      connection, req.user.id, 'created', 'goods_receipt', receipt.insertId,
+      {
+        reference: grnReference, purchaseOrderId, supplier: order.supplierName || null,
+        lines: preparedLines.map((line) => ({
+          purchaseOrderItemId: Number(line.delivery.purchase_order_item_id),
+          itemId: line.itemId, quantity: line.quantity
+        }))
+      },
+      { newStatus: fullyReceived ? 'Received' : 'Partially received' }
+    );
+    await createNotification(
+      connection, null, 'Good Received Note recorded',
+      `${grnReference}: ${preparedLines.length} line${preparedLines.length === 1 ? '' : 's'} recorded for ${order.supplierName || 'the supplier'}.`,
+      '/goods-receipts'
+    );
+
+    const body = {
+      id: Number(receipt.insertId),
+      reference: grnReference,
+      purchaseOrderId,
+      supplier: order.supplierName || null,
+      emailRecipient: order.supplierEmail || '',
+      lines: preparedLines.map((line) => ({
+        purchaseOrderItemId: Number(line.delivery.purchase_order_item_id),
+        itemId: line.itemId,
+        itemName: line.delivery.item_name,
+        quantity: line.quantity,
+        unit: line.delivery.unit,
+        comment: line.comment
+      })),
+      message: 'Good Received Note recorded from the sent purchase order.'
+    };
+
+    return {
+      status: 201,
+      body,
+      // The GRN is committed first. Email is best-effort: a failed or
+      // unconfigured provider is reported but never rolls back the document.
+      afterCommit: async () => {
+        let delivery;
+        try {
+          const record = await fetchRecord('goodsReceipt', Number(receipt.insertId), req.user);
+          const pdf = await renderRecordPdf(record);
+          const filename = `${grnReference.replace(/[^A-Za-z0-9._-]+/g, '_')}.pdf`;
+          const email = buildGoodReceivedNoteEmail({
+            supplierName: order.supplierName,
+            recipientEmail: order.supplierEmail,
+            reference: grnReference,
+            purchaseOrderReference: order.reference,
+            lines: body.lines
+          });
+          delivery = await sendEmail({
+            ...email,
+            attachments: [{ filename, contentType: 'application/pdf', content: pdf }]
+          });
+        } catch (error) {
+          delivery = {
+            ok: false, status: 'Failed', reason: 'grn_email_error',
+            error: { code: 'GRN_EMAIL_ERROR', message: error.message || 'Could not prepare the Good Received Note email.' }
+          };
+        }
+        try {
+          await writeAudit(
+            pool, req.user.id, 'grn_email_sent', 'goods_receipt', receipt.insertId,
+            {
+              reference: grnReference, recipientEmail: order.supplierEmail || null,
+              emailStatus: delivery.status, reason: delivery.reason || null
+            }
+          );
+        } catch {
+          // The email outcome is still returned even if audit logging fails.
+        }
+        body.emailDelivery = delivery;
+        body.message = emailFailureMessage(delivery, body.message, 'GRN email');
+      }
+    };
+  }, res, next);
+});
+
 router.get('/goods-receipts', async (req, res, next) => {
   try {
     const columns = { received: 'g.received_at', expected: 'g.expected_at' };
@@ -1887,9 +2299,14 @@ router.get('/goods-receipts', async (req, res, next) => {
     const [receipts] = await pool.query(
       `SELECT g.id, g.reference, g.source, g.expected_at AS expectedAt,
         g.received_at AS receivedAt, g.updated_at AS updatedAt,
-        p.reference AS purchaseOrder, u.name AS receivedBy,
+        g.supplied_by AS suppliedBy, g.receiving_department AS receivingDepartment,
+        g.received_by_name AS receivedByName, g.verified_by_name AS verifiedByName,
+        g.grn_date AS grnDate,
+        p.reference AS purchaseOrder, s.name AS supplier, u.name AS receivedBy,
         GROUP_CONCAT(CONCAT(i.name, ' × ', gi.quantity) SEPARATOR ', ') AS items
-       FROM goods_receipts g LEFT JOIN purchase_orders p ON p.id = g.purchase_order_id
+       FROM goods_receipts g
+       LEFT JOIN purchase_orders p ON p.id = g.purchase_order_id
+       LEFT JOIN suppliers s ON s.id = g.supplier_id
        JOIN users u ON u.id = g.received_by
        JOIN goods_receipt_items gi ON gi.goods_receipt_id = g.id
        JOIN items i ON i.id = gi.item_id

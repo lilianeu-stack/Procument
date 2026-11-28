@@ -225,7 +225,7 @@ function BulkImportDialog({ departments, defaultDepartment, onValidate, onImport
   function downloadTemplate() {
     downloadCsv('procurement-users-template.csv', [
       TEMPLATE_HEADERS,
-      ['Jane', 'Doe', 'jane.doe@example.org', 'requestor', defaultDepartment?.name || departments[0]?.name || 'Administration Office', '+250 700 000 000']
+      ['Jane', 'Doe', 'jane.doe@example.org', 'requestor', defaultDepartment?.name || departments[0]?.name || 'Procurement', '+250 700 000 000']
     ]);
   }
 
@@ -795,7 +795,7 @@ export function UsersPage({
           {subdepartments.filter((department) => department.id !== selectedDepartmentForDelete.id).map((department) => <option key={department.id} value={department.id}>{departments.find((parent) => parent.id === department.parentId)?.name} → {department.name}</option>)}
         </select>
       </label>}
-      <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-black"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{departmentDependencyText(selectedDepartmentForDelete)} Choose a destination subdepartment to enable deletion.</span></p>
+      <p className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-black"><AlertTriangle size={14} className="mt-0.5 shrink-0" /><span>{departmentDependencyText(selectedDepartmentForDelete)}{requiresDepartmentReassignment(selectedDepartmentForDelete) ? ' Choose a destination subdepartment to enable deletion.' : ''}</span></p>
     </ConfirmDialog>}
   </>;
 }

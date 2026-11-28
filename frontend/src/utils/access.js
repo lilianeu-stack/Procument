@@ -27,6 +27,7 @@ export const STOCKKEEPER_PAGES = [
   'Dashboard',
   'List of Requesters',
   'Notification',
+  'Display before delivery',
   'Bin Card',
   'Profile'
 ];
