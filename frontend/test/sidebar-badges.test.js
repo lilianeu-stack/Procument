@@ -74,7 +74,7 @@ test('loading a conversation never marks messages read; each message opens expli
   assert.match(messages, /onClick=\{\(\) => onOpen\(message\)\}/);
   assert.match(messages, /openMessage[\s\S]*portalApi\.markMessageRead\(message\.id\)/);
   assert.match(messages, /setThread\(\(current\)[\s\S]*isRead: true/);
-  assert.match(messages, /const loadThread = useCallback[\s\S]*portalApi\.getThread\(selectedId\)[\s\S]*setThread\(response\);[\s\S]*await loadInbox\(\);/);
+  assert.match(messages, /const loadThread = useCallback[\s\S]*portalApi\.getThread\(\{[\s\S]*setThread\(response\);/);
   assert.match(app, /markMessageRead: async[\s\S]*await refreshSidebarCounts\(\)/);
 });
 
@@ -83,7 +83,7 @@ test('one grouped count request feeds all badges and refreshes without a page re
   assert.match(app, /fetchSidebarCounts/);
   assert.match(app, /setSidebarCounts\(counts\)/);
   assert.match(app, /countSequenceRef\.current/);
-  assert.match(app, /setInterval\(\(\) => \{ void refreshSidebarCounts\(\); \}, 30000\)/);
+  assert.match(app, /setInterval\(\(\) => \{[\s\S]*?void refreshSidebarCounts\(\);[\s\S]*?void refreshNotifications\(\);[\s\S]*?\}, 20000\)/);
   assert.match(app, /window\.addEventListener\('focus'/);
   assert.match(app, /document\.addEventListener\('visibilitychange'/);
   assert.match(app, /counts: sidebarCounts/);

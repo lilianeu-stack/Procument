@@ -1,4 +1,4 @@
-import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, PackageCheck, PackageSearch, PackagePlus, UserRound } from 'lucide-react';
+import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, MessageSquare, PackageCheck, PackageSearch, PackagePlus, UserRound } from 'lucide-react';
 import PortalSidebarFrame from './PortalSidebarFrame.jsx';
 import { STOCKKEEPER_PAGES } from '../../utils/access.js';
 
@@ -11,6 +11,7 @@ const icons = {
   'Display before delivery': PackageCheck,
   'Bin Card': PackageSearch,
   'Inventory Reports': FileBarChart,
+  Messages: MessageSquare,
   Notifications: Bell,
   Profile: UserRound
 };

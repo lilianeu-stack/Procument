@@ -3,12 +3,14 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool from '../config/db.js';
-import { allowRoles, authenticate } from '../middleware/auth.js';
+import { allowRoles, apiError, authenticate } from '../middleware/auth.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import {
   UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, countUnreadEmails,
   markNotificationRead, markNotificationsRead
 } from '../lib/notification-reads.js';
+import { countUnreadMessages } from '../services/message-service.js';
+import { countNotifications } from '../services/notification-service.js';
 import { withPortalIdentity } from '../utils/roles.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
@@ -23,6 +25,8 @@ import purchaseOrderApprovals from './purchase-order-approvals.js';
 import purchaseOrderPricing, { publicRouter as supplierPricingPublicRouter } from './purchase-order-pricing.js';
 import emails from './emails.js';
 import googleEmail, { googleEmailPublicRouter } from './google-email.js';
+import messages from './messages.js';
+import notifications from './notifications.js';
 import requestResponse from './request-response.js';
 import committeeReview from './committee-review.js';
 import profile from './profile.js';
@@ -88,7 +92,8 @@ function sidebarPagesForRole(role) {
   if (role === 'admin' || role === 'procurement') {
     return [
       SIDEBAR_PAGES.receivedRequests, SIDEBAR_PAGES.rfqs,
-      SIDEBAR_PAGES.emailInbox, SIDEBAR_PAGES.purchaseOrders
+      SIDEBAR_PAGES.emailInbox, SIDEBAR_PAGES.messages, SIDEBAR_PAGES.purchaseOrders,
+      SIDEBAR_PAGES.notifications
     ];
   }
   if (['approver', 'finance', 'committee'].includes(role)) return [SIDEBAR_PAGES.rfqs];
@@ -104,7 +109,7 @@ function sidebarPagesForRole(role) {
   if (role === 'storekeeper') {
     return [
       SIDEBAR_PAGES.stockRequests, SIDEBAR_PAGES.stockOverview, SIDEBAR_PAGES.stockIn,
-      SIDEBAR_PAGES.stockOut, SIDEBAR_PAGES.inventoryReports,
+      SIDEBAR_PAGES.stockOut, SIDEBAR_PAGES.inventoryReports, SIDEBAR_PAGES.messages,
       SIDEBAR_PAGES.notifications, SIDEBAR_PAGES.displayBeforeDelivery, SIDEBAR_PAGES.binCard
     ];
   }
@@ -131,7 +136,7 @@ const MODULE_NOTIFICATION_CONDITIONS = {
   [SIDEBAR_PAGES.displayBeforeDelivery]: `n.link LIKE '#/stockkeeper/Display%20before%20delivery%'`,
   [SIDEBAR_PAGES.inventoryReports]: `n.link LIKE '#/stockkeeper/Inventory%20Reports%'`,
   [SIDEBAR_PAGES.binCard]: `n.link LIKE '#/stockkeeper/Bin%20Card%'`,
-  [SIDEBAR_PAGES.notifications]: `(n.category <> 'message' AND n.link NOT LIKE '%message=%')`
+  [SIDEBAR_PAGES.notifications]: `(COALESCE(n.category, '') <> 'message' AND (n.link IS NULL OR n.link NOT LIKE '%message=%'))`
 };
 
 router.post('/auth/login', async (req, res, next) => {
@@ -156,7 +161,7 @@ router.post('/auth/login', async (req, res, next) => {
     const { password_hash: _passwordHash, ...safeAccount } = account;
     const user = withPortalIdentity(safeAccount);
     if (!user.portal) {
-      return res.status(403).json({ message: 'Your role does not have an assigned portal. Contact an administrator.' });
+      return next(apiError(403, 'Your role does not have an assigned portal. Contact an administrator.', 'FORBIDDEN'));
     }
     // Only the account ID identifies the session. Role and Department are
     // resolved from the database on every request, so stale claims cannot grant access.
@@ -195,21 +200,20 @@ router.get('/auth/me', (req, res) => res.json({ user: req.user }));
 router.get('/sidebar-counts', async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const [[messageRow]] = await pool.execute(
-      `SELECT COUNT(*) AS total
-         FROM message_recipients mr
-         JOIN messages m ON m.id = mr.message_id
-        WHERE mr.user_id = ? AND mr.is_read = FALSE AND m.sender_id <> ?`,
-      [userId, userId]
-    );
+    const [messageUnread, notificationCounts] = await Promise.all([
+      countUnreadMessages(pool, userId),
+      countNotifications(pool, userId)
+    ]);
     const [[notificationRow]] = await pool.execute(
       `SELECT
-         COALESCE(SUM(CASE WHEN n.category <> 'message'
-           AND n.link NOT LIKE '#/requester/Messages%'
-           AND n.link NOT LIKE '#/supervisor/Department%20Messages%'
-           AND n.link NOT LIKE '#/supervisor/Department Messages%'
-           AND n.link NOT LIKE '#/stockkeeper/Display%20before%20delivery%'
-           AND n.link NOT LIKE '%message=%'
+         COALESCE(SUM(CASE WHEN COALESCE(n.category, '') <> 'message'
+           AND (n.link IS NULL OR (
+             n.link NOT LIKE '#/requester/Messages%'
+             AND n.link NOT LIKE '#/supervisor/Department%20Messages%'
+             AND n.link NOT LIKE '#/supervisor/Department Messages%'
+             AND n.link NOT LIKE '#/stockkeeper/Display%20before%20delivery%'
+             AND n.link NOT LIKE '%message=%'
+           ))
          THEN 1 ELSE 0 END), 0) AS general,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Requests%' THEN 1 ELSE 0 END), 0) AS receivedRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/RFQs%' THEN 1 ELSE 0 END), 0) AS rfqs,
@@ -221,7 +225,9 @@ router.get('/sidebar-counts', async (req, res, next) => {
            OR n.link LIKE '#/supervisor/Procurement Requests%' THEN 1 ELSE 0 END), 0) AS supervisorRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/My%20Procurement%20Requests%'
            OR n.link LIKE '#/requester/My Procurement Requests%' THEN 1 ELSE 0 END), 0) AS requesterRequests,
-         COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/Messages%request=%' THEN 1 ELSE 0 END), 0) AS requesterRequestMessages,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/Messages%request=%'
+           AND n.link NOT LIKE '%message=%'
+           THEN 1 ELSE 0 END), 0) AS requesterRequestMessages,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Display%20before%20delivery%' THEN 1 ELSE 0 END), 0) AS displayBeforeDelivery,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Requests%20from%20Supervisors%'
            OR n.link LIKE '#/stockkeeper/Requests%20to%20Issue%' THEN 1 ELSE 0 END), 0) AS stockRequests,
@@ -237,7 +243,7 @@ router.get('/sidebar-counts', async (req, res, next) => {
     );
     const unreadEmails = await countUnreadEmails(pool, userId);
 
-    const unreadMessages = Number(messageRow?.total) || 0;
+    const unreadMessages = messageUnread;
     const generalNotifications = Number(notificationRow?.general) || 0;
     const allCounts = {
       [SIDEBAR_PAGES.messages]: unreadMessages,
@@ -261,6 +267,11 @@ router.get('/sidebar-counts', async (req, res, next) => {
     };
     const counts = {};
     for (const page of sidebarPagesForRole(req.user.role)) counts[page] = allCounts[page] || 0;
+    // The navbar bell counts every unread notice, including private messages;
+    // the Notifications sidebar badge intentionally excludes message notices
+    // because the separate Messages badge represents those conversations.
+    counts.notificationUnread = notificationCounts.unread;
+    counts.notificationCounts = notificationCounts;
     return res.json({ counts });
   } catch (error) { return next(error); }
 });
@@ -272,11 +283,11 @@ router.patch('/notifications/read-module', async (req, res, next) => {
   try {
     const page = String(req.body?.page || '');
     if (!sidebarPagesForRole(req.user.role).includes(page)) {
-      return res.status(403).json({ message: 'This module is not available in your portal.' });
+      return next(apiError(403, 'This module is not available in your portal.', 'FORBIDDEN'));
     }
     const condition = MODULE_NOTIFICATION_CONDITIONS[page];
     if (!condition) {
-      return res.status(403).json({ message: 'Private messages clear only when a message is opened.' });
+      return next(apiError(403, 'Private messages clear only when a message is opened.', 'FORBIDDEN'));
     }
     const ids = await markNotificationsRead(pool, req.user.id, condition);
     return res.json({ updated: ids.length, ids });
@@ -294,29 +305,34 @@ router.patch('/notifications/read-all', async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
-// Personal Profile is available to every authenticated account. It is mounted
-// before the portal allow-lists below so each role can manage only itself.
+// Personal Profile and the shared messaging API are available to their
+// authorized roles before the portal allow-lists below. Conversation privacy
+// is enforced inside the messaging service, not by the shell's route list.
 router.use('/profile', profile);
+router.use('/messages', messages);
+router.use('/notifications', notifications);
 
 // Supervisor and Requester accounts live only in their new portals. They can
-// read their session, notifications, and portal data, but never the legacy
-// management/workflow APIs directly, even if a URL is entered manually.
+// read their session, notifications, messages, and portal data, but never the
+// legacy management/workflow APIs directly, even if a URL is entered manually.
 router.use((req, res, next) => {
   if (req.user.role === 'storekeeper') {
     const allowed = req.path === '/auth/me'
       || req.path === '/notifications' || req.path.startsWith('/notifications/')
+      || req.path === '/messages' || req.path.startsWith('/messages/')
       || req.path === '/portal/stockkeeper' || req.path.startsWith('/portal/stockkeeper/')
       || req.path === '/exports' || req.path.startsWith('/exports/');
     if (allowed) return next();
-    return res.status(403).json({ message: 'This area is not available in your portal.' });
+    return next(apiError(403, 'This area is not available in your portal.', 'FORBIDDEN'));
   }
   if (!['supervisor', 'requestor'].includes(req.user.role)) return next();
   const allowed = req.path === '/auth/me'
     || req.path === '/notifications' || req.path.startsWith('/notifications/')
+    || req.path === '/messages' || req.path.startsWith('/messages/')
     || req.path === '/exports' || req.path.startsWith('/exports/')
     || req.path === '/portal' || req.path.startsWith('/portal/');
   if (allowed) return next();
-  return res.status(403).json({ message: 'This area is not available in your portal.' });
+  return next(apiError(403, 'This area is not available in your portal.', 'FORBIDDEN'));
 });
 
 router.use('/portal/stockkeeper', stockkeeper);

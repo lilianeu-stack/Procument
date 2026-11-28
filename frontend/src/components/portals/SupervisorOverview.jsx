@@ -49,14 +49,14 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
   ];
 
   if (mode === 'department') return <>
-    <PageHeader
-      eyebrow="Department"
-      title="My Department"
-      description="Details of your assigned Department and the Requesters who work in it."
-      actions={<button type="button" onClick={() => navigate('Requesters')} className={secondaryButtonClass()}>
+    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+      <p className="max-w-2xl text-xs leading-5 text-black">
+        Details of your assigned Department and the Requesters who work in it.
+      </p>
+      <button type="button" onClick={() => navigate('Requesters')} className={secondaryButtonClass()}>
         <UsersRound size={14} />View all Requesters
-      </button>}
-    />
+      </button>
+    </div>
     <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
       <PageCard title="Department details">
         <dl className="space-y-4 p-5 text-xs">

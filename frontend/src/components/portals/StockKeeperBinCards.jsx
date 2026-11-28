@@ -29,6 +29,7 @@ const BIN_CARD_REPORT = {
   ],
   defaultField: 'movement'
 };
+const EMPTY_LIST = [];
 
 function transactionKey() {
   return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -267,7 +268,7 @@ function BinCardDetails({ card, onDownload, onError, actions, user = {} }) {
 }
 
 export default function StockKeeperBinCards({
-  portalApi, initialItems = [], initialIssueRequests = [], query = {}, navigate, user = {}
+  portalApi, initialItems = EMPTY_LIST, initialIssueRequests = EMPTY_LIST, query = {}, navigate, user = {}
 }) {
   const [items, setItems] = useState(initialItems);
   const [issueRequests, setIssueRequests] = useState(initialIssueRequests);

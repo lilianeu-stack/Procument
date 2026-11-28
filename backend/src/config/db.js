@@ -231,6 +231,16 @@ export async function applySchemaMigrations() {
     await pool.query('ALTER TABLE rfqs MODIFY due_date DATETIME NULL');
   }
 
+  // In-app conversations can be Department-scoped or global. Relaxing the
+  // column preserves every existing message and lets Administrator/Procurement
+  // conversations exist without inventing a Department assignment.
+  const [messageDepartmentColumns] = await pool.query(
+    "SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'messages' AND column_name = 'department_id'"
+  );
+  if (messageDepartmentColumns[0]?.IS_NULLABLE === 'NO') {
+    await pool.query('ALTER TABLE messages MODIFY department_id INT UNSIGNED NULL');
+  }
+
   // Older installations predate this table but still run the column additions
   // below. Create it first so the ALTERs are safe; the later table bootstrap
   // is idempotent.
@@ -408,6 +418,14 @@ export async function applySchemaMigrations() {
     { table: 'store_requests', column: 'updated_at', ddl: 'ALTER TABLE store_requests ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'notifications', column: 'updated_at', ddl: 'ALTER TABLE notifications ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at' },
     { table: 'notifications', column: 'category', ddl: "ALTER TABLE notifications ADD COLUMN category VARCHAR(40) NOT NULL DEFAULT 'general' AFTER link" },
+    { table: 'notifications', column: 'notification_type', ddl: "ALTER TABLE notifications ADD COLUMN notification_type VARCHAR(20) NOT NULL DEFAULT 'information' AFTER category" },
+    { table: 'notifications', column: 'module', ddl: 'ALTER TABLE notifications ADD COLUMN module VARCHAR(120) NULL AFTER notification_type' },
+    { table: 'notifications', column: 'related_record_id', ddl: 'ALTER TABLE notifications ADD COLUMN related_record_id VARCHAR(80) NULL AFTER module' },
+    { table: 'notifications', column: 'action_url', ddl: 'ALTER TABLE notifications ADD COLUMN action_url VARCHAR(500) NULL AFTER related_record_id' },
+    { table: 'notifications', column: 'recommended_action', ddl: 'ALTER TABLE notifications ADD COLUMN recommended_action VARCHAR(200) NULL AFTER action_url' },
+    { table: 'notifications', column: 'read_at', ddl: 'ALTER TABLE notifications ADD COLUMN read_at DATETIME NULL AFTER is_read' },
+    { table: 'notifications', column: 'dedupe_key', ddl: 'ALTER TABLE notifications ADD COLUMN dedupe_key VARCHAR(191) NULL AFTER recommended_action' },
+    { table: 'notifications', column: 'request_id', ddl: 'ALTER TABLE notifications ADD COLUMN request_id VARCHAR(64) NULL AFTER dedupe_key' },
     { table: 'audit_logs', column: 'previous_status', ddl: 'ALTER TABLE audit_logs ADD COLUMN previous_status VARCHAR(80) NULL AFTER details' },
     { table: 'audit_logs', column: 'new_status', ddl: 'ALTER TABLE audit_logs ADD COLUMN new_status VARCHAR(80) NULL AFTER previous_status' },
     // Recommendation details captured when a committee form is emailed. Older
@@ -490,7 +508,10 @@ export async function applySchemaMigrations() {
     { table: 'requisitions', name: 'idx_req_department_status', ddl: 'CREATE INDEX idx_req_department_status ON requisitions (department_id, status)' },
     { table: 'requisition_activity', name: 'idx_req_activity_date', ddl: 'CREATE INDEX idx_req_activity_date ON requisition_activity (requisition_id, created_at)' },
     { table: 'messages', name: 'idx_messages_thread', ddl: 'CREATE INDEX idx_messages_thread ON messages (department_id, sender_id, recipient_id, created_at)' },
+    { table: 'message_recipients', name: 'idx_msg_recipient_unread', ddl: 'CREATE INDEX idx_msg_recipient_unread ON message_recipients (user_id, is_read, message_id)' },
     { table: 'notifications', name: 'idx_notifications_user_date', ddl: 'CREATE INDEX idx_notifications_user_date ON notifications (user_id, created_at)' },
+    { table: 'notifications', name: 'idx_notifications_type_user_date', ddl: 'CREATE INDEX idx_notifications_type_user_date ON notifications (notification_type, user_id, created_at)' },
+    { table: 'notifications', name: 'uq_notifications_dedupe', ddl: 'CREATE UNIQUE INDEX uq_notifications_dedupe ON notifications (user_id, dedupe_key)' },
     { table: 'inventory_movements', name: 'uq_inventory_movement_reference', ddl: 'CREATE UNIQUE INDEX uq_inventory_movement_reference ON inventory_movements (reference_no)' },
     { table: 'inventory_movements', name: 'uq_inventory_movement_idempotency', ddl: 'CREATE UNIQUE INDEX uq_inventory_movement_idempotency ON inventory_movements (idempotency_key)' },
     { table: 'inventory_movements', name: 'idx_inventory_movement_requester_date', ddl: 'CREATE INDEX idx_inventory_movement_requester_date ON inventory_movements (requester_id, movement_at)' },
@@ -666,7 +687,7 @@ export async function applySchemaMigrations() {
     )`,
     `CREATE TABLE IF NOT EXISTS messages (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-      department_id INT UNSIGNED NOT NULL,
+      department_id INT UNSIGNED NULL,
       requisition_id INT UNSIGNED NULL,
       sender_id INT UNSIGNED NOT NULL,
       recipient_id INT UNSIGNED NULL,

@@ -138,12 +138,12 @@ test('public committee decision links remain outside the staff portals', () => {
   assert.equal(tokenPathRoute.query.token, token);
 });
 
-test('Stock Keepers have a dedicated inventory workspace with all nine pages', () => {
+test('Stock Keepers have a dedicated inventory workspace with all eleven pages', () => {
   assert.equal(portalForRole('storekeeper'), 'stockkeeper');
   assert.equal(defaultPageForPortal('stockkeeper'), 'Dashboard');
   assert.deepEqual(STOCKKEEPER_PAGES, [
     'Dashboard', 'Requests from Supervisors', 'Stock Overview', 'Stock In',
-    'Stock Out', 'Display before delivery', 'Bin Card', 'Inventory Reports', 'Notifications', PROFILE_PAGE
+    'Stock Out', 'Display before delivery', 'Bin Card', 'Inventory Reports', 'Messages', 'Notifications', PROFILE_PAGE
   ]);
   for (const page of STOCKKEEPER_PAGES) {
     assert.equal(canAccessPage('storekeeper', page), true, `Stock Keeper should see ${page}`);

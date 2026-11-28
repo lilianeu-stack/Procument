@@ -23,7 +23,7 @@ export async function loadStockkeeperScope(connection, userId) {
   };
 }
 
-function scopeMatches(scope, departmentId, parentId) {
+export function scopeMatches(scope, departmentId, parentId) {
   if (!scope) return false;
   const requestDepartment = positiveId(departmentId);
   const requestParent = positiveId(parentId);

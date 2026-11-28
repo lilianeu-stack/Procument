@@ -32,7 +32,8 @@ import SupplierPricingPage from './components/portals/SupplierPricingPage.jsx';
 import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprovalPage.jsx';
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { initialsFor } from './components/ui/UserAvatar.jsx';
-import { api } from './services/api.js';
+import { useNotifications } from './notifications/NotificationProvider.jsx';
+import { api, apiBlob } from './services/api.js';
 import {
   fetchSidebarCounts, markAllNotificationsRead as requestMarkAllNotificationsRead,
   markModuleNotificationsRead, shouldMarkModuleOnOpen
@@ -80,6 +81,22 @@ function readRoute() {
   return readRouteFromLocation(window.location);
 }
 
+function pageLabelForPath(path) {
+  const value = String(path || '');
+  if (value.startsWith('/messages')) return 'Messages';
+  if (value.startsWith('/rfqs')) return 'RFQs';
+  if (value.startsWith('/purchase-order')) return 'Purchase orders';
+  if (value.startsWith('/portal/requester')) return 'My Procurement Requests';
+  if (value.startsWith('/portal/supervisor')) return 'Department Supervisor Portal';
+  if (value.startsWith('/portal/stockkeeper')) return 'Stock Keeper Portal';
+  if (value.startsWith('/inventory')) return 'Inventory';
+  if (value.startsWith('/goods-receipts')) return 'Goods receipts';
+  if (value.startsWith('/invoices')) return 'Invoices';
+  if (value.startsWith('/suppliers')) return 'Suppliers';
+  if (value.startsWith('/admin')) return 'Administration';
+  return 'Workspace';
+}
+
 function toQuery(params = {}) {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -91,6 +108,10 @@ function toQuery(params = {}) {
 
 // Portal pages need more than the summary; load the data each page starts with.
 async function loadPortalExtras(portal, page) {
+  // Every authenticated portal uses the same role-scoped messaging endpoint.
+  if (page === 'Messages' || page === 'Department Messages') {
+    return { conversations: await api('/messages/conversations') };
+  }
   if (portal === 'stockkeeper') {
     if (page === 'Requests from Supervisors') {
       return { routedRequests: (await api('/portal/stockkeeper/routed-requests')).requests || [] };
@@ -110,9 +131,6 @@ async function loadPortalExtras(portal, page) {
   if (portal === 'requester') {
     if (page === 'Requester Dashboard' || page === 'My Procurement Requests' || page === 'My Request History') {
       return { requesterRequests: await api(`/portal/requester/requisitions${toQuery({ page: 1, limit: 10 })}`) };
-    }
-    if (page === 'Messages') {
-      return { conversations: await api('/portal/messages/conversations') };
     }
     return null;
   }
@@ -145,9 +163,6 @@ async function loadPortalExtras(portal, page) {
     if (page === 'Stock Overview') {
       return { stock: await api('/portal/supervisor/stock') };
     }
-    if (page === 'Department Messages') {
-      return { conversations: await api('/portal/messages/conversations') };
-    }
   }
   return null;
 }
@@ -164,10 +179,13 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [dateFilters, setDateFilters] = useState({});
   const [sidebarCounts, setSidebarCounts] = useState({});
+  const [notificationBusy, setNotificationBusy] = useState(false);
+  const { notify } = useNotifications();
   // Count requests are sequenced so a slow response from an older page cannot
   // overwrite a newer count after a module has been marked read.
   const countSequenceRef = useRef(0);
   const countUserRef = useRef(null);
+  const notificationSequenceRef = useRef(0);
   const loadSequenceRef = useRef(0);
   const markedPageRef = useRef(null);
 
@@ -237,18 +255,59 @@ export default function App() {
     }
   }, [user]);
 
-  // No WebSocket/SSE transport exists in this project, so badges use one small
-  // grouped request on mount, after mutations/read actions, on focus, and every
-  // 30 seconds. This avoids one request per sidebar link and avoids stale badges.
+  // The notification dropdown is refreshed independently of page data so a new
+  // notice appears without a page reload. The sequence prevents an older
+  // response from replacing a newer read/dismiss state.
+  const refreshNotifications = useCallback(async () => {
+    if (!user) return [];
+    const sequence = ++notificationSequenceRef.current;
+    try {
+      const result = await api('/notifications?limit=50');
+      const notifications = result.notifications || [];
+      if (sequence !== notificationSequenceRef.current) return [];
+      setData((current) => ({ ...current, notifications }));
+      return notifications;
+    } catch {
+      return [];
+    }
+  }, [user]);
+
+  const downloadMessageAttachment = useCallback(async (id, fileName) => {
+    const blob = await apiBlob(`/messages/attachments/${id}`);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName || `attachment-${id}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, []);
+
+  // No WebSocket/SSE transport exists in this project, so badges and the
+  // notification dropdown use grouped requests on mount, after mutations, on
+  // focus, and every 20 seconds. This avoids stale counts or dropdown content.
   useEffect(() => {
     if (!user) {
       setSidebarCounts({});
       return undefined;
     }
     void refreshSidebarCounts();
-    const interval = window.setInterval(() => { void refreshSidebarCounts(); }, 30000);
-    const onFocus = () => { void refreshSidebarCounts(); };
-    const onVisibility = () => { if (!document.hidden) void refreshSidebarCounts(); };
+    void refreshNotifications();
+    const interval = window.setInterval(() => {
+      void refreshSidebarCounts();
+      void refreshNotifications();
+    }, 20000);
+    const onFocus = () => {
+      void refreshSidebarCounts();
+      void refreshNotifications();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void refreshSidebarCounts();
+        void refreshNotifications();
+      }
+    };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
@@ -256,7 +315,7 @@ export default function App() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [user, refreshSidebarCounts]);
+  }, [user, refreshSidebarCounts, refreshNotifications]);
 
   const loadData = useCallback(async () => {
     if (!user || !portal) return;
@@ -303,6 +362,9 @@ export default function App() {
         const [users, departments] = adminOnly
           ? await Promise.all([api(filtered('/admin/users')), api('/admin/departments')])
           : [{ users: [] }, { departments: [] }];
+        const conversations = activePage === 'Messages' && canAccessPage(user.role, 'Messages')
+          ? await api('/messages/conversations')
+          : null;
         let movements = [];
         if (activePage === 'Stock movements' && ['admin', 'procurement', 'storekeeper'].includes(user.role)) {
           movements = (await api(filtered('/inventory/movements'))).movements;
@@ -331,7 +393,8 @@ export default function App() {
           committeeMembers: committee.members || [],
           users: users.users || [], departments: departments.departments || [],
           quotations: current.quotations || [],
-          movements, portalSummary: null, portalExtras: null
+          movements, portalSummary: null,
+          portalExtras: conversations ? { conversations } : null
         }));
       } else {
         const [summary, notifications, portalExtras] = await Promise.all([
@@ -430,20 +493,29 @@ export default function App() {
 
   const mutate = useCallback(async (path, body, method = 'POST') => {
     const result = await request(path, body, method);
+    if (result?.message) {
+      notify({ type: 'success', title: 'Operation completed', message: result.message, module: pageLabelForPath(path) });
+    }
     await loadData();
     return result;
-  }, [loadData]);
+  }, [loadData, notify]);
 
   // Callbacks used by Requester / Supervisor pages. Every mutation reloads the
   // portal data so summaries, lists and unread counts stay in sync.
   const portalApi = useMemo(() => {
     const post = async (path, body) => {
       const result = await api(path, { method: 'POST', body: JSON.stringify(body || {}) });
+      if (result?.message) {
+        notify({ type: 'success', title: 'Operation completed', message: result.message, module: pageLabelForPath(path) });
+      }
       await loadData();
       return result;
     };
     const patch = async (path, body) => {
       const result = await api(path, { method: 'PATCH', body: JSON.stringify(body || {}) });
+      if (result?.message) {
+        notify({ type: 'success', title: 'Operation completed', message: result.message, module: pageLabelForPath(path) });
+      }
       await loadData();
       return result;
     };
@@ -476,19 +548,29 @@ export default function App() {
       syncEmailInbox: () => api('/email/inbox/sync', { method: 'POST', body: '{}' }),
       getStock: (params = {}) => api(`/portal/supervisor/stock${toQuery(params)}`),
       getStockItem: (id) => api(`/portal/supervisor/stock/${id}`),
-      getConversations: () => api('/portal/messages/conversations'),
-      getThread: async (userId) => {
-        const result = await api(`/portal/messages/thread?userId=${encodeURIComponent(userId)}`);
+      getConversations: (params = {}) => api(`/messages/conversations${toQuery(params)}`),
+      getThread: async ({ userId, announcementId, ...params } = {}) => {
+        const result = await api(`/messages/thread${toQuery({
+          ...(userId ? { userId } : {}),
+          ...(announcementId ? { announcementId } : {}),
+          ...params
+        })}`);
         await refreshSidebarCounts();
         return result;
       },
-      sendMessage: (payload) => post('/portal/messages', payload),
+      sendMessage: (payload) => post('/messages', payload),
       markMessageRead: async (id) => {
-        const result = await api(`/portal/messages/${id}/read`, { method: 'PATCH' });
+        const result = await api(`/messages/${id}/read`, { method: 'PATCH' });
         await refreshSidebarCounts();
         return result;
       },
-      getNotifications: async () => (await api('/notifications')).notifications,
+      refreshMessageCounts: refreshSidebarCounts,
+      downloadMessageAttachment,
+      getNotifications: async (params = {}) => (await api(`/notifications${toQuery(params)}`)).notifications,
+      reload: async () => {
+        await refreshSidebarCounts();
+        await refreshNotifications();
+      },
       markNotificationRead: async (id) => {
         const result = await api(`/notifications/${id}/read`, { method: 'PATCH' });
         await refreshSidebarCounts();
@@ -498,6 +580,11 @@ export default function App() {
         const updated = await requestMarkAllNotificationsRead();
         await refreshSidebarCounts();
         return { updated };
+      },
+      deleteNotification: async (id) => {
+        const result = await api(`/notifications/${id}`, { method: 'DELETE' });
+        await refreshSidebarCounts();
+        return result;
       },
       getStockItems: (params = {}) => api(`/portal/stockkeeper/items${toQuery(params)}`),
       getBinCard: (id) => api(`/portal/stockkeeper/items/${id}`),
@@ -533,7 +620,49 @@ export default function App() {
       stockOut: (payload) => post('/portal/stockkeeper/transactions/stock-out', payload),
       stockAdjustment: (payload) => post('/portal/stockkeeper/transactions/adjustment', payload)
     };
-  }, [loadData, portal, refreshSidebarCounts]);
+  }, [downloadMessageAttachment, loadData, notify, portal, refreshNotifications, refreshSidebarCounts]);
+
+  const patchNotificationState = useCallback((updater) => {
+    setData((current) => ({
+      ...current,
+      notifications: updater(Array.isArray(current.notifications) ? current.notifications : [])
+    }));
+  }, []);
+
+  const markNotificationRead = useCallback(async (id) => {
+    setNotificationBusy(true);
+    try {
+      await portalApi.markNotificationRead(id);
+      patchNotificationState((items) => items.map((item) => item.id === id ? { ...item, isRead: true } : item));
+    } finally {
+      setNotificationBusy(false);
+    }
+  }, [patchNotificationState, portalApi]);
+
+  const markAllNotificationsRead = useCallback(async () => {
+    setNotificationBusy(true);
+    try {
+      await portalApi.markAllNotificationsRead();
+      patchNotificationState((items) => items.map((item) => ({ ...item, isRead: true })));
+    } finally {
+      setNotificationBusy(false);
+    }
+  }, [patchNotificationState, portalApi]);
+
+  const deleteNotification = useCallback(async (id) => {
+    setNotificationBusy(true);
+    try {
+      await portalApi.deleteNotification(id);
+      patchNotificationState((items) => items.filter((item) => item.id !== id));
+    } finally {
+      setNotificationBusy(false);
+    }
+  }, [patchNotificationState, portalApi]);
+
+  const viewAllNotifications = useCallback(() => {
+    go(activePortal, 'Notifications');
+    setNotificationsOpen(false);
+  }, [activePortal]);
 
   async function loadQuotations(rfqId) {
     const result = await api(`/rfqs/${rfqId}/quotations`);
@@ -754,7 +883,12 @@ export default function App() {
     notificationsOpen,
     onNavigate: (nextPage, nextQuery) => go(activePortal, nextPage, nextQuery),
     onNotification: openNotification,
-    onToggleNotifications: () => setNotificationsOpen((open) => !open),
+    onToggleNotifications: (next) => setNotificationsOpen(typeof next === 'boolean' ? next : !notificationsOpen),
+    onMarkNotificationRead: markNotificationRead,
+    onMarkAllNotificationsRead: markAllNotificationsRead,
+    onDeleteNotification: deleteNotification,
+    onViewAllNotifications: viewAllNotifications,
+    notificationBusy,
     onOpenMenu: () => setMobileNav(true),
     onCloseMenu: () => setMobileNav(false),
     onLogout: logout,
@@ -770,6 +904,7 @@ export default function App() {
     && activePage !== 'Purchase orders'
     && activePage !== 'Goods receipts'
     && activePage !== 'Invoices'
+    && activePage !== 'Messages'
     && activePage !== 'Stock movements'
     && activePage !== 'Store requests'
     && activePage !== 'Users'
@@ -793,6 +928,8 @@ export default function App() {
           getPurchaseOrder={actions.getPurchaseOrder}
           updatePurchaseOrder={actions.updatePurchaseOrder}
           loading={loading}
+          counts={sidebarCounts}
+          onOpenNotification={openNotification}
           navigate={(nextPage, nextQuery) => go('admin', nextPage, nextQuery)}
           dateFilter={activeFilter}
           onDateFilterChange={setDateFilter}
@@ -858,11 +995,22 @@ export default function App() {
       portalContent = <Suspense fallback={stockLoader('inventory reports')}>
         <StockKeeperInventoryReports portalApi={portalApi} user={displayUser} department={displayUser?.departmentName || displayUser?.department || ''} />
       </Suspense>;
+    } else if (activePage === 'Messages') {
+      portalContent = <PortalMessages
+        portal="stockkeeper"
+        portalApi={portalApi}
+        query={route.query || {}}
+        userId={user?.id}
+        navigate={navigatePage}
+        initial={extras.conversations}
+      />;
     } else if (activePage === 'Notifications') {
       portalContent = <StockKeeperNotifications
         notifications={data.notifications}
+        counts={sidebarCounts}
         portalApi={portalApi}
         onOpenNotification={openNotification}
+        navigate={navigatePage}
       />;
     } else if (activePage === 'Display before delivery') {
       portalContent = <StockKeeperDisplayBeforeDelivery portalApi={portalApi} />;
@@ -907,6 +1055,7 @@ export default function App() {
       portalContent = <PortalNotifications
         portal="requester"
         notifications={data.notifications}
+        counts={sidebarCounts}
         portalApi={portalApi}
         onOpenNotification={openNotification}
         navigate={navigatePage}
@@ -947,6 +1096,7 @@ export default function App() {
       portalContent = <PortalNotifications
         portal="supervisor"
         notifications={data.notifications}
+        counts={sidebarCounts}
         portalApi={portalApi}
         onOpenNotification={openNotification}
         navigate={navigatePage}

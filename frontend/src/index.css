@@ -66,6 +66,10 @@ input::placeholder, textarea::placeholder { color: var(--text-primary) !importan
   .field { @apply mt-1.5 h-10 w-full rounded-lg border border-brand px-3 text-sm font-normal outline-none focus:border-accent-border; }
   button.bg-brand { border: 1px solid var(--pims-border); }
   button.bg-brand:hover { background-color: var(--pims-interaction-tint); border-color: var(--pims-interaction-border); }
+
+  /* Unread messages use a subtle green surface. Read rows stay white, and the
+     selected ring is independent from read state. */
+  .message-unread { background-color: var(--pims-interaction-row-tint); }
 }
 
 @layer utilities {

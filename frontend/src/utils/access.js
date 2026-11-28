@@ -32,6 +32,7 @@ export const STOCKKEEPER_PAGES = [
   'Display before delivery',
   'Bin Card',
   'Inventory Reports',
+  'Messages',
   'Notifications',
   PROFILE_PAGE
 ];
@@ -93,6 +94,8 @@ export const PROCUREMENT_PAGES = [
   PROCUREMENT_COMMITTEE_PAGE,
   'RFQs',
   'Email Inbox',
+  'Messages',
+  'Notifications',
   PURCHASE_ORDERS_PAGE,
   'Goods receipts',
   'Invoices',
@@ -126,6 +129,7 @@ const restrictedPages = {
   [RECEIVED_REQUESTS_PAGE]: ['admin', 'procurement'],
   [PROCUREMENT_PROCESSING_PAGE]: ['admin', 'procurement'],
   'Email Inbox': ['admin', 'procurement'],
+  Messages: ['admin', 'procurement'],
   [PROCUREMENT_COMMITTEE_PAGE]: ['admin', 'procurement'],
   [PURCHASE_ORDERS_PAGE]: ['admin', 'procurement'],
   Users: ['admin'],

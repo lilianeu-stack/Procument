@@ -1,3 +1,5 @@
+import { createNotificationRecord } from '../services/notification-service.js';
+
 export async function writeAudit(connection, userId, action, entityType, entityId, details = {}, status = {}) {
   await connection.execute(
     `INSERT INTO audit_logs
@@ -15,9 +17,18 @@ export async function writeAudit(connection, userId, action, entityType, entityI
   );
 }
 
-export async function createNotification(connection, userId, title, body, link = null, category = 'general') {
-  await connection.execute(
-    'INSERT INTO notifications (user_id, title, body, link, category) VALUES (?, ?, ?, ?, ?)',
-    [userId || null, title, body, link, category]
-  );
+// Existing call sites use the original five positional arguments. The optional
+// metadata argument carries the structured fields used by the notification
+// center; category remains the module sub-type for backward compatibility.
+export async function createNotification(
+  connection, userId, title, body, link = null, category = 'general', metadata = {}
+) {
+  return createNotificationRecord(connection, {
+    ...metadata,
+    userId,
+    title,
+    body,
+    link,
+    category
+  });
 }

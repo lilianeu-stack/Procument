@@ -1620,7 +1620,7 @@ test('sidebar badge counts are real, per-user, role scoped, and clear on read', 
   assert.equal(afterSupervisor.Approvals - (beforeSupervisor.Approvals || 0), 1);
   assert.equal(afterSupervisor['My Procurement Requests'], undefined);
   assert.equal(afterRequester.Messages - (beforeRequester.Messages || 0), 1);
-  assert.equal(afterRequester['My Procurement Requests'] - (beforeRequester['My Procurement Requests'] || 0), 2);
+  assert.equal(afterRequester['My Procurement Requests'] - (beforeRequester['My Procurement Requests'] || 0), 1);
   assert.equal((afterRequester.Notifications || 0) - (beforeRequester.Notifications || 0), 1, 'only the general request notice should count; the paired message notice must be excluded');
   assert.equal(afterRequester.Approvals, undefined);
   assert.equal(afterOther.Messages || 0, beforeOther.Messages || 0);
@@ -1645,7 +1645,7 @@ test('sidebar badge counts are real, per-user, role scoped, and clear on read', 
   assert.equal(
     requesterAfterRead['My Procurement Requests'] || 0,
     (beforeRequester['My Procurement Requests'] || 0) + 1,
-    'the conversation notice clears, while the separate request notice stays unread'
+    'the message notice was never a module badge; only the separate request notice stays unread'
   );
 
   const [remainingNotice] = await pool.execute(
@@ -1800,6 +1800,174 @@ test('sidebar badges follow real send, stepwise read, reappear, refresh, and ind
   assert.equal(recipientRows.length, 2);
   assert.equal(recipientRows.find((row) => row.user_id === requester.id)?.is_read, 1);
   assert.equal(recipientRows.find((row) => row.user_id === secondRecipient.id)?.is_read, 0);
+});
+
+test('shared messaging API filters, searches, paginates and preserves role privacy', async () => {
+  const stamp = Date.now();
+  const requesterC = await createUser(
+    'QA Shared Requester C', `qa.shared.requester.c.${stamp}@example.org`, 'requestor', departments.b.id
+  );
+  const unreadFor = async (account) => Number((await request('/messages/unread-count', { user: account })).data.unread) || 0;
+  const baseline = {
+    requesterB: await unreadFor(users.requesterB),
+    requesterC: await unreadFor(requesterC),
+    supervisorA: await unreadFor(users.supervisorA)
+  };
+
+  const first = await request('/messages', {
+    method: 'POST', user: users.supervisorB,
+    body: { recipientId: users.requesterB.id, body: `QA shared alpha ${stamp}` }
+  });
+  assert.equal(first.response.status, 201, first.data.message);
+  const otherRecipient = await request('/messages', {
+    method: 'POST', user: users.supervisorB,
+    body: { recipientId: requesterC.id, body: `QA shared beta ${stamp}` }
+  });
+  assert.equal(otherRecipient.response.status, 201, otherRecipient.data.message);
+  const reply = await request('/messages', {
+    method: 'POST', user: users.requesterB,
+    body: { recipientId: users.supervisorB.id, body: `QA shared reply ${stamp}` }
+  });
+  assert.equal(reply.response.status, 201, reply.data.message);
+  const adminSent = await request('/messages', {
+    method: 'POST', user: admin,
+    body: { recipientId: users.supervisorB.id, body: `QA admin coordination ${stamp}` }
+  });
+  assert.equal(adminSent.response.status, 201, adminSent.data.message);
+  const adminToRequester = await request('/messages', {
+    method: 'POST', user: admin,
+    body: { recipientId: users.requesterB.id, body: `QA admin requester ${stamp}` }
+  });
+  assert.equal(adminToRequester.response.status, 201, adminToRequester.data.message);
+  const stockSent = await request('/messages', {
+    method: 'POST', user: users.stockkeeper,
+    body: { recipientId: users.supervisorA.id, body: `QA stock coordination ${stamp}` }
+  });
+  assert.equal(stockSent.response.status, 201, stockSent.data.message);
+
+  // Unrelated users cannot open or inject into another department's thread.
+  const crossThread = await request(`/messages/thread?userId=${users.requesterB.id}`, { user: users.requesterA });
+  assert.equal(crossThread.response.status, 403);
+  const stockCrossThread = await request(`/messages/thread?userId=${users.requesterB.id}`, { user: users.stockkeeper });
+  assert.equal(stockCrossThread.response.status, 403);
+  const crossSend = await request('/messages', {
+    method: 'POST', user: users.requesterA,
+    body: { recipientId: users.requesterB.id, body: 'QA cross-department message' }
+  });
+  assert.equal(crossSend.response.status, 403);
+  const announcementDenied = await request('/messages', {
+    method: 'POST', user: users.requesterB,
+    body: { announcement: true, body: 'QA unauthorized announcement' }
+  });
+  assert.equal(announcementDenied.response.status, 403);
+
+  // A privileged sender's conversation is visible to the department recipient
+  // so the recipient can reply, but never to unrelated users.
+  const supervisorInbox = await request('/messages/conversations', { user: users.supervisorB });
+  assert.equal(supervisorInbox.response.status, 200, supervisorInbox.data.message);
+  assert.ok(supervisorInbox.data.conversations.some((row) => row.id === admin.id));
+  const adminInbox = await request('/messages/conversations', { user: admin });
+  assert.ok(adminInbox.data.conversations.some((row) => row.id === users.supervisorB.id));
+  const stockInbox = await request('/messages/conversations', { user: users.stockkeeper });
+  assert.ok(stockInbox.data.conversations.some((row) => row.id === users.supervisorA.id));
+  assert.ok(!stockInbox.data.conversations.some((row) => row.id === users.requesterB.id));
+  const sidebar = await request('/sidebar-counts', { user: users.stockkeeper });
+  assert.equal(typeof sidebar.data.counts.Messages, 'number');
+
+  const all = await request(`/messages/conversations?pageSize=50`, { user: users.requesterB });
+  assert.equal(all.response.status, 200, all.data.message);
+  const conversation = all.data.conversations.find((row) => row.id === users.supervisorB.id);
+  assert.ok(conversation, 'the shared conversation must be present');
+  assert.equal(conversation.kind, 'private');
+  assert.ok(conversation.unreadCount >= 1);
+  assert.ok(conversation.sentCount >= 1);
+  assert.ok(Object.values(all.data.counts).every((value) => Number.isInteger(value)));
+
+  const unreadFilter = await request('/messages/conversations?filter=unread', { user: users.requesterB });
+  assert.ok(unreadFilter.data.conversations.some((row) => row.id === users.supervisorB.id));
+  assert.ok(!unreadFilter.data.conversations.some((row) => row.id === requesterC.id));
+  const search = await request(`/messages/conversations?search=${encodeURIComponent(`alpha ${stamp}`)}`, { user: users.requesterB });
+  assert.ok(search.data.conversations.some((row) => row.id === users.supervisorB.id));
+  assert.equal(search.data.conversations.length, 1, 'message-content search must narrow the list');
+  const paginated = await request('/messages/conversations?page=1&pageSize=1', { user: users.requesterB });
+  assert.equal(paginated.data.conversations.length, 1);
+  assert.ok(paginated.data.total > 1);
+
+  const attachmentText = `QA attachment ${stamp}`;
+  const withAttachment = await request('/messages', {
+    method: 'POST', user: users.supervisorB,
+    body: {
+      recipientId: users.requesterB.id,
+      body: `QA attachment message ${stamp}`,
+      attachments: [{
+        fileName: 'qa-messages.txt', mimeType: 'text/plain',
+        data: `data:text/plain;base64,${Buffer.from(attachmentText).toString('base64')}`
+      }]
+    }
+  });
+  assert.equal(withAttachment.response.status, 201, withAttachment.data.message);
+  const detailThread = await request(`/messages/thread?userId=${users.supervisorB.id}&pageSize=100`, { user: users.requesterB });
+  const attachmentMessage = detailThread.data.messages.find((row) => Number(row.id) === Number(withAttachment.data.id));
+  assert.equal(attachmentMessage?.attachmentCount, 1);
+  const attachmentId = attachmentMessage.attachments[0].id;
+  const deniedAttachment = await request(`/messages/attachments/${attachmentId}`, { user: users.requesterA });
+  assert.equal(deniedAttachment.response.status, 403);
+  const allowedAttachment = await fetch(`${baseUrl}/messages/attachments/${attachmentId}`, {
+    headers: { Authorization: `Bearer ${tokenFor(users.requesterB)}` }
+  });
+  assert.equal(allowedAttachment.status, 200);
+  assert.equal(await allowedAttachment.text(), attachmentText);
+
+  // A notification belonging to a message whose ID shares a numeric prefix
+  // must not be cleared when the shorter message is opened.
+  const decoyNoticeId = await insertNotification(
+    users.requesterB.id, 'QA prefixed message badge',
+    `#/requester/Messages?message=${Number(first.data.id)}0`, 'message'
+  );
+  const beforeRead = await unreadFor(users.requesterB);
+  const marked = await request(`/messages/${first.data.id}/read`, { method: 'PATCH', user: users.requesterB });
+  assert.equal(marked.response.status, 200, marked.data.message);
+  assert.equal(await unreadFor(users.requesterB), beforeRead - 1);
+  const [receiptRows] = await pool.execute(
+    'SELECT is_read FROM message_recipients WHERE message_id = ? AND user_id = ?',
+    [first.data.id, users.requesterB.id]
+  );
+  assert.equal(Boolean(receiptRows[0]?.is_read), true);
+  const [decoyRows] = await pool.execute(
+    `SELECT n.is_read FROM notifications n WHERE n.id = ?`, [decoyNoticeId]
+  );
+  assert.equal(Boolean(decoyRows[0]?.is_read), false, 'message=10 must not be cleared by opening message=1');
+  const [decoyReceipts] = await pool.execute(
+    'SELECT notification_id FROM notification_read_receipts WHERE notification_id = ? AND user_id = ?',
+    [decoyNoticeId, users.requesterB.id]
+  );
+  assert.equal(decoyReceipts.length, 0);
+  const markedAttachment = await request(`/messages/${withAttachment.data.id}/read`, {
+    method: 'PATCH', user: users.requesterB
+  });
+  assert.equal(markedAttachment.response.status, 200, markedAttachment.data.message);
+
+  // Earlier tests may have left unread messages in this long-lived conversation.
+  // Clear them so the Read filter assertion is independent of suite order.
+  const fullThread = await request(`/messages/thread?userId=${users.supervisorB.id}&pageSize=100`, { user: users.requesterB });
+  for (const message of fullThread.data.messages.filter((row) => !row.isRead)) {
+    const cleared = await request(`/messages/${message.id}/read`, { method: 'PATCH', user: users.requesterB });
+    assert.equal(cleared.response.status, 200, cleared.data.message);
+  }
+  const afterReads = await unreadFor(users.requesterB);
+
+  // Reads are stepwise and independent: the other recipient keeps their badge.
+  const readFilter = await request('/messages/conversations?filter=read', { user: users.requesterB });
+  assert.ok(readFilter.data.conversations.some((row) => row.id === users.supervisorB.id));
+  assert.equal(await unreadFor(requesterC), baseline.requesterC + 1);
+  const later = await request('/messages', {
+    method: 'POST', user: users.supervisorB,
+    body: { recipientId: users.requesterB.id, body: `QA shared reappearing ${stamp}` }
+  });
+  assert.equal(later.response.status, 201, later.data.message);
+  assert.equal(await unreadFor(users.requesterB), afterReads + 1, 'a later message must restore the badge');
+  const stockSidebar = await request('/sidebar-counts', { user: users.supervisorA });
+  assert.ok(stockSidebar.data.counts['Department Messages'] >= baseline.supervisorA + 1);
 });
 
 test('supervisor stock view is read-only and scoped to the assigned Department', async () => {
@@ -4640,4 +4808,309 @@ test('synced email badges are per authorized reader until that email is opened',
     await pool.execute('DELETE FROM email_message_read_receipts WHERE gmail_message_id = ?', [gmailMessageId]);
     await pool.execute('DELETE FROM google_email_messages WHERE gmail_message_id = ?', [gmailMessageId]);
   }
+});
+
+async function postNotification(user, payload) {
+  const result = await request('/notifications', { method: 'POST', user, body: payload });
+  const id = Number(result.data?.notification?.id || 0);
+  if (id) createdNotificationIds.push(id);
+  return result;
+}
+
+async function notificationCountsFor(user) {
+  const result = await request('/notifications?limit=1', { user });
+  assert.equal(result.response.status, 200, result.data.message);
+  return result.data.counts;
+}
+
+async function notificationRows(userId, condition, params = []) {
+  const [rows] = await pool.execute(
+    `SELECT id, request_id AS requestId, dedupe_key AS dedupeKey, module, body
+       FROM notifications WHERE user_id = ? AND ${condition}`,
+    [userId, ...params]
+  );
+  for (const row of rows) createdNotificationIds.push(Number(row.id));
+  return rows;
+}
+
+test('notification API returns typed, filtered, authoritative counts scoped to the recipient', async () => {
+  const stamp = Date.now();
+  const beforeA = await notificationCountsFor(users.requesterA);
+  const beforeSidebarA = (await request('/sidebar-counts', { user: users.requesterA })).data.counts;
+  const beforeB = await notificationCountsFor(users.requesterB);
+  const titles = {
+    error: `QA typed error ${stamp}`,
+    warning: `QA typed warning ${stamp}`,
+    success: `QA typed success ${stamp}`,
+    information: `QA typed information ${stamp}`
+  };
+
+  for (const [type, title] of Object.entries(titles)) {
+    const created = await postNotification(users.requesterA, {
+      title,
+      message: `QA structured ${type} body ${stamp}`,
+      type,
+      module: 'QA Notifications',
+      relatedRecordId: `qa-${type}-${stamp}`,
+      actionUrl: '/rfqs',
+      recommendedAction: `Review the ${type} details.`
+    });
+    assert.equal(created.response.status, 201, created.data.message);
+    assert.equal(created.data.notification.type, type);
+    assert.equal(created.data.notification.module, 'QA Notifications');
+    assert.equal(created.data.notification.relatedRecordId, `qa-${type}-${stamp}`);
+    assert.equal(created.data.notification.actionUrl, '/rfqs');
+    assert.equal(created.data.notification.recommendedAction, `Review the ${type} details.`);
+  }
+
+  const foreignTitle = `QA foreign notice ${stamp}`;
+  const foreign = await postNotification(users.requesterB, {
+    title: foreignTitle, message: 'Private to the other requester.', type: 'error'
+  });
+  assert.equal(foreign.response.status, 201, foreign.data.message);
+
+  const listA = await request('/notifications?limit=100', { user: users.requesterA });
+  assert.equal(listA.response.status, 200, listA.data.message);
+  for (const title of Object.values(titles)) {
+    assert.ok(listA.data.notifications.some((row) => row.title === title), `${title} should persist`);
+  }
+  assert.ok(!listA.data.notifications.some((row) => row.title === foreignTitle), 'another user\'s notice must not leak');
+
+  const afterA = await notificationCountsFor(users.requesterA);
+  for (const type of ['error', 'warning', 'success', 'information']) {
+    assert.equal(afterA[type] - beforeA[type], 1, `${type} count should come from the backend`);
+  }
+  assert.equal(afterA.unread - beforeA.unread, 4);
+  const sidebarA = (await request('/sidebar-counts', { user: users.requesterA })).data.counts;
+  assert.equal(sidebarA.Notifications - beforeSidebarA.Notifications, 4,
+    'the notification sidebar badge must include notices without a module link');
+
+  const filtered = await request('/notifications?filter=error&limit=100', { user: users.requesterA });
+  assert.equal(filtered.data.filter, 'error');
+  assert.ok(filtered.data.notifications.every((row) => row.type === 'error'));
+  assert.ok(filtered.data.notifications.some((row) => row.title === titles.error));
+  assert.ok(!filtered.data.notifications.some((row) => row.title === titles.warning));
+  assert.equal(filtered.data.counts.error, afterA.error, 'filtering must not change authoritative counts');
+
+  // A refreshed session still sees the same persisted records.
+  const refreshed = await request('/auth/me', { user: users.requesterA });
+  assert.equal(refreshed.response.status, 200);
+  const afterRefresh = await request('/notifications?limit=100', { user: users.requesterA });
+  assert.ok(afterRefresh.data.notifications.some((row) => row.title === titles.information));
+
+  const listB = await request('/notifications?limit=100', { user: users.requesterB });
+  assert.ok(listB.data.notifications.some((row) => row.title === foreignTitle));
+  assert.ok(!listB.data.notifications.some((row) => row.title === titles.error), 'role/recipient scoping failed');
+  const afterB = await notificationCountsFor(users.requesterB);
+  assert.equal(afterB.error - beforeB.error, 1);
+  assert.equal(afterB.unread - beforeB.unread, 1);
+});
+
+test('notification creation deduplicates, sanitizes action URLs, and keeps error responses safe', async () => {
+  const stamp = Date.now();
+  const dedupeKey = `qa-notification-dedupe-${stamp}`;
+  const payload = {
+    title: `QA dedupe notice ${stamp}`,
+    message: 'The same operation must not create two notices.',
+    type: 'success',
+    dedupeKey,
+    actionUrl: 'javascript:alert(1)',
+    link: 'https://attacker.example/qa'
+  };
+  const first = await postNotification(users.requesterA, payload);
+  assert.equal(first.response.status, 201, first.data.message);
+  assert.equal(first.data.notification.actionUrl, null);
+  assert.equal(first.data.notification.link, null);
+
+  const second = await postNotification(users.requesterA, payload);
+  assert.equal(second.response.status, 200);
+  assert.equal(second.data.duplicate, true);
+  assert.equal(second.data.notification, null);
+
+  const rows = await notificationRows(users.requesterA.id, 'dedupe_key = ?', [dedupeKey]);
+  assert.equal(rows.length, 1, 'a repeated dedupe key must not insert a second row');
+
+  const before = await notificationCountsFor(admin);
+  const invalid = await request('/notifications', {
+    method: 'POST', user: admin, body: { message: 'A notice without a title.' }
+  });
+  assert.equal(invalid.response.status, 400);
+  assert.equal(typeof invalid.data.requestId, 'string');
+  assert.equal(invalid.response.headers.get('x-request-id'), invalid.data.requestId);
+  assert.ok(!invalid.data.stack);
+  assert.doesNotMatch(invalid.data.message, /ER_[A-Z_]+|select\s|insert\s|at\s+\/|C:\\/i);
+  const after = await notificationCountsFor(admin);
+  assert.equal(after.total, before.total, 'notification endpoints must not notify themselves');
+});
+
+test('notification read and dismiss actions are user scoped, including shared notices', async () => {
+  const stamp = Date.now();
+  const created = await postNotification(users.requesterB, {
+    title: `QA personal notice ${stamp}`,
+    message: 'Only this recipient may mark or dismiss it.',
+    type: 'warning'
+  });
+  const id = created.data.notification.id;
+  const before = await notificationCountsFor(users.requesterB);
+
+  const crossRead = await request(`/notifications/${id}/read`, { method: 'PATCH', user: users.requesterA });
+  assert.equal(crossRead.response.status, 404);
+  const crossDelete = await request(`/notifications/${id}`, { method: 'DELETE', user: users.requesterA });
+  assert.equal(crossDelete.response.status, 404);
+
+  const marked = await request(`/notifications/${id}/read`, { method: 'PATCH', user: users.requesterB });
+  assert.equal(marked.response.status, 200, marked.data.message);
+  assert.equal(marked.data.counts.unread, before.unread - 1);
+  const [[personal]] = await pool.execute(
+    'SELECT is_read AS isRead, read_at AS readAt FROM notifications WHERE id = ?', [id]
+  );
+  assert.equal(Boolean(personal.isRead), true);
+  assert.ok(personal.readAt, 'a read timestamp must be persisted');
+
+  const readList = await request('/notifications?filter=read&limit=100', { user: users.requesterB });
+  assert.ok(readList.data.notifications.some((row) => row.id === id));
+
+  const dismissed = await request(`/notifications/${id}`, { method: 'DELETE', user: users.requesterB });
+  assert.equal(dismissed.response.status, 200, dismissed.data.message);
+  assert.equal(dismissed.data.dismissed, true);
+  const afterDelete = await request('/notifications?limit=100', { user: users.requesterB });
+  assert.ok(!afterDelete.data.notifications.some((row) => row.id === id));
+
+  const [broadcastResult] = await pool.execute(
+    `INSERT INTO notifications
+       (user_id, title, body, link, category, notification_type, module, recommended_action)
+     VALUES (NULL, ?, ?, '/notifications', 'general', 'information', 'QA Notifications', ?)`,
+    [`QA shared notice ${stamp}`, 'Shared rows need per-user receipts.', 'Review this shared notice.']
+  );
+  const broadcastId = Number(broadcastResult.insertId);
+  createdNotificationIds.push(broadcastId);
+
+  const beforeSharedA = await notificationCountsFor(users.requesterA);
+  const beforeSharedB = await notificationCountsFor(users.requesterB);
+  const sharedReadA = await request(`/notifications/${broadcastId}/read`, { method: 'PATCH', user: users.requesterA });
+  assert.equal(sharedReadA.response.status, 200, sharedReadA.data.message);
+  const [[shared]] = await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [broadcastId]);
+  assert.equal(Boolean(shared.isRead), false, 'one reader must not clear a shared row globally');
+
+  const sharedListA = await request('/notifications?limit=100', { user: users.requesterA });
+  const sharedListB = await request('/notifications?limit=100', { user: users.requesterB });
+  assert.equal(sharedListA.data.notifications.find((row) => row.id === broadcastId)?.isRead, true);
+  assert.equal(sharedListB.data.notifications.find((row) => row.id === broadcastId)?.isRead, false);
+  assert.equal((await notificationCountsFor(users.requesterA)).unread, beforeSharedA.unread - 1);
+  assert.equal((await notificationCountsFor(users.requesterB)).unread, beforeSharedB.unread);
+
+  const sharedDismissB = await request(`/notifications/${broadcastId}`, { method: 'DELETE', user: users.requesterB });
+  assert.equal(sharedDismissB.response.status, 200, sharedDismissB.data.message);
+  assert.equal(sharedDismissB.data.dismissed, false);
+  assert.equal((await notificationCountsFor(users.requesterB)).unread, beforeSharedB.unread - 1);
+  const [receipts] = await pool.execute(
+    'SELECT user_id AS userId FROM notification_read_receipts WHERE notification_id = ? ORDER BY user_id',
+    [broadcastId]
+  );
+  assert.deepEqual(receipts.map((row) => row.userId), [users.requesterA.id, users.requesterB.id]);
+});
+
+test('API failures persist once with a request id, safe message, and no notification loop', async () => {
+  const beforeValidation = await notificationCountsFor(users.requesterA);
+  const invalidBody = {
+    recipientId: users.supervisorA.id,
+    body: 'QA invalid attachment payload',
+    attachments: 'not-a-list'
+  };
+  const first = await request('/messages', {
+    method: 'POST', user: users.requesterA, body: invalidBody
+  });
+  assert.equal(first.response.status, 400, first.data.message);
+  assert.equal(typeof first.data.requestId, 'string');
+  assert.equal(first.response.headers.get('x-request-id'), first.data.requestId);
+  assert.ok(!first.data.stack);
+  assert.doesNotMatch(first.data.message, /ER_[A-Z_]+|select\s|insert\s|at\s+\/|C:\\/i);
+
+  const repeated = await request('/messages', {
+    method: 'POST', user: users.requesterA, body: invalidBody
+  });
+  assert.equal(repeated.response.status, 400);
+  const afterValidation = await notificationCountsFor(users.requesterA);
+  assert.equal(afterValidation.total - beforeValidation.total, 1, 'retries must not stack identical notices');
+
+  const failureRows = await notificationRows(
+    users.requesterA.id, "title = 'Action failed' AND body = ?", [first.data.message]
+  );
+  assert.equal(failureRows.length, 1);
+  assert.equal(failureRows[0].requestId, first.data.requestId);
+  assert.match(failureRows[0].dedupeKey, /^api-error:[a-f0-9]{40}$/);
+  assert.equal(failureRows[0].module, 'Messages');
+
+  const unauthorizedBody = {
+    recipientId: users.supervisorA.id,
+    body: 'QA unauthorized requisition link',
+    requisitionId: 987654321
+  };
+  const beforeDenied = await notificationCountsFor(admin);
+  const denied = await request('/messages', { method: 'POST', user: admin, body: unauthorizedBody });
+  assert.equal(denied.response.status, 403, denied.data.message);
+  assert.equal(denied.response.headers.get('x-request-id'), denied.data.requestId);
+  const deniedAgain = await request('/messages', { method: 'POST', user: admin, body: unauthorizedBody });
+  assert.equal(deniedAgain.response.status, 403);
+  const afterDenied = await notificationCountsFor(admin);
+  assert.equal(afterDenied.total - beforeDenied.total, 1);
+
+  const deniedRows = await notificationRows(
+    admin.id, "title = 'Access denied' AND body = ?", [denied.data.message]
+  );
+  assert.equal(deniedRows.length, 1);
+  assert.equal(deniedRows[0].requestId, denied.data.requestId);
+  assert.equal(deniedRows[0].module, 'Messages');
+
+  const forbidden = await request('/admin/users', { user: users.requesterA });
+  assert.equal(forbidden.response.status, 403);
+  assert.equal(typeof forbidden.data.requestId, 'string');
+  assert.equal(forbidden.response.headers.get('x-request-id'), forbidden.data.requestId);
+  assert.ok(!forbidden.data.stack);
+  const forbiddenRows = await notificationRows(
+    users.requesterA.id, "title = 'Access denied' AND body = ?", [forbidden.data.message]
+  );
+  assert.ok(forbiddenRows.length >= 1, 'role-gate denials must also become safe notifications');
+});
+
+test('mark all notifications read clears only the notification badge and persists read state', async () => {
+  const stamp = Date.now();
+  const before = await notificationCountsFor(users.requesterB);
+  const sidebarBefore = (await request('/sidebar-counts', { user: users.requesterB })).data.counts;
+  const ids = [];
+  const titles = [
+    `QA bulk error ${stamp}`,
+    `QA bulk warning ${stamp}`,
+    `QA bulk success ${stamp}`
+  ];
+  for (const [index, title] of titles.entries()) {
+    const created = await postNotification(users.requesterB, {
+      title,
+      message: `QA bulk notification ${index}`,
+      type: ['error', 'warning', 'success'][index]
+    });
+    assert.equal(created.response.status, 201, created.data.message);
+    ids.push(created.data.notification.id);
+  }
+
+  const marked = await request('/notifications/read-all', { method: 'PATCH', user: users.requesterB });
+  assert.equal(marked.response.status, 200, marked.data.message);
+  assert.ok(marked.data.updated >= 3);
+
+  const after = await notificationCountsFor(users.requesterB);
+  assert.equal(before.unread + titles.length - after.unread, marked.data.updated);
+  const sidebarAfter = (await request('/sidebar-counts', { user: users.requesterB })).data.counts;
+  assert.equal(sidebarAfter.notificationUnread, after.unread);
+
+  const unread = await request('/notifications?filter=unread&limit=100', { user: users.requesterB });
+  for (const title of titles) {
+    assert.ok(!unread.data.notifications.some((row) => row.title === title), `${title} should no longer be unread`);
+  }
+  const [rows] = await pool.execute(
+    `SELECT id, is_read AS isRead, read_at AS readAt FROM notifications
+      WHERE id IN (${ids.map(() => '?').join(',')})`,
+    ids
+  );
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every((row) => Boolean(row.isRead) && row.readAt), 'read-all must persist read timestamps');
 });

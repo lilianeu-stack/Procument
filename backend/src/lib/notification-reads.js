@@ -54,7 +54,7 @@ export async function markNotificationsRead(connection, userId, condition = '1 =
   // User-addressed rows keep the long-standing boolean contract for lists and
   // older clients. Broadcast rows deliberately keep is_read = FALSE.
   await connection.execute(
-    `UPDATE notifications SET is_read = TRUE
+    `UPDATE notifications SET is_read = TRUE, read_at = COALESCE(read_at, UTC_TIMESTAMP())
       WHERE user_id = ? AND is_read = FALSE AND id IN (${marks})`,
     [userId, ...ids]
   );
@@ -63,6 +63,20 @@ export async function markNotificationsRead(connection, userId, condition = '1 =
 
 export async function markNotificationRead(connection, userId, notificationId) {
   return markNotificationsRead(connection, userId, 'n.id = ?', [notificationId]);
+}
+
+// A message ID must match the whole query parameter. A plain
+// `LIKE CONCAT('%message=', ?)` prefix would also match message=1 inside
+// message=11 and clear an unrelated notification.
+export function messageNotificationCondition(messageId) {
+  return {
+    condition: `n.category = 'message' AND (
+      n.link LIKE CONCAT('%message=', ?, '&%')
+      OR n.link LIKE CONCAT('%message=', ?, '#%')
+      OR n.link LIKE CONCAT('%message=', ?)
+    )`,
+    params: [messageId, messageId, messageId]
+  };
 }
 
 // Shared Google mailbox messages have no owner column, so read state is also

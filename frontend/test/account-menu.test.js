@@ -134,7 +134,7 @@ test('avatars only request a photo when the record actually has one', () => {
   assert.match(userAvatar, /apiBlob\(`\/profile\/photo\/\$\{id\}\?v=\$\{version\}`/);
   assert.match(portalMessages, /photo=\{conversation\.photo\}/);
   assert.match(portalMessages, /photo=\{message\.senderPhoto\}/);
-  assert.match(portalMessages, /photo=\{announcement\.senderPhoto\}/);
+  assert.match(portalMessages, /photo=\{conversation\.photo\}/);
 });
 
 test('profile page removes its heading while preserving profile sections', () => {

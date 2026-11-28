@@ -13,6 +13,8 @@ import { UsersPage } from './AdminPages.jsx';
 import ReceivedRequests from '../components/portals/ReceivedRequests.jsx';
 import ProcurementDocumentView from '../components/portals/ProcurementDocumentView.jsx';
 import ProcurementProcessingPage from '../components/portals/ProcurementProcessingPage.jsx';
+import PortalMessages from '../components/portals/PortalMessages.jsx';
+import NotificationsPage from '../notifications/NotificationsPage.jsx';
 import ReportToolbar from '../components/ui/ReportToolbar.jsx';
 import {
   PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, PROFILE_PAGE, RECEIVED_REQUESTS_PAGE,
@@ -49,7 +51,7 @@ function baseReportParams(page, query = {}, data = {}) {
 
 export default function PageContent({
   page, data, query = {}, actions, portalApi, navigate, dateFilter, onDateFilterChange,
-  getPurchaseOrder, updatePurchaseOrder, loading
+  getPurchaseOrder, updatePurchaseOrder, loading, counts, onOpenNotification
 }) {
   const documentId = query.view || query.request;
   const report = reportForPage(page);
@@ -95,6 +97,24 @@ export default function PageContent({
     content = <Suspense fallback={<div role="status" className="rounded-xl border border-slate-100 bg-white p-8 text-sm text-black">Loading email inbox…</div>}>
       <EmailInboxPage actions={actions} query={query} />
     </Suspense>;
+  } else if (page === 'Messages') {
+    content = <PortalMessages
+      portal="admin"
+      portalApi={portalApi}
+      query={query}
+      userId={data.user?.id}
+      navigate={navigate}
+      initial={data.portalExtras?.conversations}
+    />;
+  } else if (page === 'Notifications') {
+    content = <NotificationsPage
+      portal="admin"
+      notifications={data.notifications}
+      counts={counts}
+      portalApi={portalApi}
+      onOpenNotification={onOpenNotification}
+      navigate={navigate}
+    />;
   } else if (page === PROCUREMENT_PROCESSING_PAGE) {
     content = <ProcurementProcessingPage
       data={data} query={query} actions={actions} portalApi={portalApi} navigate={navigate}

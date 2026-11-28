@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS requisition_routing_lines (
 
 CREATE TABLE IF NOT EXISTS messages (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  department_id INT UNSIGNED NOT NULL,
+  department_id INT UNSIGNED NULL,
   requisition_id INT UNSIGNED NULL,
   sender_id INT UNSIGNED NOT NULL,
   recipient_id INT UNSIGNED NULL,
@@ -216,7 +216,8 @@ CREATE TABLE IF NOT EXISTS message_recipients (
   read_at DATETIME NULL,
   PRIMARY KEY (message_id, user_id),
   CONSTRAINT fk_msg_recipient_message FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
-  CONSTRAINT fk_msg_recipient_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  CONSTRAINT fk_msg_recipient_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_msg_recipient_unread (user_id, is_read, message_id)
 );
 
 CREATE TABLE IF NOT EXISTS message_attachments (
@@ -782,11 +783,21 @@ CREATE TABLE IF NOT EXISTS notifications (
   body VARCHAR(500) NOT NULL,
   link VARCHAR(255) NULL,
   category VARCHAR(40) NOT NULL DEFAULT 'general',
+  notification_type VARCHAR(20) NOT NULL DEFAULT 'information',
+  module VARCHAR(120) NULL,
+  related_record_id VARCHAR(80) NULL,
+  action_url VARCHAR(500) NULL,
+  recommended_action VARCHAR(200) NULL,
   is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  read_at DATETIME NULL,
+  dedupe_key VARCHAR(191) NULL,
+  request_id VARCHAR(64) NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  INDEX idx_notifications_user_date (user_id, created_at)
+  INDEX idx_notifications_user_date (user_id, created_at),
+  INDEX idx_notifications_type_user_date (notification_type, user_id, created_at),
+  UNIQUE INDEX uq_notifications_dedupe (user_id, dedupe_key)
 );
 
 -- Per-recipient read receipts. Shared/broadcast notification rows stay visible

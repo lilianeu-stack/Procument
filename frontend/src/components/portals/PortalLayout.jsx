@@ -7,7 +7,8 @@ export default function PortalLayout({
   sidebar: Sidebar, portal, user, page, counts = {}, notifications,
   mobileNav, notificationsOpen, refreshing, hidePageHeading = false,
   onNavigate, onNotification, onToggleNotifications,
-  onOpenMenu, onCloseMenu, onLogout, children
+  onMarkNotificationRead, onMarkAllNotificationsRead, onDeleteNotification, onViewAllNotifications,
+  notificationBusy, onOpenMenu, onCloseMenu, onLogout, children
 }) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -27,10 +28,16 @@ export default function PortalLayout({
         portal={portal}
         user={user}
         notifications={notifications}
+        counts={counts}
         open={notificationsOpen}
         refreshing={refreshing}
+        busy={notificationBusy}
         onToggle={onToggleNotifications}
         onNotification={onNotification}
+        onMarkNotificationRead={onMarkNotificationRead}
+        onMarkAllNotificationsRead={onMarkAllNotificationsRead}
+        onDeleteNotification={onDeleteNotification}
+        onViewAllNotifications={onViewAllNotifications}
         onMenu={onOpenMenu}
         onLogout={onLogout}
         onProfile={() => onNavigate(PROFILE_PAGE)}

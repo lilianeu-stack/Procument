@@ -2,7 +2,9 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
-import { UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, markNotificationsRead } from '../lib/notification-reads.js';
+import {
+  UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, markNotificationsRead, messageNotificationCondition
+} from '../lib/notification-reads.js';
 import { allowRoles } from '../middleware/auth.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import {
@@ -10,6 +12,7 @@ import {
 } from '../utils/requisition-status.js';
 import { getSettings } from '../services/settings.js';
 import { eligibleStockkeepers } from '../services/stockkeeper-scope.js';
+import { countUnreadMessages } from '../services/message-service.js';
 
 const router = Router();
 
@@ -580,12 +583,10 @@ async function unreadNotifications(userId) {
   return Number(rows[0]?.total) || 0;
 }
 
-async function unreadMessages(userId) {
-  const [rows] = await pool.execute(
-    'SELECT COUNT(*) AS total FROM message_recipients WHERE user_id = ? AND is_read = FALSE',
-    [userId]
-  );
-  return Number(rows[0]?.total) || 0;
+// Dashboard stats use the same authoritative unread count as the sidebar so
+// a user never sees two different numbers for the same messages.
+function unreadMessages(userId) {
+  return countUnreadMessages(pool, userId);
 }
 
 router.get('/session', (req, res) => res.json({ portal: req.user.portal, user: req.user }));
@@ -1579,19 +1580,20 @@ router.patch('/messages/:id/read', allowRoles('supervisor', 'requestor'), async 
   const messageId = parseId(req.params.id);
   if (!messageId) return res.status(400).json({ message: 'Invalid message identifier.' });
   try {
-    const [result] = await pool.execute(
+    const [recipientRows] = await pool.execute(
+      'SELECT user_id FROM message_recipients WHERE message_id = ? AND user_id = ?',
+      [messageId, req.user.id]
+    );
+    if (!recipientRows.length) return res.status(404).json({ message: 'Message not found.' });
+    await pool.execute(
       `UPDATE message_recipients SET is_read = TRUE, read_at = NOW()
        WHERE message_id = ? AND user_id = ?`,
       [messageId, req.user.id]
     );
-    if (!result.affectedRows) return res.status(404).json({ message: 'Message not found.' });
     // Clear only this reader's paired notification receipt. Broadcast rows are
     // never globally marked read and unrelated recipients keep their badge.
-    await markNotificationsRead(
-      pool, req.user.id,
-      `n.category = 'message' AND n.link LIKE CONCAT('%message=', ?)`,
-      [messageId]
-    );
+    const notice = messageNotificationCondition(messageId);
+    await markNotificationsRead(pool, req.user.id, notice.condition, notice.params);
     return res.json({ message: 'Message marked as read.' });
   } catch (error) { return next(error); }
 });
@@ -1613,9 +1615,10 @@ router.get('/messages/attachments/:attachmentId', allowRoles('supervisor', 'requ
       'SELECT user_id FROM message_recipients WHERE message_id = (SELECT message_id FROM message_attachments WHERE id = ?)',
       [attachmentId]
     );
+    // Attachments inherit their message's privacy. Being a Supervisor in the
+    // same Department is not enough to open another person's private document.
     const allowed = attachment.senderId === req.user.id
-      || readers.some((reader) => reader.user_id === req.user.id)
-      || (req.user.role === 'supervisor' && attachment.departmentId === parseId(req.user.departmentId));
+      || readers.some((reader) => reader.user_id === req.user.id);
     if (!allowed) return res.status(403).json({ message: 'You do not have access to this attachment.' });
     res.setHeader('Content-Type', attachment.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${String(attachment.fileName).replace(/["\r\n]/g, '_')}"`);

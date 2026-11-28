@@ -226,8 +226,8 @@ export function AttachmentList({ attachments = [], downloadPath, onError }) {
     {attachments.map((attachment) => <li key={attachment.id} className="flex items-center justify-between gap-3 rounded-lg border border-brand bg-white px-3 py-2">
       <span className="flex min-w-0 items-center gap-2">
         <Paperclip size={14} className="shrink-0 text-black" />
-        <span className="truncate text-xs font-semibold">{attachment.fileName}</span>
-        <span className="shrink-0 text-[10px] text-black">{formatFileSize(attachment.fileSize)}</span>
+        <span className="truncate text-xs font-semibold">{attachment.fileName || attachment.name}</span>
+        <span className="shrink-0 text-[10px] text-black">{formatFileSize(attachment.fileSize ?? attachment.size)}</span>
       </span>
       <button type="button" onClick={async () => {
         try { await downloadPath(attachment.id, attachment.fileName); }

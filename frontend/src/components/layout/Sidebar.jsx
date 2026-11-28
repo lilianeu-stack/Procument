@@ -1,6 +1,6 @@
 import {
-  Activity, ArrowDownToLine, Boxes, ChevronLeft, ChevronRight,
-  FileText, Inbox, LayoutDashboard, Mail, ShoppingCart, Truck, UserRound, Users
+  Activity, ArrowDownToLine, Bell, Boxes, BriefcaseBusiness, ChevronLeft, ChevronRight,
+  FileText, Inbox, LayoutDashboard, Mail, MessageSquare, ShoppingCart, Truck, UserRound, Users
 } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
 import SidebarBadge from '../ui/SidebarBadge.jsx';
@@ -14,6 +14,8 @@ const groups = [
     { name: RECEIVED_REQUESTS_PAGE, icon: Inbox },
     { name: 'RFQs', icon: FileText },
     { name: 'Email Inbox', icon: Mail },
+    { name: 'Messages', icon: MessageSquare },
+    { name: 'Notifications', icon: Bell },
     { name: PURCHASE_ORDERS_PAGE, icon: ShoppingCart },
     { name: 'Goods receipts', icon: ArrowDownToLine },
     { name: 'Suppliers', icon: Truck }

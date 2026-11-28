@@ -84,6 +84,7 @@ export const BADGE_TONES = {
   amber: 'border border-brand bg-white text-black',
   orange: 'border border-brand bg-white text-black',
   emerald: 'border border-brand bg-white text-black',
+  green: 'border border-brand bg-white text-black',
   red: 'border border-brand bg-white text-black',
   rose: 'border border-brand bg-white text-black'
 };

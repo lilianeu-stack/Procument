@@ -16,6 +16,7 @@ const stockOut = read('../src/components/portals/StockKeeperStockOut.jsx');
 const overview = read('../src/components/portals/StockKeeperStockOverview.jsx');
 const binCards = read('../src/components/portals/StockKeeperBinCards.jsx');
 const notificationsPage = read('../src/components/portals/StockKeeperNotifications.jsx');
+const sharedNotifications = read('../src/notifications/NotificationsPage.jsx');
 const detail = read('../src/components/portals/RequestDetail.jsx');
 const supervisorSidebar = read('../src/components/portals/SupervisorSidebar.jsx');
 const statusUtils = read('../src/utils/status.js');
@@ -83,7 +84,7 @@ test('App wires every redesigned Stock Keeper page and its portal APIs', () => {
   assert.ok(STOCKKEEPER_PAGES.every((page) => app.includes(`'${page}'`)));
 });
 
-test('sidebar uses the canonical nine pages and every link can carry a real badge', () => {
+test('sidebar uses every canonical Stock Keeper page and every link can carry a real badge', () => {
   assert.match(sidebar, /STOCKKEEPER_PAGES\.map/);
   for (const page of STOCKKEEPER_PAGES) {
     const key = /^[A-Za-z]+$/.test(page) ? page : `'${page}'`;
@@ -161,13 +162,15 @@ test('Bin Card list removes its heading while preserving transaction actions and
   assert.ok(binCards.includes('Inventory Items'));
 });
 
-test('Stock Keeper notifications removes its heading while retaining notification actions', () => {
-  assert.ok(!notificationsPage.includes('Inventory updates'));
-  assert.ok(!notificationsPage.includes('eyebrow="Inventory updates"'));
-  assert.ok(!notificationsPage.includes('title="Notifications"'));
-  assert.ok(notificationsPage.includes('title="Updates"'));
-  assert.ok(notificationsPage.includes('>Mark all as read'));
-  assert.ok(notificationsPage.includes('id="stock-notification-type"'));
+test('Stock Keeper notifications uses the shared center without a duplicated heading', () => {
+  assert.match(notificationsPage, /NotificationsPage/);
+  assert.match(notificationsPage, /portal="stockkeeper"/);
+  assert.match(notificationsPage, /id="stock-notification-type"/);
+  assert.match(sharedNotifications, /title="All notifications"/);
+  assert.match(sharedNotifications, />Mark all as read/);
+  assert.match(sharedNotifications, /id=\{id\}/);
+  assert.match(sharedNotifications, /\['unread', 'Unread'\]/);
+  assert.match(sharedNotifications, /\['information', 'Information'\]/);
 });
 
 test('Supervisor request register shows every required column and all eight states', () => {
