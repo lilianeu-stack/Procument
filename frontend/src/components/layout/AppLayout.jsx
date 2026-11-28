@@ -31,7 +31,7 @@ export default function AppLayout({
         onMarkNotificationRead={onMarkNotificationRead} onMarkAllNotificationsRead={onMarkAllNotificationsRead}
         onDeleteNotification={onDeleteNotification} onViewAllNotifications={onViewAllNotifications}
         busy={notificationBusy} onLogout={onLogout} onProfile={() => onNavigate(PROFILE_PAGE)} />
-      <div className="mx-auto max-w-[1440px] px-5 pb-10 pt-7 sm:px-8">
+      <div className="w-full max-w-none px-5 pb-10 pt-7 sm:px-8">
         {page !== 'Purchase orders' && page !== 'Stock overview' && page !== 'Stock movements' && page !== 'Goods receipts' &&
           page !== 'Email Inbox' && page !== RECEIVED_REQUESTS_PAGE && page !== 'RFQs' && (isOverview ? <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">

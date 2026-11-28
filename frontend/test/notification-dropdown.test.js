@@ -5,17 +5,19 @@ import { readFileSync } from 'node:fs';
 const read = (relative) => readFileSync(new URL(relative, import.meta.url), 'utf8');
 const topbar = read('../src/components/layout/Topbar.jsx');
 const sharedHeader = read('../src/components/portals/SharedHeader.jsx');
+const notificationCenter = read('../src/notifications/NotificationCenter.jsx');
 const css = read('../src/index.css');
 
 for (const [name, source] of [['Topbar', topbar], ['SharedHeader', sharedHeader]]) {
   test(`${name} bell card shows the unread count and marks each unread notice`, () => {
-    assert.match(source, /filter\(\(notice\) => !notice\.isRead\)\.length/, `${name} must derive the unread count`);
-    assert.match(source, /data-testid="notification-unread-count"/, `${name} must expose the count`);
-    assert.match(source, /pims-notification-unread-text[^>]*\{unread\} unread|className="pims-notification-unread-text[^"]*"[^>]*>\{unread\} unread/, `${name} must render the green count text`);
-    assert.match(source, /!notice\.isRead && <span data-testid="notification-unread-marker"/, `${name} must mark unread notices`);
-    assert.match(source, /pims-notification-unread-label/, `${name} must use the scoped green marker class`);
-    assert.match(source, /border-reference bg-accent-tint/, `${name} must tint unread items`);
-    assert.match(source, /border-transparent bg-white/, `${name} must keep read items neutral`);
+    assert.match(source, /<NotificationCenter/, `${name} must use the shared notification center`);
+    assert.match(notificationCenter, /notifications\.filter\(\(item\) => !item\.isRead\)\.length/,
+      'the shared center must derive unread counts when backend counts are absent');
+    assert.match(notificationCenter, /\{unread\} unread/, 'the shared center must show the unread count');
+    assert.match(notificationCenter, /!notice\.isRead && <span[^>]*>New<\/span>/,
+      'the shared center must mark unread notices');
+    assert.match(notificationCenter, /notice\.isRead \? 'bg-white' : 'bg-accent-row'/,
+      'the shared center must distinguish read and unread notices');
   });
 }
 

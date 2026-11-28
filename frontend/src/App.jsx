@@ -520,7 +520,11 @@ export default function App() {
       return result;
     };
     return {
-      reload: () => loadData(),
+      reload: async () => {
+        await loadData();
+        await refreshSidebarCounts();
+        await refreshNotifications();
+      },
       navigate: (page, query) => go(portal, page, query),
       getRequesterRequests: (params = {}) => api(`/portal/requester/requisitions${toQuery(params)}`),
       getRequesterRequest: (id) => api(`/portal/requester/requisitions/${id}`),
@@ -567,10 +571,6 @@ export default function App() {
       refreshMessageCounts: refreshSidebarCounts,
       downloadMessageAttachment,
       getNotifications: async (params = {}) => (await api(`/notifications${toQuery(params)}`)).notifications,
-      reload: async () => {
-        await refreshSidebarCounts();
-        await refreshNotifications();
-      },
       markNotificationRead: async (id) => {
         const result = await api(`/notifications/${id}/read`, { method: 'PATCH' });
         await refreshSidebarCounts();
