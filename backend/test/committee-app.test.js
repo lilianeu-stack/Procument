@@ -39,13 +39,19 @@ async function imageSignature() {
 }
 
 async function request(path, { method = 'GET', user, body } = {}) {
+  // RFQs cannot be issued without the Procurement signature. Supply a valid
+  // generated image by default so committee tests keep testing committee behavior.
+  const needsRfqSignature = method === 'POST' && /\/rfqs(?:\/\d+\/send)?$/.test(path);
+  const rfqBody = needsRfqSignature && body
+    ? { senderSignature: await imageSignature(), ...body }
+    : body;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     headers: {
       ...(user ? { Authorization: `Bearer ${tokenFor(user)}` } : {}),
-      ...(body ? { 'Content-Type': 'application/json' } : {})
+      ...(rfqBody ? { 'Content-Type': 'application/json' } : {})
     },
-    ...(body ? { body: JSON.stringify(body) } : {})
+    ...(rfqBody ? { body: JSON.stringify(rfqBody) } : {})
   });
   const data = await response.json().catch(() => ({}));
   return { response, data };
@@ -2301,6 +2307,7 @@ test('a sent request form can be resent with the current public response link', 
     assert.ok(form, 'the sent form must appear in the Procurement sent-forms list');
     assert.equal(form.responded, false);
     assert.equal(form.message, 'Please confirm the quantities.');
+    assert.match(form.responseUrl, /^https:\/\/public\.example\.test\/response\/[a-f0-9]{32}$/);
 
     const denied = await request(`/email/requisitions/${requisitionId}/forms/${threadId}/resend`, {
       method: 'POST', user: users.requesterA
@@ -2314,11 +2321,97 @@ test('a sent request form can be resent with the current public response link', 
     assert.equal(resent.data.threadId, threadId);
     assert.equal(relay.messages.length, 1, 'resend must deliver exactly one message');
     const message = normalizedMessage(relay.messages[0]);
-    assert.ok(message.includes('https://public.example.test/#/response?token=' + token), 'resend must use the current public link and the original token');
+    assert.ok(message.includes('https://public.example.test/response/' + token), 'resend must use the current public link and the original token');
     assert.match(message, /Please confirm the quantities\./);
 
     const opened = await fetch(`${baseUrl}/request-response/${token}`);
     assert.equal(opened.status, 200, 'the resent link must still open the response form');
+  } finally {
+    if (relay) await relay.close();
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('sending requested items stores and emails the sender name and signature', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL', 'CLIENT_ORIGIN'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let relay = null;
+  try {
+    relay = await startTestSmtp();
+    const stamp = Date.now();
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(relay.port);
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.sender.smtp.${stamp}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = `qa.sender.${stamp}@hopehaven.test`;
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'https://public.example.test';
+    process.env.CLIENT_ORIGIN = 'https://public.example.test';
+
+    const formDepartment = await createDepartment(`QA Sender Dept ${stamp}`);
+    const formSupervisor = await createUser('QA Sender Supervisor', `qa.sender.supervisor.${stamp}@example.org`, 'supervisor', formDepartment.id);
+    const formRequester = await createUser('QA Sender Requester', `qa.sender.requester.${stamp}@example.org`, 'requestor', formDepartment.id);
+    const created = await submitRequest(formRequester, 'SENDERSIGN');
+    assert.equal(created.response.status, 201, created.data.message);
+    const requisitionId = created.data.id;
+    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/decision`, {
+      method: 'POST', user: formSupervisor, body: { decision: 'Approve' }
+    })).response.status, 200);
+    assert.equal((await request(`/portal/supervisor/requisitions/${requisitionId}/forward`, {
+      method: 'POST', user: formSupervisor, body: {}
+    })).response.status, 200);
+
+    const signature = await imageSignature();
+    const missingSignature = await request(`/email/requisitions/${requisitionId}/send`, {
+      method: 'POST', user: users.procurement,
+      body: { to: 'qa.sender.recipient@example.test', senderName: 'Jane Procurement' }
+    });
+    assert.equal(missingSignature.response.status, 400);
+    assert.match(missingSignature.data.message, /signature/i);
+
+    const sent = await request(`/email/requisitions/${requisitionId}/send`, {
+      method: 'POST', user: users.procurement,
+      body: {
+        to: 'qa.sender.recipient@example.test',
+        recipientPhone: '+250700000222',
+        senderName: 'Jane Procurement',
+        senderSignature: signature,
+        message: 'Please confirm these quantities.'
+      }
+    });
+    assert.equal(sent.response.status, 200, sent.data.message);
+
+    const forms = await request(`/email/requisitions/${requisitionId}/forms`, { user: users.procurement });
+    const form = forms.data.forms.find((row) => Number(row.id) === Number(sent.data.threadId));
+    assert.ok(form, 'the sent form must appear in Procurement forms');
+    assert.equal(form.senderName, 'Jane Procurement');
+    const token = /\/response\/([a-f0-9]{32})/.exec(form.responseUrl)?.[1];
+    assert.ok(token);
+
+    const [[stored]] = await pool.execute(
+      'SELECT sender_name AS senderName, sender_signature AS senderSignature FROM requisition_email_threads WHERE id = ?',
+      [sent.data.threadId]
+    );
+    assert.equal(stored.senderName, 'Jane Procurement');
+    assert.match(stored.senderSignature, /^data:image\/webp;base64,/);
+
+    const opened = await fetch(`${baseUrl}/request-response/${token}`);
+    assert.equal(opened.status, 200);
+    const document = await opened.json();
+    assert.equal(document.request.senderName, 'Jane Procurement');
+    assert.equal(document.request.senderSignature, stored.senderSignature);
+
+    assert.equal(relay.messages.length, 1, 'the signed form must be sent exactly once');
+    const message = normalizedMessage(relay.messages[0]);
+    assert.match(message, /Sent by: Jane Procurement/);
+    assert.match(message, /cid:requisition-sender-signature/);
+    assert.match(message, /Content-ID: <requisition-sender-signature>/i);
+    assert.match(message, /https:\/\/public\.example\.test\/response\//);
   } finally {
     if (relay) await relay.close();
     for (const name of envNames) {

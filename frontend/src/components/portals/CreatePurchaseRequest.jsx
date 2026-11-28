@@ -1,17 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Check, Info, Paperclip, Plus, Save, Send, Trash2
+  AlertTriangle, ArrowLeft, ArrowRight, Check, Info, Plus, Save, Send, Trash2
 } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
 import {
-  AttachmentPicker, EmptyState, ErrorState, KeyValue, LoadingState, PageHeader,
+  EmptyState, ErrorState, KeyValue, LoadingState,
   TableScroll, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
-import { filesToAttachments } from '../../utils/attachments.js';
 import { isDraft } from '../../utils/status.js';
 
-const PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
 const UNITS = ['unit', 'box', 'kg', 'litre', 'hour', 'day', 'set', 'piece'];
 
 const emptyItem = () => ({ itemName: '', description: '', quantity: '1', unit: 'unit', estimatedUnitCost: '', remarks: '' });
@@ -20,23 +18,19 @@ function itemTotals(items) {
   return items.reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0), 0);
 }
 
-export default function CreatePurchaseRequest({ portalApi, navigate, query = {}, user = {} }) {
+export default function CreatePurchaseRequest({ portalApi, navigate, query = {}, user = {}, inModal = false }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     title: query.title || '',
     justification: '',
     location: '',
-    budgetCode: '',
-    requiredBy: '',
-    priority: 'Medium'
+    requiredBy: ''
   });
   const [items, setItems] = useState([emptyItem()]);
-  const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
   const [department, setDepartment] = useState(user.department || user.departmentName || '');
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState(null);
   const [loadingDraft, setLoadingDraft] = useState(Boolean(query.request));
 
   const draftId = Number(query.request);
@@ -68,15 +62,12 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
           return;
         }
         setEditingId(draftId);
-        setDraft(request);
         setDepartment(request.department || user.department || '');
         setForm({
           title: request.title || '',
           justification: request.justification || '',
           location: request.location || '',
-          budgetCode: request.budgetCode || '',
-          requiredBy: request.requiredBy || '',
-          priority: request.priority || 'Medium'
+          requiredBy: request.requiredBy || ''
         });
         setItems((request.items || []).length
           ? request.items.map((item) => ({
@@ -101,13 +92,11 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
   }, [portalApi, hasDraftId, draftId]);
 
   const total = useMemo(() => itemTotals(items), [items]);
-  const budgetMissing = !form.budgetCode.trim();
   const locationMissing = !form.location.trim();
   const needsAdministrator = /no active supervisor|contact an administrator/i.test(error);
   const hasUnsavedChanges = Boolean(
-    form.title || form.justification || form.location || form.budgetCode || form.requiredBy || form.priority !== 'Medium' ||
-    items.some((item) => item.itemName || item.description || item.remarks || item.estimatedUnitCost || item.quantity !== '1' || item.unit !== 'unit') ||
-    files.length
+    form.title || form.justification || form.location || form.requiredBy ||
+    items.some((item) => item.itemName || item.description || item.remarks || item.estimatedUnitCost || item.quantity !== '1' || item.unit !== 'unit')
   );
 
   function cancelRequest() {
@@ -124,7 +113,6 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
     if (!form.title.trim()) return 'A request title is required.';
     if (!form.justification.trim()) return 'A justification is required.';
     if (!form.location.trim()) return 'A location where the items are needed is required.';
-    if (!form.budgetCode.trim()) return 'A budget code is required.';
     if (!items.length) return 'Add at least one item.';
     for (const [index, item] of items.entries()) {
       if (!item.itemName.trim()) return `Item ${index + 1} needs a name.`;
@@ -148,9 +136,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
       title: form.title.trim(),
       justification: form.justification.trim(),
       location: form.location.trim(),
-      budgetCode: form.budgetCode.trim(),
       requiredBy: form.requiredBy || undefined,
-      priority: form.priority,
       items: items.filter((item) => item.itemName.trim()).map((item) => ({
         ...(item.id ? { id: Number(item.id) } : {}),
         itemName: item.itemName.trim(),
@@ -176,13 +162,12 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
     }
     setBusy(action);
     try {
-      const attachments = files.length ? await filesToAttachments(files) : undefined;
-      const payload = { ...payloadFor(action), attachments };
+      const payload = payloadFor(action);
       let result;
       if (editingId) {
         // Draft edits use PATCH so the reference, status and history are kept.
         result = await portalApi.updateRequesterRequest(editingId, { ...payload, action: 'draft' });
-        if (action === 'submit') result = await portalApi.submitRequesterRequest(editingId, { attachments });
+        if (action === 'submit') result = await portalApi.submitRequesterRequest(editingId, {});
       } else {
         result = await portalApi.createRequesterRequest(payload);
       }
@@ -195,26 +180,16 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
   }
 
   if (loadingDraft) return <>
-    <button type="button" onClick={() => navigate('My Procurement Requests')} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
+    {!inModal && <button type="button" onClick={() => navigate('My Procurement Requests')} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
       <ArrowLeft size={14} />Back to My Procurement Requests
-    </button>
+    </button>}
     <LoadingState label="Opening draft request…" />
   </>;
 
   return <>
-    <button type="button" onClick={cancelRequest} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
+    {!inModal && <button type="button" onClick={cancelRequest} className="mb-4 inline-flex items-center gap-1.5 text-xs font-bold text-black hover:underline">
       <ArrowLeft size={14} />Back to My Procurement Requests
-    </button>
-
-    <PageHeader
-      eyebrow={editingId ? `Editing draft · Step ${step} of 2` : `Step ${step} of 2 · Request builder`}
-      title={editingId ? 'Edit draft purchase request' : 'Create purchase request'}
-      description="Describe what your Department needs, attach supporting documents, then review before saving or submitting for approval."
-      actions={<div className="flex items-center gap-2">
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 1 ? 'border border-black bg-white text-black' : 'bg-white text-black'}`}>1 · Details</span>
-        <span className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${step === 2 ? 'border border-black bg-white text-black' : 'bg-white text-black'}`}>2 · Review</span>
-      </div>}
-    />
+    </button>}
 
     {needsAdministrator && <div className="mb-4 rounded-xl border border-brand bg-white p-4">
       <div className="flex items-start gap-3">
@@ -256,20 +231,8 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
             {locationMissing && <span className="mt-1 block text-[10px] font-normal text-black">Required when submitting.</span>}
           </label>
           <label className="block text-xs font-bold">
-            Budget code *
-            <input required value={form.budgetCode} maxLength={60} onChange={(event) => setForm({ ...form, budgetCode: event.target.value })}
-              placeholder="e.g. OPS-2026-004" className="field" />
-            {budgetMissing && <span className="mt-1 block text-[10px] font-normal text-black">Required when submitting.</span>}
-          </label>
-          <label className="block text-xs font-bold">
-            Required by
+            Requested date
             <input type="date" value={form.requiredBy} onChange={(event) => setForm({ ...form, requiredBy: event.target.value })} className="field" />
-          </label>
-          <label className="block text-xs font-bold">
-            Priority
-            <select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} className="field">
-              {PRIORITIES.map((priority) => <option key={priority}>{priority}</option>)}
-            </select>
           </label>
           <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-black sm:col-span-1">
             <Info size={14} className="mb-1 text-black" />
@@ -341,39 +304,6 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
           </TableScroll>}
       </PageCard>
 
-      <PageCard title="Authorization" description="Requested-by details are captured from your session. Approval details appear only after a Supervisor decision.">
-        <div className="grid gap-4 p-5 sm:grid-cols-2">
-          <div className="rounded-lg border border-brand bg-white p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Requested by</div>
-            <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-black">Name (Requested by)</dt><dd className="font-bold">{user.name || user.userName || '—'}</dd></div>
-              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">{draft?.submittedAt ? 'Digitally submitted' : 'Pending submission'}</dd></div>
-              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">{dateLabel(draft?.submittedAt || draft?.createdAt) || '—'}</dd></div>
-            </dl>
-          </div>
-          {draft?.supervisorDecision === 'Approved' && draft?.supervisorDecisionAt ? <div className="rounded-lg border border-brand bg-white p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
-            <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-black">Name (Approved by)</dt><dd className="font-bold">{draft.supervisorName || '—'}</dd></div>
-              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">Digitally approved</dd></div>
-              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">{dateLabel(draft.supervisorDecisionAt)}</dd></div>
-            </dl>
-          </div> : <div className="rounded-lg border border-brand bg-white p-4">
-            <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by</div>
-            <dl className="mt-3 grid gap-3 text-xs">
-              <div><dt className="text-[10px] text-black">Name (Approved by)</dt><dd className="font-bold">—</dd></div>
-              <div><dt className="text-[10px] text-black">Signature</dt><dd className="font-bold italic">—</dd></div>
-              <div><dt className="text-[10px] text-black">Date</dt><dd className="font-bold">—</dd></div>
-            </dl>
-            <p className="mt-3 text-[10px] leading-4 text-black">Completed by your Department Supervisor after approval.</p>
-          </div>}
-        </div>
-      </PageCard>
-
-      <PageCard title="Supporting documents" description="Optional. Up to five files, 5 MB each.">
-        <div className="p-5"><AttachmentPicker files={files} onChange={setFiles} /></div>
-      </PageCard>
-
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" onClick={cancelRequest} disabled={Boolean(busy)} className={secondaryButtonClass()}>
           Cancel
@@ -391,9 +321,7 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
           <KeyValue label="Requesting department">{department || '—'}</KeyValue>
           <KeyValue label="Title">{form.title}</KeyValue>
           <KeyValue label="Location">{form.location}</KeyValue>
-          <KeyValue label="Budget code">{form.budgetCode}</KeyValue>
-          <KeyValue label="Required by">{dateLabel(form.requiredBy)}</KeyValue>
-          <KeyValue label="Priority">{form.priority}</KeyValue>
+          <KeyValue label="Requested date">{dateLabel(form.requiredBy)}</KeyValue>
           <KeyValue label="Justification" className="sm:col-span-2">{form.justification}</KeyValue>
         </dl>
         <TableScroll minWidth={640}>
@@ -414,11 +342,6 @@ export default function CreatePurchaseRequest({ portalApi, navigate, query = {},
             <tfoot><tr className="bg-white"><td colSpan="5" className="px-4 py-3 text-right font-bold">Estimated total</td><td className="px-4 py-3 font-extrabold text-black">{currency(total)}</td></tr></tfoot>
           </table>
         </TableScroll>
-        <div className="border-t border-subtle px-5 py-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-bold"><Paperclip size={14} />Attachments ({files.length})</div>
-          {files.length ? <ul className="space-y-1">{files.map((file, index) => <li key={index} className="text-[11px] text-black">• {file.name}</li>)}</ul>
-            : <p className="text-[11px] text-black">{editingId ? 'Existing attachments are preserved when editing a draft.' : 'No documents attached.'}</p>}
-        </div>
       </PageCard>
       <ErrorState message={error} />
       <div className="flex flex-wrap justify-between gap-2">

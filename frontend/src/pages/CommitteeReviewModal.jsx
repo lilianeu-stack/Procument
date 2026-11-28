@@ -118,7 +118,7 @@ export default function CommitteeReviewModal({ rfqIds = [], onClose, onPreview, 
               {index + 2}. Content for {section.reference}
             </h3>
             <div className="mt-2 grid gap-3 text-xs sm:grid-cols-3">
-              <div><span className="text-black">Requisition</span><strong className="mt-1 block">{section.requisitionReference}</strong></div>
+              <div><span className="text-black">Requisition</span><strong className="mt-1 block">{section.requisitionDisplayReference || section.requisitionReference}</strong></div>
               <div><span className="text-black">Request</span><strong className="mt-1 block">{section.title}</strong></div>
               <div><span className="text-black">Sent / deadline</span><strong className="mt-1 block">{dateTimeLabel(section.issuedAt)} · {dateTimeLabel(section.dueDate)}</strong></div>
             </div>

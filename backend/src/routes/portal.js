@@ -4,6 +4,8 @@ import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { allowRoles } from '../middleware/auth.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
+import { normalizeSignature } from '../utils/signature.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 import {
   PROCUREMENT_READY_STATUSES, REQUISITION_STATUS, statusLabel
 } from '../utils/requisition-status.js';
@@ -217,8 +219,13 @@ function requisitionQuery(where = '') {
       r.supervisor_id AS supervisorId, su.name AS supervisorName,
       r.supervisor_decision AS supervisorDecision,
       r.supervisor_decision_at AS supervisorDecisionAt,
+      r.supervisor_signature AS supervisorSignature,
       r.supervisor_notes AS supervisorNotes,
       r.information_response AS informationResponse,
+      (SELECT COUNT(*) FROM requisitions rr
+        WHERE rr.requester_id = r.requester_id
+          AND rr.department_id <=> r.department_id
+          AND rr.id <= r.id) AS departmentSequence,
       COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS total,
       COUNT(DISTINCT ra.id) AS attachmentCount,
       GROUP_CONCAT(CONCAT(ri.item_name, ' × ', ri.quantity, ' ', ri.unit) ORDER BY ri.id SEPARATOR ', ') AS itemsSummary
@@ -235,9 +242,11 @@ function requisitionQuery(where = '') {
 }
 
 function mapRequisition(row) {
+  const displayReference = requisitionDisplayReference(row);
   return {
     ...row,
-    title: row.title || `${row.reference} procurement request`,
+    displayReference,
+    title: row.title || `${displayReference} procurement request`,
     statusLabel: statusLabel(row.status),
     total: Number(row.total) || 0,
     attachmentCount: Number(row.attachmentCount) || 0,
@@ -260,7 +269,20 @@ async function loadRequisition(connection, id, req) {
   }
   const [rows] = await connection.execute(requisitionQuery(where), params);
   if (!rows[0]) throw httpError(404, 'Request not found or you do not have access to it.');
-  return mapRequisition(rows[0]);
+  const row = rows[0];
+  // Stable 1-based position of this request among the Requester's requests in
+  // the same Department. Used for the HHR/<department>/<date>/<sequence> display
+  // reference without changing the stored reference or any workflow lookups.
+  const [sequenceRows] = await connection.execute(
+    `SELECT COUNT(*) AS departmentSequence
+       FROM requisitions
+      WHERE requester_id = ? AND department_id = ? AND id <= ?`,
+    [row.requesterId, row.departmentId ?? null, id]
+  );
+  return mapRequisition({
+    ...row,
+    departmentSequence: Number(sequenceRows[0]?.departmentSequence) || 1
+  });
 }
 
 async function loadRequisitionParts(connection, id) {
@@ -334,7 +356,7 @@ async function submitRequisition(connection, requisition, req, response = '', at
   await connection.execute(
     `UPDATE requisitions
        SET status = ?, submitted_at = NOW(), supervisor_id = ?, supervisor_decision = NULL,
-         supervisor_decision_at = NULL, forwarded_at = NULL, forwarded_by_supervisor = NULL,
+         supervisor_decision_at = NULL, supervisor_signature = NULL, forwarded_at = NULL, forwarded_by_supervisor = NULL,
          information_response = CASE WHEN ? = '' THEN information_response ELSE ? END
      WHERE id = ?`,
     [REQUISITION_STATUS.PENDING, supervisor.id, response, response, requisition.id]
@@ -346,9 +368,9 @@ async function submitRequisition(connection, requisition, req, response = '', at
     { previousStatus: requisition.status, newStatus: REQUISITION_STATUS.PENDING });
   const link = `#/supervisor/Approvals?request=${requisition.id}`;
   await createNotification(connection, supervisor.id, 'New request awaiting approval',
-    `${requisition.reference} was submitted by ${req.user.name} and routed to you.`, link);
+    `${requisition.displayReference || requisitionDisplayReference(requisition)} was submitted by ${req.user.name} and routed to you.`, link);
   await createNotification(connection, req.user.id, 'Request submitted',
-    `${requisition.reference} was submitted to ${supervisor.name} for approval.`,
+    `${requisition.displayReference || requisitionDisplayReference(requisition)} was submitted to ${supervisor.name} for approval.`,
     `#/requester/My%20Procurement%20Requests?request=${requisition.id}`);
   return {
     id: requisition.id,
@@ -759,18 +781,22 @@ router.post('/supervisor/requisitions/:id/decision', allowRoles('supervisor'), a
     Approve: 'Approved', Reject: 'Rejected', 'Request Information': 'Information Required'
   }[decision];
   try {
+    const signature = decision === 'Approve' && req.body.signature
+      ? await normalizeSignature(req.body.signature, 'Approved by')
+      : null;
     const department = await assignedDepartment(req, res);
     if (!department) return;
     return await transaction(async (connection) => {
       const [rows] = await connection.execute(
         `SELECT r.id, r.reference, r.requester_id AS requesterId, r.status, r.department_id AS departmentId,
-          r.title, u.name AS requesterName
+          r.title, u.name AS requesterName, ${REQUISITION_DISPLAY_SQL}
          FROM requisitions r JOIN users u ON u.id = r.requester_id
          WHERE r.id = ? AND r.department_id = ? FOR UPDATE`,
         [id, department.id]
       );
       const requisition = rows[0];
       if (!requisition) throw httpError(404, 'Request not found in your Department.');
+      requisition.displayReference = requisitionDisplayReference(requisition);
       if (requisition.status !== REQUISITION_STATUS.PENDING) {
         throw httpError(409, 'This request has already been decided and cannot be actioned again.');
       }
@@ -785,9 +811,9 @@ router.post('/supervisor/requisitions/:id/decision', allowRoles('supervisor'), a
       await connection.execute(
         `UPDATE requisitions
            SET status = ?, supervisor_id = ?, supervisor_decision = ?, supervisor_decision_at = NOW(),
-             supervisor_notes = ?
+             supervisor_signature = ?, supervisor_notes = ?
          WHERE id = ?`,
-        [status, req.user.id, decisionValue, reason || null, id]
+        [status, req.user.id, decisionValue, signature, reason || null, id]
       );
       await recordActivity(connection, id, req.user.id,
         decision === 'Approve' ? 'approved_by_supervisor' : decision === 'Reject' ? 'rejected_by_supervisor' : 'information_requested',
@@ -797,13 +823,13 @@ router.post('/supervisor/requisitions/:id/decision', allowRoles('supervisor'), a
       const requesterLink = `#/requester/My%20Procurement%20Requests?request=${id}`;
       if (decision === 'Approve') {
         await createNotification(connection, requisition.requesterId, 'Request approved by Supervisor',
-          `${requisition.reference} was approved by ${req.user.name}. Your Supervisor will forward it to Procurement.`, requesterLink);
+          `${requisition.displayReference} was approved by ${req.user.name}. Your Supervisor will forward it to Procurement.`, requesterLink);
       } else if (decision === 'Reject') {
         await createNotification(connection, requisition.requesterId, 'Request rejected by Supervisor',
-          `${requisition.reference} was rejected. Reason: ${reason}`, requesterLink);
+          `${requisition.displayReference} was rejected. Reason: ${reason}`, requesterLink);
       } else {
         await createNotification(connection, requisition.requesterId, 'Additional information requested',
-          `${requisition.reference} needs more information. ${reason}`, `#/requester/Messages?userId=${req.user.id}&request=${id}`);
+          `${requisition.displayReference} needs more information. ${reason}`, `#/requester/Messages?userId=${req.user.id}&request=${id}`);
       }
       return {
         body: {
@@ -830,13 +856,14 @@ router.post('/supervisor/requisitions/:id/forward', allowRoles('supervisor'), as
         `SELECT r.id, r.reference, r.requester_id AS requesterId, r.status, r.department_id AS departmentId,
           r.supervisor_id AS supervisorId, r.supervisor_decision AS supervisorDecision,
           r.forwarded_by_supervisor AS forwardedBySupervisor, r.forwarded_at AS forwardedAt,
-          r.title, u.name AS requesterName
+          r.title, u.name AS requesterName, ${REQUISITION_DISPLAY_SQL}
          FROM requisitions r JOIN users u ON u.id = r.requester_id
          WHERE r.id = ? AND r.department_id = ? FOR UPDATE`,
         [id, department.id]
       );
       const requisition = rows[0];
       if (!requisition) throw httpError(404, 'Request not found in your Department.');
+      requisition.displayReference = requisitionDisplayReference(requisition);
 
       // Duplicate forwarding is impossible: the marker and the status are both
       // checked, so a retry, a double-click, or a direct API call cannot resend.
@@ -878,9 +905,9 @@ router.post('/supervisor/requisitions/:id/forward', allowRoles('supervisor'), as
 
       const requesterLink = `#/requester/My%20Procurement%20Requests?request=${id}`;
       await createNotification(connection, requisition.requesterId, 'Request forwarded to Procurement',
-        `${requisition.reference} was approved by ${req.user.name} and forwarded to Procurement.`, requesterLink);
+        `${requisition.displayReference} was approved by ${req.user.name} and forwarded to Procurement.`, requesterLink);
       await notifyRoles(connection, ['admin', 'procurement'], 'Department request forwarded to Procurement',
-        `${requisition.reference} from ${requisition.requesterName} was approved and forwarded by ${req.user.name}.`,
+        `${requisition.displayReference} from ${requisition.requesterName} was approved and forwarded by ${req.user.name}.`,
         `#/admin/Requests%20Received%20from%20Departments?request=${id}`);
 
       const [[updated]] = await connection.execute('SELECT forwarded_at AS forwardedAt FROM requisitions WHERE id = ?', [id]);
@@ -944,7 +971,13 @@ async function messageRows(connection, where, params, viewerId) {
       sender.name AS senderName, sender.profile_photo AS senderPhoto,
       m.recipient_id AS recipientId, recipient.name AS recipientName,
       recipient.profile_photo AS recipientPhoto,
-      m.requisition_id AS requisitionId, rr.reference AS requisitionReference, m.is_announcement AS isAnnouncement,
+      m.requisition_id AS requisitionId, rr.reference AS requisitionReference,
+      rr.submitted_at AS requisitionSubmittedAt, rr.created_at AS requisitionCreatedAt,
+      (SELECT COUNT(*) FROM requisitions req
+        WHERE req.requester_id = rr.requester_id
+          AND req.department_id <=> rr.department_id
+          AND req.id <= rr.id) AS departmentSequence,
+      m.is_announcement AS isAnnouncement,
       CASE WHEN m.sender_id = ? THEN TRUE ELSE COALESCE(mr.is_read, FALSE) END AS isRead,
       (SELECT COUNT(*) FROM message_attachments ma WHERE ma.message_id = m.id) AS attachmentCount
      FROM messages m
@@ -957,6 +990,11 @@ async function messageRows(connection, where, params, viewerId) {
   );
   return rows.map((row) => ({
     ...row,
+    requisitionDisplayReference: row.requisitionReference ? requisitionDisplayReference({
+      submittedAt: row.requisitionSubmittedAt,
+      createdAt: row.requisitionCreatedAt,
+      departmentSequence: row.departmentSequence
+    }) : null,
     isAnnouncement: Boolean(row.isAnnouncement),
     isRead: Boolean(row.isRead),
     attachmentCount: Number(row.attachmentCount) || 0
@@ -974,7 +1012,12 @@ router.get('/messages/conversations', allowRoles('supervisor', 'requestor'), asy
           JOIN messages m ON m.id = mr.message_id
          WHERE mr.user_id = ? AND mr.is_read = FALSE AND m.sender_id = u.id AND m.is_announcement = FALSE) AS unreadCount,
         last.body AS lastBody, last.created_at AS lastAt, last.requisition_id AS lastRequisitionId,
-        rr.reference AS lastRequisitionReference
+        rr.reference AS lastRequisitionReference,
+        rr.submitted_at AS lastRequisitionSubmittedAt, rr.created_at AS lastRequisitionCreatedAt,
+        (SELECT COUNT(*) FROM requisitions req
+          WHERE req.requester_id = rr.requester_id
+            AND req.department_id <=> rr.department_id
+            AND req.id <= rr.id) AS lastRequisitionSequence
        FROM users u
        LEFT JOIN messages last ON last.id = (
          SELECT m.id FROM messages m
@@ -1001,7 +1044,15 @@ router.get('/messages/conversations', allowRoles('supervisor', 'requestor'), asy
       [req.user.id, req.user.id, department.id, req.user.id]
     );
     return res.json({
-      conversations: people.map((person) => ({ ...person, unreadCount: Number(person.unreadCount) || 0 })),
+      conversations: people.map((person) => ({
+        ...person,
+        lastRequisitionDisplayReference: person.lastRequisitionReference ? requisitionDisplayReference({
+          submittedAt: person.lastRequisitionSubmittedAt,
+          createdAt: person.lastRequisitionCreatedAt,
+          departmentSequence: person.lastRequisitionSequence
+        }) : null,
+        unreadCount: Number(person.unreadCount) || 0
+      })),
       announcements: announcements.map((notice) => ({ ...notice, isAnnouncement: Boolean(notice.isAnnouncement), isRead: Boolean(notice.isRead) })),
       department
     });

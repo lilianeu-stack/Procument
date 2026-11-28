@@ -9,6 +9,7 @@ import { getSettings } from '../services/settings.js';
 import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
 import { businessDate } from '../utils/dates.js';
 import { roundMoney } from '../utils/money.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 import {
   createSupplierPricingToken, hashSupplierPricingToken,
   isValidSupplierPricingTokenFormat
@@ -187,6 +188,7 @@ function requestView(row) {
     rfqReference: row.rfqReference,
     requisitionId: row.requisitionId,
     requisitionReference: row.requisitionReference,
+    requisitionDisplayReference: requisitionDisplayReference(row),
     currency: row.currency,
     submissionDeadline: row.submissionDeadline,
     message: row.message,
@@ -773,14 +775,17 @@ protectedRouter.get('/purchase-orders/:id/supplier-responses', allowRoles(...rea
     const purchaseOrderId = positiveId(req.params.id);
     if (!purchaseOrderId) throw httpError(400, 'Invalid purchase order identifier.');
     const [requests] = await pool.execute(
-      `SELECT id, reference, purchase_order_id AS purchaseOrderId, po_reference AS poReference,
-         rfq_id AS rfqId, rfq_reference AS rfqReference,
-         requisition_id AS requisitionId, requisition_reference AS requisitionReference,
-         currency, DATE_FORMAT(submission_deadline, '%Y-%m-%d') AS submissionDeadline, message, status,
-         created_at AS createdAt, awarded_response_id AS awardedResponseId,
-         awarded_at AS awardedAt, award_comment AS awardComment
-        FROM purchase_order_pricing_requests
-       WHERE purchase_order_id = ? ORDER BY created_at DESC, id DESC`,
+      `SELECT pr.id, pr.reference, pr.purchase_order_id AS purchaseOrderId, pr.po_reference AS poReference,
+         pr.rfq_id AS rfqId, pr.rfq_reference AS rfqReference,
+         pr.requisition_id AS requisitionId, pr.requisition_reference AS requisitionReference,
+         ${REQUISITION_DISPLAY_SQL},
+         pr.currency, DATE_FORMAT(pr.submission_deadline, '%Y-%m-%d') AS submissionDeadline,
+         pr.message, pr.status, pr.created_at AS createdAt,
+         pr.awarded_response_id AS awardedResponseId,
+         pr.awarded_at AS awardedAt, pr.award_comment AS awardComment
+        FROM purchase_order_pricing_requests pr
+        LEFT JOIN requisitions r ON r.id = pr.requisition_id
+       WHERE pr.purchase_order_id = ? ORDER BY pr.created_at DESC, pr.id DESC`,
       [purchaseOrderId]
     );
     let responses = [];
@@ -807,13 +812,17 @@ protectedRouter.get('/purchase-order-pricing/requests/:requestId/comparison', al
     const requestId = positiveId(req.params.requestId);
     if (!requestId) throw httpError(400, 'Invalid pricing request identifier.');
     const [[request]] = await pool.execute(
-      `SELECT id, reference, purchase_order_id AS purchaseOrderId, po_reference AS poReference,
-         rfq_id AS rfqId, rfq_reference AS rfqReference,
-         requisition_id AS requisitionId, requisition_reference AS requisitionReference,
-         currency, DATE_FORMAT(submission_deadline, '%Y-%m-%d') AS submissionDeadline, message, status,
-         created_at AS createdAt, awarded_response_id AS awardedResponseId,
-         awarded_at AS awardedAt, award_comment AS awardComment
-        FROM purchase_order_pricing_requests WHERE id = ?`,
+      `SELECT pr.id, pr.reference, pr.purchase_order_id AS purchaseOrderId, pr.po_reference AS poReference,
+         pr.rfq_id AS rfqId, pr.rfq_reference AS rfqReference,
+         pr.requisition_id AS requisitionId, pr.requisition_reference AS requisitionReference,
+         ${REQUISITION_DISPLAY_SQL},
+         pr.currency, DATE_FORMAT(pr.submission_deadline, '%Y-%m-%d') AS submissionDeadline,
+         pr.message, pr.status, pr.created_at AS createdAt,
+         pr.awarded_response_id AS awardedResponseId,
+         pr.awarded_at AS awardedAt, pr.award_comment AS awardComment
+        FROM purchase_order_pricing_requests pr
+        LEFT JOIN requisitions r ON r.id = pr.requisition_id
+       WHERE pr.id = ?`,
       [requestId]
     );
     if (!request) throw httpError(404, 'Pricing request not found.');

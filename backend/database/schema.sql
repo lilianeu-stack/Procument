@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS requisitions (
   supervisor_id INT UNSIGNED NULL,
   supervisor_decision ENUM('Approved','Rejected','Information Required') NULL,
   supervisor_decision_at DATETIME NULL,
+  supervisor_signature MEDIUMTEXT NULL,
   supervisor_notes TEXT NULL,
   information_response TEXT NULL,
   submitted_at DATETIME NULL,
@@ -243,6 +244,8 @@ CREATE TABLE IF NOT EXISTS rfqs (
   selected_quotation_id INT UNSIGNED NULL,
   issued_at DATETIME NULL,
   message TEXT NULL,
+  sender_name VARCHAR(150) NULL,
+  sender_signature MEDIUMTEXT NULL,
   closed_at DATETIME NULL,
   created_by INT UNSIGNED NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -281,6 +284,18 @@ CREATE TABLE IF NOT EXISTS rfq_email_deliveries (
   CONSTRAINT fk_rfq_email_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
   CONSTRAINT fk_rfq_email_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
   INDEX idx_rfq_email_status (rfq_id, status)
+);
+
+-- Signed RFQ links are stored by hash so a JWT_SECRET rotation cannot invalidate
+-- links that have already been delivered to a supplier.
+CREATE TABLE IF NOT EXISTS rfq_link_tokens (
+  token_hash CHAR(64) NOT NULL PRIMARY KEY,
+  rfq_id INT UNSIGNED NOT NULL,
+  supplier_id INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_rfq_link_token_rfq FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_rfq_link_token_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id),
+  INDEX idx_rfq_link_token_pair (rfq_id, supplier_id)
 );
 
 -- One token per Committee member and RFQ. The same token is reused if the
@@ -741,6 +756,8 @@ CREATE TABLE IF NOT EXISTS requisition_email_threads (
   recipient_email VARCHAR(190) NOT NULL,
   recipient_phone VARCHAR(50) NULL,
   message TEXT NULL,
+  sender_name VARCHAR(150) NULL,
+  sender_signature MEDIUMTEXT NULL,
   created_by INT UNSIGNED NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   response_submitted_at DATETIME NULL,

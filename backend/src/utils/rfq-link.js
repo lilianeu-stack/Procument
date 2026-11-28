@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 const VERSION = 'v1';
 
@@ -18,6 +18,24 @@ function sign(payload) {
 export function createRfqToken(rfqId, supplierId) {
   const payload = Buffer.from(`${Number(rfqId)}:${Number(supplierId)}`, 'utf8').toString('base64url');
   return `${VERSION}.${payload}.${sign(payload)}`;
+}
+
+export function hashRfqToken(token) {
+  return createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+// Only used after a token has been independently proven to have been sent by
+// this mailbox. It never replaces signature verification on its own.
+export function extractRfqIdentity(token) {
+  const match = /^v1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(String(token || ''));
+  if (!match) return null;
+  const decoded = Buffer.from(match[1], 'base64url').toString('utf8');
+  const ids = /^(\d+):(\d+)$/.exec(decoded);
+  if (!ids) return null;
+  const rfqId = Number(ids[1]);
+  const supplierId = Number(ids[2]);
+  if (!Number.isInteger(rfqId) || rfqId < 1 || !Number.isInteger(supplierId) || supplierId < 1) return null;
+  return { rfqId, supplierId };
 }
 
 export function parseRfqToken(token) {

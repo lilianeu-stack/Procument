@@ -7,6 +7,7 @@ import {
   businessDate, businessDateTime, dateFilterClause, enforceDateOrder, parseDateFilter, toUtcDateTime
 } from '../utils/dates.js';
 import { PROCUREMENT_READY_STATUSES, REQUISITION_STATUS } from '../utils/requisition-status.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 import { createRfqEmailDeliveries, listRfqDeliveries, sendRfqDeliveries } from '../services/rfq-email.js';
 import {
   buildGoodReceivedNoteEmail, buildPurchaseOrderDecisionEmail,
@@ -59,8 +60,21 @@ async function markRequisitionInProcurement(connection, requisition, userId, rfq
      VALUES (?, ?, 'procurement_review_started', ?, ?, ?)`,
     [requisition.id, userId, JSON.stringify({ rfqReference }), requisition.status, nextStatus]
   );
+  let displayReference = requisition.displayReference;
+  if (!displayReference) {
+    const [[row]] = await connection.execute(
+      `SELECT r.submitted_at AS submittedAt, r.created_at AS createdAt,
+         (SELECT COUNT(*) FROM requisitions rr
+           WHERE rr.requester_id = r.requester_id
+             AND rr.department_id <=> r.department_id
+             AND rr.id <= r.id) AS departmentSequence
+        FROM requisitions r WHERE r.id = ? LIMIT 1`,
+      [requisition.id]
+    );
+    displayReference = requisitionDisplayReference(row || requisition);
+  }
   await createNotification(connection, requisition.requesterId, 'Request under Procurement review',
-    `${requisition.reference} is now being processed by Procurement.`,
+    `${displayReference} is now being processed by Procurement.`,
     `#/requester/My%20Procurement%20Requests?request=${requisition.id}`);
   return nextStatus;
 }
@@ -184,6 +198,7 @@ export async function loadPurchaseOrder(executor, id) {
       p.amount_in_words AS amountInWords, p.total,
       p.approved_at AS approvedAt, p.created_at AS createdAt, p.updated_at AS updatedAt,
       s.name AS supplier, r.reference AS requisition, r.id AS requisitionId,
+      ${REQUISITION_DISPLAY_SQL},
       f.reference AS rfq, f.id AS rfqId,
       creator.name AS preparedBy, reviewer.name AS approvedBy
      FROM purchase_orders p
@@ -266,6 +281,7 @@ export async function loadPurchaseOrder(executor, id) {
     approvedBy: order.approvedBy || null,
     approvedAt: order.approvedAt || null,
     requisition: order.requisition,
+    requisitionDisplayReference: requisitionDisplayReference(order),
     requisitionId: order.requisitionId,
     rfq: order.rfq,
     rfqId: order.rfqId,
@@ -515,6 +531,7 @@ function rfqBaseQuery() {
     f.issued_at AS issuedAt, f.closed_at AS closedAt,
     f.created_at AS createdAt, f.updated_at AS updatedAt,
     r.reference AS requisition, r.id AS requisitionId, r.title AS requisitionTitle,
+    ${REQUISITION_DISPLAY_SQL},
     q.supplier_id AS selectedSupplierId, q.amount AS awardedAmount,
     s.name AS selectedSupplier,
     s.contact_name AS selectedSupplierContactName,
@@ -623,7 +640,11 @@ router.get('/rfqs', async (req, res, next) => {
           }
         }
       }
-      return rows.map((rfq) => ({ ...rfq, responses: responsesByRfq.get(Number(rfq.id)) || [] }));
+      return rows.map((rfq) => ({
+        ...rfq,
+        requisitionDisplayReference: requisitionDisplayReference(rfq),
+        responses: responsesByRfq.get(Number(rfq.id)) || []
+      }));
     }
 
     if (!paginated) {
@@ -707,6 +728,13 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
     }
   }
   return transaction(async (connection) => {
+    // The supplier receives the Procurement sign-off with the RFQ. Drafts may
+    // be saved before it is uploaded; a live send must carry a real image.
+    const senderName = String(req.body.senderName || req.user.name || '').trim().slice(0, 150);
+    const senderSignature = await normalizeSignature(req.body.senderSignature, 'Sender');
+    if (!saveAsDraft && !senderSignature) {
+      throw httpError(400, 'Upload a Procurement signature before sending the RFQ.');
+    }
     const readyPlaceholders = PROCUREMENT_READY_STATUSES.map(() => '?').join(',');
     const [requests] = await connection.execute(
       `SELECT id, reference, requester_id AS requesterId, status,
@@ -748,11 +776,13 @@ router.post('/rfqs', allowRoles(...procurement), async (req, res, next) => {
     try {
       [result] = await connection.execute(
         `INSERT INTO rfqs
-           (reference, idempotency_key, requisition_id, due_date, instructions, terms, message, status, issued_at, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (reference, idempotency_key, requisition_id, due_date, instructions, terms, message,
+            sender_name, sender_signature, status, issued_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           rfqReference, idempotencyKey || null, requisitionId, dueDate,
           instructions || null, terms || null, message || null,
+          senderName || null, senderSignature || null,
           saveAsDraft ? 'Draft' : 'Sent', saveAsDraft ? null : startDate, req.user.id
         ]
       );
@@ -955,7 +985,9 @@ router.post('/rfqs/:id/send', allowRoles(...procurement), async (req, res, next)
 
   return transaction(async (connection) => {
     const [[rfq]] = await connection.execute(
-      "SELECT id, reference, requisition_id AS requisitionId, idempotency_key AS idempotencyKey FROM rfqs WHERE id = ? AND status = 'Draft' FOR UPDATE",
+      `SELECT id, reference, requisition_id AS requisitionId, idempotency_key AS idempotencyKey,
+         sender_name AS senderName, sender_signature AS senderSignature
+       FROM rfqs WHERE id = ? AND status = 'Draft' FOR UPDATE`,
       [req.params.id]
     );
     if (!rfq) throw httpError(404, 'Only a draft RFQ can be sent.');
@@ -965,6 +997,14 @@ router.post('/rfqs/:id/send', allowRoles(...procurement), async (req, res, next)
        WHERE fs.rfq_id = ? AND s.status = 'Active' ORDER BY s.id`, [rfq.id]
     );
     if (!suppliers.length) throw httpError(400, 'Add at least one active supplier before sending the RFQ.');
+    const uploadedSignature = Object.prototype.hasOwnProperty.call(req.body, 'senderSignature')
+      ? await normalizeSignature(req.body.senderSignature, 'Sender')
+      : null;
+    const senderSignature = uploadedSignature || (rfq.senderSignature ? String(rfq.senderSignature) : null);
+    if (!senderSignature) {
+      throw httpError(400, 'Upload a Procurement signature before sending the RFQ.');
+    }
+    const senderName = String(req.body.senderName || rfq.senderName || req.user.name || '').trim().slice(0, 150);
     const [[existingDeliveries]] = await connection.execute(
       'SELECT COUNT(*) AS total FROM rfq_email_deliveries WHERE rfq_id = ?', [rfq.id]
     );
@@ -975,7 +1015,13 @@ router.post('/rfqs/:id/send', allowRoles(...procurement), async (req, res, next)
         supplierIds: suppliers.map((supplier) => supplier.id)
       });
     }
-    await connection.execute("UPDATE rfqs SET status = 'Sent', issued_at = UTC_TIMESTAMP() WHERE id = ?", [rfq.id]);
+    await connection.execute(
+      `UPDATE rfqs
+         SET status = 'Sent', issued_at = UTC_TIMESTAMP(),
+           sender_name = ?, sender_signature = ?
+       WHERE id = ?`,
+      [senderName || null, senderSignature, rfq.id]
+    );
     const nextStatus = await markRequisitionInProcurement(connection, requisition, req.user.id, rfq.reference);
     await createNotification(connection, null, 'New request for quotation',
       `${rfq.reference} was issued to ${suppliers.length} suppliers.`, `/rfqs/${rfq.id}`);
@@ -1014,6 +1060,11 @@ router.get('/rfqs/:id/quotations', async (req, res, next) => {
       `SELECT f.id, f.reference, f.status, f.message, f.issued_at AS issuedAt,
         f.due_date AS dueDate, r.id AS requisitionId,
         r.reference AS requisitionReference, r.title,
+        r.submitted_at AS submittedAt, r.created_at AS createdAt,
+        (SELECT COUNT(*) FROM requisitions rr
+          WHERE rr.requester_id = r.requester_id
+            AND rr.department_id <=> r.department_id
+            AND rr.id <= r.id) AS departmentSequence,
         d.name AS department
        FROM rfqs f
        JOIN requisitions r ON r.id = f.requisition_id
@@ -1058,6 +1109,7 @@ router.get('/rfqs/:id/quotations', async (req, res, next) => {
     return res.json({
       rfq: {
         ...rfq,
+        requisitionDisplayReference: requisitionDisplayReference(rfq),
         requestedItems: requestedItems.map((item) => ({
           ...item,
           quantity: Number(item.quantity) || 0,
@@ -1149,6 +1201,7 @@ router.get('/purchase-orders', async (req, res, next) => {
         p.approved_at AS approvedAt, p.created_at AS createdAt, p.updated_at AS updatedAt,
         p.supplier_id AS supplierId,
         s.name AS supplier, r.reference AS requisition, r.id AS requisitionId,
+        ${REQUISITION_DISPLAY_SQL},
         f.reference AS rfq, f.id AS rfqId,
         (SELECT cr.recommended_supplier_id FROM rfq_committee_reviews cr
           WHERE cr.rfq_id = f.id AND cr.recommended_supplier_id IS NOT NULL
@@ -1184,6 +1237,7 @@ router.get('/purchase-orders', async (req, res, next) => {
     return res.json({
       purchaseOrders: orders.map((order) => ({
         ...order,
+        requisitionDisplayReference: requisitionDisplayReference(order),
         approval: approvals.get(Number(order.id)) || null
       }))
     });

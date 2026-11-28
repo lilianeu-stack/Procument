@@ -104,7 +104,7 @@ function Notice({ message }) {
   </p>;
 }
 
-export default function PortalProfile({ user, summary, portal, onUpdated }) {
+export default function PortalProfile({ user, summary, portal, onUpdated, inModal = false }) {
   const [profile, setProfile] = useState(user || null);
   const [selected, setSelected] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -248,11 +248,11 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
   const role = profile?.roleLabel || roleLabel(profile?.role);
 
   return <>
-    <PageHeader
+    {!inModal && <PageHeader
       eyebrow="Account"
       title="My profile"
       description="Manage your personal details, profile photo and account security. Protected role and access settings remain with an Administrator."
-    />
+    />}
 
     <div className="space-y-5">
       <Notice message={notice} />

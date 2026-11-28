@@ -13,6 +13,7 @@ import {
   secondaryButtonClass
 } from './PortalUi.jsx';
 import { dateLabel, dateTimeLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 import { RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
 import { dateQueryForFilter, reportForPage } from '../../utils/reportFields.js';
 
@@ -154,32 +155,14 @@ export default function ReceivedRequests({
   const pagination = result?.pagination;
   const hasFilters = Boolean(filters.reference || dateQuery.from || dateQuery.to);
   const scopeLabel = hasFilters ? 'records matching the active filters' : 'forwarded requests';
-  const exportedTotal = pagination?.total ?? 0;
 
   return <>
     <PrintHeader title={report.title} reference="" dates={`Generated ${dateTimeLabel(generatedAt)}`} />
-    <section className="no-print mb-6 overflow-hidden rounded-xl border border-brand bg-white">
-      <div className="border-b border-subtle bg-white px-6 py-6">
-        <h1 className="display-font text-[28px] font-extrabold leading-tight tracking-[-0.02em]">Requests Received from Departments</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-black">
-          Review and manage procurement requests formally forwarded by Department Supervisors.
-        </p>
-      </div>
-    </section>
-
-    <div className="no-print mb-4 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h2 className="display-font text-sm font-extrabold">Received requests register</h2>
-        <p className="text-[11px] text-black">
-          Print or download all {exportedTotal.toLocaleString('en-US')} {scopeLabel} — not just the current page.
-        </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <PrintButton label={printing ? 'Preparing…' : 'Print Register'} tone="toolbar" disabled={printing} onClick={handlePrint} />
-        <DownloadButton exportKey={report.exportKey} format="pdf" params={listParams} label="PDF" tone="toolbar" />
-        <DownloadButton exportKey={report.exportKey} format="xlsx" params={listParams} label="Excel" tone="toolbar" />
-        <DownloadButton exportKey={report.exportKey} format="csv" params={listParams} label="CSV" tone="toolbar" />
-      </div>
+    <div className="no-print mb-4 flex flex-wrap items-center justify-end gap-2">
+      <PrintButton label={printing ? 'Preparing…' : 'Print Register'} tone="toolbar" disabled={printing} onClick={handlePrint} />
+      <DownloadButton exportKey={report.exportKey} format="pdf" params={listParams} label="PDF" tone="toolbar" />
+      <DownloadButton exportKey={report.exportKey} format="xlsx" params={listParams} label="Excel" tone="toolbar" />
+      <DownloadButton exportKey={report.exportKey} format="csv" params={listParams} label="CSV" tone="toolbar" />
     </div>
 
     <section className="print-only" aria-label="Print-ready requests received register">
@@ -192,7 +175,7 @@ export default function ReceivedRequests({
         <tbody>
           {printRows.map((request, index) => <tr key={request.id}>
             <td>{index + 1}</td>
-            <td>{request.reference}</td>
+            <td>{requisitionDisplayReference(request)}</td>
             <td>{request.requester || '—'}</td>
             <td>{request.department || '—'}</td>
             <td>{dateLabel(request.submittedAt || request.createdAt)}</td>
@@ -206,17 +189,10 @@ export default function ReceivedRequests({
       </p>
     </section>
 
-    <PageCard
-      className="no-print"
-      title="Requests register"
-      description="Only complete requests explicitly forwarded by a Department Supervisor appear here."
-      action={<button type="button" onClick={load}
-        className={secondaryButtonClass('focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand')}>
-        <RefreshCw size={13} />Refresh
-      </button>}>
+    <PageCard className="no-print">
       <div className="border-b border-subtle bg-white px-4 py-4 sm:px-5">
-        <div className="grid gap-3 md:grid-cols-3">
-          <FilterField label="Search request" className="w-full">
+        <div className="grid grid-cols-3 gap-3">
+          <FilterField label="Search request" className="w-full min-w-0">
             <input value={filters.reference} onChange={(event) => updateFilter('reference', event.target.value)}
               placeholder="Search request" aria-label="Search request" className="field" />
           </FilterField>
@@ -226,10 +202,14 @@ export default function ReceivedRequests({
             fields={report.fields}
             onChange={onDateFilterChange}
             label="Date"
-            className="w-full md:col-span-2"
+            className="col-span-2 w-full min-w-0"
           />
         </div>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex justify-end gap-2">
+          <button type="button" onClick={load}
+            className={secondaryButtonClass('focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand')}>
+            <RefreshCw size={13} />Refresh
+          </button>
           <button type="button" onClick={clearFilters} disabled={!hasFilters}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-brand bg-white px-3 text-[11px] font-bold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:cursor-not-allowed disabled:opacity-40">
             <X size={12} />Clear Filters
@@ -277,8 +257,9 @@ export default function ReceivedRequests({
                     </td>
                     <td className={`${CELL_CLASS} min-w-0`}>
                       <div className="flex min-w-0 flex-col gap-1">
-                        <TextLink onClick={() => openDocument(request.id)} className="truncate !font-semibold">
-                          {request.reference}
+                        <TextLink onClick={() => openDocument(request.id)} className="truncate !font-semibold"
+                          title={requisitionDisplayReference(request)}>
+                          {requisitionDisplayReference(request)}
                         </TextLink>
                         <span className="block max-w-[280px] truncate text-[11px] font-normal leading-4 text-black"
                           title={request.title || ''}>
@@ -304,7 +285,7 @@ export default function ReceivedRequests({
                     </td>
                     <td className={`${CELL_CLASS} sticky right-0 z-10 whitespace-nowrap border-l border-subtle bg-white text-center`}>
                       <button type="button" onClick={() => openDocument(request.id)}
-                        aria-label="View" title={`View request ${request.reference}`}
+                        aria-label="View" title={`View request ${requisitionDisplayReference(request)}`}
                         className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-brand bg-white px-2.5 text-[11px] font-bold text-black transition hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand">
                         <Eye size={13} aria-hidden="true" />View
                       </button>

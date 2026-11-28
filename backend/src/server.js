@@ -10,6 +10,8 @@ const REQUIRED_VARIABLES = ['DB_HOST', 'DB_USER', 'DB_NAME', 'JWT_SECRET'];
 let server;
 let pool;
 let shutdownPromise;
+let inboxSyncTimer;
+let inboxSyncRunning = false;
 let startupStage = 'environment configuration';
 
 function env(name) {
@@ -140,7 +142,26 @@ function printReadyBanner(config) {
   console.log('========================================');
 }
 
+async function runInboxSync() {
+  if (inboxSyncRunning) return;
+  inboxSyncRunning = true;
+  try {
+    const { googleConnectionStatus, syncGoogleInbox } = await import('./services/google-email.js');
+    const status = await googleConnectionStatus();
+    if (!status.connected) return;
+    const result = await syncGoogleInbox();
+    if (result.synced || result.commentsReceived) {
+      log('INFO', `Mailbox sync checked ${result.synced} message(s); linked ${result.commentsReceived} response comment(s).`);
+    }
+  } catch (error) {
+    log('ERROR', `Automatic mailbox sync failed (${errorCode(error)}): ${error.message}`);
+  } finally {
+    inboxSyncRunning = false;
+  }
+}
+
 async function closeResources() {
+  if (inboxSyncTimer) clearInterval(inboxSyncTimer);
   if (server?.listening) {
     const closeServer = new Promise((resolve, reject) => {
       server.close((error) => error ? reject(error) : resolve());
@@ -229,6 +250,17 @@ async function start() {
   log('INFO', `Starting HTTP server on ${displayUrl(config)}...`);
   server = await listen(app, config);
   printReadyBanner(config);
+
+  // Procurement cannot wait for someone to press "Sync inbox": keep incoming
+  // Gmail messages and requisition replies current in the background.
+  const configuredInterval = Number(env('INBOX_SYNC_INTERVAL_MS'));
+  const intervalMs = Number.isFinite(configuredInterval) && configuredInterval >= 15000
+    ? configuredInterval
+    : 60000;
+  inboxSyncTimer = setInterval(() => { void runInboxSync(); }, intervalMs);
+  inboxSyncTimer.unref?.();
+  log('INFO', `Automatic mailbox sync every ${Math.round(intervalMs / 1000)} second(s).`);
+  void runInboxSync();
 }
 
 try {

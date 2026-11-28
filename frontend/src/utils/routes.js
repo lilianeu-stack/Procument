@@ -62,6 +62,28 @@ export function readRouteFromLocation(location) {
     return { portal: PORTALS.COMMITTEE_REVIEW, page: 'Review', query };
   }
 
+  // Response forms sent to another person use a real public token path so the
+  // link opens on any device. The older hash/query links stay valid.
+  const responsePath = /^\/response\/([^/]+)$/.exec(path);
+  if (responsePath) {
+    let token = '';
+    try { token = decodeURIComponent(responsePath[1]); }
+    catch { token = responsePath[1]; }
+    return {
+      portal: PORTALS.RESPONSE,
+      page: 'Response',
+      query: token ? { token } : {}
+    };
+  }
+
+  if (path === '/response') {
+    const query = {};
+    for (const [key, value] of new URLSearchParams(location?.search || '')) {
+      if (key) query[key] = value;
+    }
+    return { portal: PORTALS.RESPONSE, page: 'Response', query };
+  }
+
   const hash = String(location?.hash || '');
   if (hash && hash.length > 1) return parseRoute(hash);
   return parseRoute(hash);

@@ -3,9 +3,11 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { allowRoles } from '../middleware/auth.js';
 import { writeAudit } from '../lib/events.js';
-import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
+import { normalizeEmail, validEmail } from '../utils/email-config.js';
 import { buildRequestedItemsEmail } from '../utils/email-reply.js';
-import { sendEmail } from '../services/email.js';
+import { normalizeSignature } from '../utils/signature.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
+import { requestResponseLink, sendEmail } from '../services/email.js';
 import {
   buildGoogleAuthorizationUrl, createOAuthState, disconnectGoogleMailbox,
   exchangeAuthorizationCode, fetchGoogleAccount, googleConnectionStatus,
@@ -153,13 +155,13 @@ router.post('/email/inbox/sync', allowRoles(...managers), async (_req, res, next
 });
 
 function publicFormUrl(token) {
-  const base = String(emailConfigStatus().appBaseUrl || 'http://localhost:5173').replace(/\/+$/, '');
-  return `${base}/#/response?token=${encodeURIComponent(token)}`;
+  return requestResponseLink(token);
 }
 
-async function requisitionFormEmail(connection, requisitionId, { token, recipientPhone, message }) {
+async function requisitionFormEmail(connection, requisitionId, { token, recipientPhone, message, senderName, senderSignature }) {
   const [[requisition]] = await connection.execute(
-    `SELECT r.id, r.reference, r.title, d.name AS department, u.name AS requester
+    `SELECT r.id, r.reference, r.title, d.name AS department, u.name AS requester,
+            ${REQUISITION_DISPLAY_SQL}
        FROM requisitions r
        LEFT JOIN departments d ON d.id = r.department_id
        LEFT JOIN users u ON u.id = r.requester_id
@@ -175,14 +177,16 @@ async function requisitionFormEmail(connection, requisitionId, { token, recipien
     [requisitionId]
   );
   return {
-    requisition,
+    requisition: { ...requisition, displayReference: requisitionDisplayReference(requisition) },
     email: buildRequestedItemsEmail({
       requisitionId,
-      reference: requisition.reference,
+      reference: requisitionDisplayReference(requisition),
       title: requisition.title,
       department: requisition.department,
       requester: requisition.requester,
       recipientPhone,
+      senderName,
+      senderSignature,
       items,
       token,
       message,
@@ -198,13 +202,16 @@ router.get('/email/requisitions/:id/forms', allowRoles(...managers), async (req,
       return res.status(400).json({ message: 'Invalid requisition identifier.' });
     }
     const [[requisition]] = await pool.execute(
-      'SELECT id, reference FROM requisitions WHERE id = ? AND forwarded_by_supervisor IS NOT NULL LIMIT 1',
+      `SELECT r.id, r.reference, ${REQUISITION_DISPLAY_SQL}
+         FROM requisitions r WHERE r.id = ? AND r.forwarded_by_supervisor IS NOT NULL LIMIT 1`,
       [requisitionId]
     );
     if (!requisition) return res.status(404).json({ message: 'Forwarded request not found.' });
+    requisition.displayReference = requisitionDisplayReference(requisition);
     const [rows] = await pool.execute(
-      `SELECT t.id, t.recipient_email AS recipientEmail, t.recipient_phone AS recipientPhone,
-          t.message, t.created_at AS createdAt, t.response_submitted_at AS responseSubmittedAt,
+      `SELECT t.id, t.token, t.recipient_email AS recipientEmail, t.recipient_phone AS recipientPhone,
+          t.message, t.sender_name AS senderName,
+          t.created_at AS createdAt, t.response_submitted_at AS responseSubmittedAt,
           (SELECT COUNT(*) FROM requisition_email_comments c WHERE c.thread_id = t.id) AS responseCount
          FROM requisition_email_threads t WHERE t.requisition_id = ?
         ORDER BY t.created_at DESC, t.id DESC`,
@@ -212,8 +219,9 @@ router.get('/email/requisitions/:id/forms', allowRoles(...managers), async (req,
     );
     return res.json({
       requisition,
-      forms: rows.map((form) => ({
+      forms: rows.map(({ token, ...form }) => ({
         ...form,
+        responseUrl: requestResponseLink(token),
         responseCount: Number(form.responseCount) || 0,
         responded: Boolean(form.responseSubmittedAt || Number(form.responseCount) > 0)
       }))
@@ -230,7 +238,8 @@ router.post('/email/requisitions/:id/forms/:threadId/resend', allowRoles(...mana
   const connection = await pool.getConnection();
   try {
     const [[thread]] = await connection.execute(
-      `SELECT id, token, recipient_email AS recipientEmail, recipient_phone AS recipientPhone, message
+      `SELECT id, token, recipient_email AS recipientEmail, recipient_phone AS recipientPhone, message,
+              sender_name AS senderName, sender_signature AS senderSignature
          FROM requisition_email_threads WHERE id = ? AND requisition_id = ? LIMIT 1`,
       [threadId, requisitionId]
     );
@@ -248,7 +257,8 @@ router.post('/email/requisitions/:id/forms/:threadId/resend', allowRoles(...mana
       to: thread.recipientEmail,
       subject: form.email.subject,
       text: form.email.text,
-      html: form.email.html
+      html: form.email.html,
+      inlineImages: form.email.inlineImages
     });
     if (!result.ok) {
       return res.status(result.reason === 'not_configured' ? 503 : 502).json({
@@ -269,18 +279,24 @@ router.post('/email/requisitions/:id/send', allowRoles(...managers), async (req,
   const to = normalizeEmail(req.body.to);
   const recipientPhone = String(req.body.recipientPhone || '').trim().slice(0, 50);
   const message = String(req.body.message || '').trim().slice(0, 2000);
+  const senderName = String(req.body.senderName || '').trim().slice(0, 150);
+  let senderSignature = null;
 
   if (!Number.isInteger(requisitionId) || requisitionId < 1) {
     return res.status(400).json({ message: 'Invalid requisition identifier.' });
   }
   if (!validEmail(to)) return res.status(400).json({ message: 'Enter a valid recipient email address.' });
+  if (!senderName) return res.status(400).json({ message: 'Enter the name of the person sending this document.' });
+  senderSignature = await normalizeSignature(req.body.senderSignature, 'Sent by');
+  if (!senderSignature) return res.status(400).json({ message: 'Upload a signature image for the sender.' });
 
   const connection = await pool.getConnection();
   let threadId = null;
   try {
     await connection.beginTransaction();
     const [[requisition]] = await connection.execute(
-      `SELECT r.id, r.reference, r.title, d.name AS department, u.name AS requester
+      `SELECT r.id, r.reference, r.title, d.name AS department, u.name AS requester,
+              ${REQUISITION_DISPLAY_SQL}
          FROM requisitions r
          LEFT JOIN departments d ON d.id = r.department_id
          LEFT JOIN users u ON u.id = r.requester_id
@@ -303,21 +319,26 @@ router.post('/email/requisitions/:id/send', allowRoles(...managers), async (req,
     const token = randomBytes(16).toString('hex');
     const [thread] = await connection.execute(
       `INSERT INTO requisition_email_threads
-         (requisition_id, token, recipient_email, recipient_phone, message, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [requisitionId, token, to, recipientPhone || null, message || null, req.user.id]
+         (requisition_id, token, recipient_email, recipient_phone, message,
+          sender_name, sender_signature, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        requisitionId, token, to, recipientPhone || null, message || null,
+        senderName, senderSignature, req.user.id
+      ]
     );
     threadId = thread.insertId;
 
-    const appBaseUrl = String(emailConfigStatus().appBaseUrl || 'http://localhost:5173').replace(/\/+$/, '');
-    const responseUrl = `${appBaseUrl}/#/response?token=${encodeURIComponent(token)}`;
+    const responseUrl = requestResponseLink(token);
     const email = buildRequestedItemsEmail({
       requisitionId,
-      reference: requisition.reference,
+      reference: requisitionDisplayReference(requisition),
       title: requisition.title,
       department: requisition.department,
       requester: requisition.requester,
       recipientPhone,
+      senderName,
+      senderSignature,
       items,
       token,
       message,
@@ -325,12 +346,16 @@ router.post('/email/requisitions/:id/send', allowRoles(...managers), async (req,
     });
 
     await writeAudit(connection, req.user.id, 'requisition_email_form_sent', 'requisition', requisitionId, {
-      to, subject: email.subject, recipientPhone
+      to, subject: email.subject, recipientPhone, senderName
     });
     await connection.commit();
 
     const result = await sendEmail({
-      to, subject: email.subject, text: email.text, html: email.html
+      to,
+      subject: email.subject,
+      text: email.text,
+      html: email.html,
+      inlineImages: email.inlineImages
     });
     if (!result.ok) {
       await pool.execute('DELETE FROM requisition_email_threads WHERE id = ?', [threadId]);

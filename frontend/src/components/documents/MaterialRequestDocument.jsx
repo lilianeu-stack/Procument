@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom';
 import { dateLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 // The sheet is rendered normally inside the modal for on-screen viewing and a
 // second print-only copy is portalled to <body>. Print CSS hides everything
@@ -21,6 +22,7 @@ export default function MaterialRequestDocument({ requisition = {} }) {
   const approved = requisition.supervisorDecision === 'Approved' && Boolean(requisition.supervisorDecisionAt);
   const requester = requisition.requester || requisition.requesterName || requisition.requestedBy || '';
   const requestedAt = requisition.submittedAt || requisition.createdAt;
+  const displayReference = requisitionDisplayReference(requisition);
   const supervisor = requisition.supervisorName || requisition.approvedBy || '';
   const paddedItems = [
     ...items,
@@ -35,7 +37,7 @@ export default function MaterialRequestDocument({ requisition = {} }) {
         <span>PROCUREMENT &amp; STORES</span>
       </div>
       <div className="official-header-meta">
-        <span>{requisition.reference || '—'}</span>
+        <span>{displayReference}</span>
         <span>{requisition.status || 'Draft'}</span>
         <span>{dateLabel(requestedAt)}</span>
       </div>
@@ -102,7 +104,7 @@ export default function MaterialRequestDocument({ requisition = {} }) {
         <span className="official-value official-signature-line">{requester ? 'Digitally submitted' : ''}</span>
       </div>
       <div>
-        <span className="official-label">Date:</span>
+        <span className="official-label">Requested At:</span>
         <span className="official-value">{requestedAt ? dateLabel(requestedAt) : ''}</span>
       </div>
       <div>
@@ -111,7 +113,11 @@ export default function MaterialRequestDocument({ requisition = {} }) {
       </div>
       <div>
         <span className="official-label">Signature:</span>
-        <span className="official-value official-signature-line">{approved ? 'Digitally approved' : ''}</span>
+        <span className="official-value official-signature-line">
+          {approved && requisition.supervisorSignature
+            ? <img src={requisition.supervisorSignature} alt="Approved by signature" className="official-signature-image" />
+            : approved ? 'Digitally approved' : ''}
+        </span>
       </div>
       <div>
         <span className="official-label">Date:</span>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Eye, Info, RefreshCw, Send, XCircle } from 'lucide-react';
 import PageCard from '../ui/PageCard.jsx';
+import Modal from '../ui/Modal.jsx';
 import ReportToolbar from '../ui/ReportToolbar.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
 import RequestDetail from './RequestDetail.jsx';
@@ -11,6 +12,7 @@ import {
 import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
 import { roleLabel } from '../../utils/access.js';
 import { SUPERVISOR_PENDING } from '../../utils/status.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 const REPORT = {
   exportKey: 'portalRequisitions',
@@ -56,6 +58,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
   const [detailError, setDetailError] = useState('');
 
   const requestId = query.request;
+  const activeRequest = pending.find((item) => Number(item.id) === Number(activeId));
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -190,7 +193,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
             <tbody className="divide-y divide-subtle">
               {pending.map((request) => <tr key={request.id} className={activeId === request.id ? 'bg-white' : 'hover:bg-white'}>
                 <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
-                  <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{request.reference}</TextLink>
+                  <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{requisitionDisplayReference(request)}</TextLink>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
                 <td className="min-w-[170px] px-4 py-3">{request.title}</td>
@@ -199,24 +202,14 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
                 <td className="whitespace-nowrap px-4 py-3">{request.priority || 'Medium'}</td>
                 <td className="whitespace-nowrap px-4 py-3"><StatusBadge value={request.status} /></td>
                 <td className="px-4 py-3">
-                  {activeId === request.id ? <div className="min-w-[240px] space-y-2">
-                    {decision !== 'Approve' && <textarea rows="2" value={reason} onChange={(event) => setReason(event.target.value)}
-                      placeholder="Reason (required)…" className="field h-auto py-2" />}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" disabled={busy} onClick={() => confirm(request)} className={primaryButtonClass('px-2.5 py-1.5')}>
-                        {busy ? 'Saving…' : `Confirm ${decision}`}
-                      </button>
-                      <button type="button" onClick={() => { setActiveId(null); setRowError(''); }} className="text-[11px] font-bold text-black hover:text-black">Cancel</button>
-                    </div>
-                    {rowError && <p role="alert" className="text-[11px] text-black">{rowError}</p>}
-                  </div> : <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5">
                     {DECISION_BUTTONS.map(({ value, icon: Icon, className }) => <button key={value} type="button"
                       onClick={() => choose(request.id, value)} title={value}
                       className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[10px] font-bold ${className}`}>
                       <Icon size={12} />{value === 'Request Information' ? 'Info' : value === 'Approve' ? 'Approve' : 'Reject'}
                     </button>)}
                     <button type="button" onClick={() => navigate(PAGE, { ...query, request: request.id })} title="View full request" className="ml-1 text-black hover:text-black"><Eye size={14} /></button>
-                  </div>}
+                  </div>
                 </td>
                 <td className="whitespace-nowrap px-4 py-3" />
               </tr>)}
@@ -235,7 +228,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
           <tbody className="divide-y">
             {decided.map((request) => <tr key={request.id}>
               <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
-                <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{request.reference}</TextLink>
+                <TextLink onClick={() => navigate(PAGE, { ...query, request: request.id })}>{requisitionDisplayReference(request)}</TextLink>
               </td>
               <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
               <td className="whitespace-nowrap px-4 py-3 font-bold">{request.supervisorDecision}</td>
@@ -273,5 +266,43 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
       onMessage={(userId, request) => navigate('Department Messages', { userId, request })}
       onChanged={async () => { await loadDetail(); await load(); await portalApi.reload(); }}
     />}
+
+    {activeRequest && <Modal
+      title={`Decision · ${requisitionDisplayReference(activeRequest)}`}
+      size="lg"
+      dismissible={!busy}
+      onClose={() => { setActiveId(null); setDecision(''); setReason(''); setRowError(''); }}
+    >
+      <div className="space-y-4">
+        <div>
+          <p className="text-xs font-bold">{activeRequest.title || requisitionDisplayReference(activeRequest)}</p>
+          <p className="mt-1 text-[11px] text-black">
+            {activeRequest.requester || 'Requester'} · {dateLabel(activeRequest.submittedAt || activeRequest.createdAt)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {DECISION_BUTTONS.map(({ value, icon: Icon, className }) => <button key={value} type="button"
+            disabled={busy} onClick={() => { setDecision(value); if (value === 'Approve') setReason(''); setRowError(''); }}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold ${decision === value ? 'ring-2 ring-brand' : ''} ${className}`}>
+            <Icon size={14} />{value}
+          </button>)}
+        </div>
+        {decision && decision !== 'Approve' && <label className="block text-xs font-bold">
+          Reason (required)
+          <textarea rows="3" value={reason} onChange={(event) => setReason(event.target.value)}
+            placeholder="Explain your decision…" className="field h-auto py-2" />
+        </label>}
+        {rowError && <p role="alert" className="rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{rowError}</p>}
+        <div className="flex justify-end gap-2 border-t border-subtle pt-4">
+          <button type="button" disabled={busy} onClick={() => { setActiveId(null); setDecision(''); setReason(''); setRowError(''); }}
+            className={secondaryButtonClass()}>
+            Cancel
+          </button>
+          <button type="button" disabled={busy || !decision} onClick={() => confirm(activeRequest)} className={primaryButtonClass()}>
+            {busy ? 'Saving…' : `Confirm ${decision || 'decision'}`}
+          </button>
+        </div>
+      </div>
+    </Modal>}
   </>;
 }

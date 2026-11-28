@@ -120,7 +120,7 @@ function DateField({ label, value, onChange, min, max, invalid }) {
 }
 
 export default function DateRangeFilter({
-  value = {}, fields = [], onChange, label = 'Date', className = '', compact = false, fromToOnly = false
+  value = {}, fields = [], onChange, label = 'Date', className = '', compact = false, fromToOnly = false, children
 }) {
   const current = {
     preset: value.preset || '',
@@ -203,7 +203,7 @@ export default function DateRangeFilter({
 
   if (fromToOnly) {
     return <div className={`no-print min-w-0 ${className}`}>
-      <div className="grid grid-cols-2 gap-2">
+      <div className={`grid grid-cols-2 gap-2 ${children ? 'xl:grid-cols-6' : ''}`}>
         <DateField
           label="From"
           value={current.from}
@@ -218,6 +218,7 @@ export default function DateRangeFilter({
           min={current.from || undefined}
           invalid={Boolean(error)}
         />
+        {children}
       </div>
       {error && <div role="alert" className="mt-2 text-[10px] font-semibold text-black">{error}</div>}
     </div>;

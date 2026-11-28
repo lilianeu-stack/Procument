@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  datePresets, formatDate, formatDateTime, isIsoDate,
+  dateParts, datePresets, formatDate, formatDateTime, isIsoDate,
   toDateInputValue, toDateTimeInputValue, toUtcDateTimeInputValue,
   validateBusinessDate, validateDateOrder, validateDateRange
 } from '../src/utils/dates.js';
@@ -12,6 +12,14 @@ test('dates are displayed in the configured local timezone', () => {
   assert.equal(formatDate('2026-01-15T23:30:00Z'), '16/01/2026');
   assert.equal(formatDateTime('2026-01-15T23:30:00Z', { withZone: false }), '16/01/2026 01:30');
   assert.equal(toDateInputValue('2026-01-15T23:30:00Z'), '2026-01-16');
+});
+
+test('date parts follow the configured display timezone', () => {
+  const parts = dateParts('2026-01-15T23:30:00Z');
+  assert.equal(parts.day, '16');
+  assert.equal(parts.month, '01');
+  assert.equal(parts.year, '2026');
+  assert.equal(dateParts('not-a-date'), null);
 });
 
 test('MySQL timestamps and invalid values are handled safely', () => {

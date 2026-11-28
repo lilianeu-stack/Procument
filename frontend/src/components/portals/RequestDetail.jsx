@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CheckCircle2, FileText, Info, MessageSquare, Pencil, Send, XCircle } from 'lucide-react';
 import Modal from '../ui/Modal.jsx';
 import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
@@ -6,12 +6,14 @@ import StatusBadge from '../ui/StatusBadge.jsx';
 import DownloadButton from '../ui/DownloadButton.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
 import PrintHeader from '../ui/PrintHeader.jsx';
+import SignatureUpload from '../ui/SignatureUpload.jsx';
 import {
-  ActivityTimeline, AttachmentList, AttachmentPicker, KeyValue, LoadingState,
+  AttachmentPicker, KeyValue,
   PageHeader, PortalBadge, TableScroll, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
-import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
-import { downloadBinary, filesToAttachments } from '../../utils/attachments.js';
+import { currency, dateTimeLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
+import { filesToAttachments } from '../../utils/attachments.js';
 import {
   decisionLabel, decisionTone, isDraft, isInformationRequired, isPendingApproval
 } from '../../utils/status.js';
@@ -34,10 +36,17 @@ export default function RequestDetail({
   const [files, setFiles] = useState([]);
   const [pendingDecision, setPendingDecision] = useState('');
   const [showOfficial, setShowOfficial] = useState(false);
+  const [approvalSignature, setApprovalSignature] = useState(null);
+
+  useEffect(() => {
+    setApprovalSignature(null);
+  }, [requisition?.id]);
 
   if (!requisition) return null;
   const isSupervisor = portal === 'supervisor';
   const status = requisition.status;
+  const requestedAt = requisition.submittedAt || requisition.createdAt;
+  const displayReference = requisitionDisplayReference(requisition);
   const otherUserId = isSupervisor ? requisition.requesterId : requisition.supervisorId;
   const items = requisition.items || [];
   const total = items.length
@@ -65,20 +74,24 @@ export default function RequestDetail({
       return;
     }
     await run(
-      () => portalApi.decideRequest(requisition.id, { decision: pendingDecision, reason: reason.trim() }),
+      () => portalApi.decideRequest(requisition.id, {
+        decision: pendingDecision,
+        reason: reason.trim(),
+        ...(pendingDecision === 'Approve' && approvalSignature ? { signature: approvalSignature } : {})
+      }),
       'Decision recorded.'
     );
   }
 
-  return <Modal title={`Request · ${requisition.reference}`} size="xl" onClose={onClose}>
+  return <Modal title={`Request · ${displayReference}`} size="xl" onClose={onClose}>
     <PrintHeader
-      title={requisition.title || requisition.reference}
-      reference={requisition.reference}
-      dates={`Submitted ${dateTimeLabel(requisition.submittedAt || requisition.createdAt)} · Required by ${dateLabel(requisition.requiredBy)}`}
+      title={requisition.title || displayReference}
+      reference={displayReference}
+      dates={`Requested ${dateTimeLabel(requestedAt)}`}
     />
     <PageHeader
       eyebrow={requisition.department || 'Department'}
-      title={requisition.title || requisition.reference}
+      title={requisition.title || displayReference}
       description={requisition.justification || 'No justification supplied.'}
       actions={<div className="flex flex-wrap items-center gap-2">
         <StatusBadge value={status} />
@@ -106,17 +119,13 @@ export default function RequestDetail({
     <div className="grid gap-4 lg:grid-cols-2">
       <DetailSection title="Request details">
         <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <KeyValue label="Reference">{requisition.reference}</KeyValue>
-          <KeyValue label="Priority">{requisition.priority || 'Medium'}</KeyValue>
+          <KeyValue label="Reference">{displayReference}</KeyValue>
           <KeyValue label="Requester">{requisition.requester || '—'}</KeyValue>
           <KeyValue label="Department">{requisition.department || '—'}</KeyValue>
           <KeyValue label="Location">{requisition.location || '—'}</KeyValue>
-          <KeyValue label="Submitted">{dateTimeLabel(requisition.submittedAt || requisition.createdAt)}</KeyValue>
-          <KeyValue label="Required by">{dateLabel(requisition.requiredBy)}</KeyValue>
-          <KeyValue label="Budget code">{requisition.budgetCode || '—'}</KeyValue>
+          <KeyValue label="Requested At">{dateTimeLabel(requestedAt)}</KeyValue>
           <KeyValue label="Estimated total"><span className="text-black">{currency(total)}</span></KeyValue>
           <KeyValue label="Supervisor">{requisition.supervisorName || '—'}</KeyValue>
-          <KeyValue label="Decision at">{dateTimeLabel(requisition.supervisorDecisionAt)}</KeyValue>
         </dl>
         {requisition.supervisorNotes && <p className="mt-4 rounded-lg bg-white p-3 text-xs leading-5 text-black">
           <strong>Supervisor note:</strong> {requisition.supervisorNotes}
@@ -150,18 +159,18 @@ export default function RequestDetail({
         <div className="mt-3 flex justify-end border-t border-subtle pt-3 text-xs font-bold">
           Total <span className="ml-3 text-black">{currency(total)}</span>
         </div>
-      </DetailSection>
-    </div>
-
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <DetailSection title={`Attachments (${(requisition.attachments || []).length})`}>
-        {requisition.loadingAttachments ? <LoadingState label="Loading attachments…" /> :
-          <AttachmentList attachments={requisition.attachments || []}
-            downloadPath={(id, name) => downloadBinary(`/portal/requisitions/${requisition.id}/attachments/${id}`, name)}
-            onError={setError} />}
-      </DetailSection>
-      <DetailSection title="Approval & activity history">
-        <ActivityTimeline activity={requisition.activity || []} />
+        {isSupervisor && (isPendingApproval(status) || requisition.supervisorDecision === 'Approved') && <div className="mt-4 grid gap-3 border-t border-subtle pt-4 sm:grid-cols-2">
+          <label className="block text-xs font-bold">
+            Approved by
+            <input readOnly value={requisition.supervisorName || '—'} className="field mt-1.5 bg-white" />
+          </label>
+          <SignatureUpload
+            label="Approved by signature"
+            value={isPendingApproval(status) ? approvalSignature : requisition.supervisorSignature || null}
+            onChange={setApprovalSignature}
+            disabled={!isPendingApproval(status)}
+          />
+        </div>}
       </DetailSection>
     </div>
 

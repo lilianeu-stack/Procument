@@ -8,6 +8,7 @@ import { createNotification, writeAudit } from '../lib/events.js';
 import { withPortalIdentity } from '../utils/roles.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 import admin from './admin.js';
 import exportsRouter from './exports.js';
 import stockkeeper from './stockkeeper.js';
@@ -460,6 +461,10 @@ router.get('/requisitions', async (req, res, next) => {
         r.created_at AS createdAt, r.updated_at AS updatedAt, u.name AS requester, d.name AS department,
         su.name AS supervisorName, r.supervisor_decision AS supervisorDecision,
         r.supervisor_notes AS supervisorNotes,
+        (SELECT COUNT(*) FROM requisitions rr
+           WHERE rr.requester_id = r.requester_id
+             AND rr.department_id <=> r.department_id
+             AND rr.id <= r.id) AS departmentSequence,
         COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0) AS total,
         GROUP_CONCAT(CONCAT(ri.item_name, ' (', ri.quantity, ')') ORDER BY ri.id SEPARATOR ', ') AS items
        FROM requisitions r JOIN users u ON u.id = r.requester_id
@@ -540,12 +545,16 @@ router.patch('/requisitions/:id/decision', allowRoles(...approverRoles), async (
       await connection.rollback();
       return res.status(404).json({ message: 'Pending requisition not found.' });
     }
-    const [[request]] = await connection.execute('SELECT reference, requester_id FROM requisitions WHERE id = ?', [req.params.id]);
+    const [[request]] = await connection.execute(
+      `SELECT reference, requester_id, ${REQUISITION_DISPLAY_SQL}
+         FROM requisitions r WHERE r.id = ?`,
+      [req.params.id]
+    );
     await writeAudit(
       connection, req.user.id, decision.toLowerCase(), 'requisition', req.params.id,
       {}, { previousStatus: 'Pending', newStatus: decision }
     );
-    await createNotification(connection, request.requester_id, `Requisition ${decision.toLowerCase()}`, `${request.reference} was ${decision.toLowerCase()}.`, '/requisitions');
+    await createNotification(connection, request.requester_id, `Requisition ${decision.toLowerCase()}`, `${requisitionDisplayReference(request)} was ${decision.toLowerCase()}.`, '/requisitions');
     await connection.commit();
     return res.json({ message: `Requisition ${decision.toLowerCase()}.` });
   } catch (error) {
@@ -599,7 +608,11 @@ function receivedListQuery() {
       (SELECT COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0)
          FROM requisition_items ri WHERE ri.requisition_id = r.id) AS total,
       (SELECT COUNT(*) FROM requisition_items ri WHERE ri.requisition_id = r.id) AS itemCount,
-      (SELECT COUNT(*) FROM requisition_attachments ra WHERE ra.requisition_id = r.id) AS attachmentCount
+      (SELECT COUNT(*) FROM requisition_attachments ra WHERE ra.requisition_id = r.id) AS attachmentCount,
+      (SELECT COUNT(*) FROM requisitions rr
+         WHERE rr.requester_id = r.requester_id
+           AND rr.department_id <=> r.department_id
+           AND rr.id <= r.id) AS departmentSequence
     FROM requisitions r
     JOIN users u ON u.id = r.requester_id
     LEFT JOIN departments d ON d.id = r.department_id
@@ -736,6 +749,10 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
       return res.status(404).json({ message: 'Forwarded request not found.' });
     }
     await markReceivedByProcurement(connection, requisitionId, req.user.id);
+    const [signatureRows] = await connection.execute(
+      'SELECT supervisor_signature AS supervisorSignature FROM requisitions WHERE id = ? LIMIT 1',
+      [requisitionId]
+    );
     const [items] = await connection.execute(
       `SELECT id, item_name AS itemName, description, remarks, quantity, unit,
         estimated_unit_cost AS estimatedUnitCost,
@@ -769,6 +786,7 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
     return res.json({
       requisition: {
         ...mapReceivedRow(requisition),
+        supervisorSignature: signatureRows[0]?.supervisorSignature || null,
         items: items.map((item) => ({ ...item, estimatedUnitCost: Number(item.estimatedUnitCost), lineTotal: Number(item.lineTotal) })),
         attachments,
         activity: activity.map((entry) => ({

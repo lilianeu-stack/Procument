@@ -20,7 +20,7 @@ import {
 } from '../utils/access.js';
 import { reportForPage } from '../utils/reportFields.js';
 import { SUPERVISOR_PENDING } from '../utils/status.js';
-import PortalProfile from '../components/portals/PortalProfile.jsx';
+import PortalProfileModal from '../components/portals/PortalProfileModal.jsx';
 
 const EmailInboxPage = lazy(() => import('./EmailInboxPage.jsx'));
 
@@ -73,6 +73,7 @@ export default function PageContent({
         onDateFilterChange={onDateFilterChange}
         params={params}
         user={reportUser}
+        dateFilterFromToOnly={page === 'Suppliers'}
       />
     : null;
 
@@ -85,11 +86,12 @@ export default function PageContent({
       onNavigate={actions.onNavigate}
     />;
   } else if (page === PROFILE_PAGE) {
-    content = <PortalProfile
+    content = <PortalProfileModal
       user={data.user}
       summary={data.portalSummary}
       portal="admin"
       onUpdated={actions.onProfileUpdated}
+      onClose={() => navigate('Overview')}
     />;
   } else if (page === 'Email Inbox') {
     content = <Suspense fallback={<div role="status" className="rounded-xl border border-slate-100 bg-white p-8 text-sm text-black">Loading email inbox…</div>}>

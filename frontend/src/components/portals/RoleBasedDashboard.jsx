@@ -9,6 +9,7 @@ import {
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
 import { roleLabel } from '../../utils/access.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 function WorkspaceStatCard({ label, value, note, icon: Icon, page, onClick, accent = 'emerald' }) {
   const accents = {
@@ -194,7 +195,7 @@ export default function RoleBasedDashboard({
                 <tbody className="divide-y divide-subtle">
                   {recent.requests.slice(0, 6).map((request) => <tr key={request.id} className="transition hover:bg-accent-tint">
                     <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
-                      <TextLink onClick={() => onNavigate(requestsPage, { request: request.id })}>{request.reference}</TextLink>
+                      <TextLink onClick={() => onNavigate(requestsPage, { request: request.id })}>{requisitionDisplayReference(request)}</TextLink>
                     </td>
                     <td className="max-w-[230px] truncate px-4 py-3">{isSupervisor ? request.requester : request.title}</td>
                     <td className="whitespace-nowrap px-4 py-3">{dateLabel(request.submittedAt || request.createdAt)}</td>

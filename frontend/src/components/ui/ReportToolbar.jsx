@@ -23,7 +23,9 @@ export default function ReportToolbar({
   user = null,
   department = '',
   scope = 'matching records',
-  renderPrintTable = true
+  renderPrintTable = true,
+  dateFilterFromToOnly = false,
+  dateFilterContent = null
 }) {
   const [printRows, setPrintRows] = useState([]);
   const [printMetadata, setPrintMetadata] = useState([]);
@@ -73,11 +75,7 @@ export default function ReportToolbar({
       scope={scope}
     />}
     <div className="no-print mb-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="display-font text-sm font-extrabold">{report.title}</h2>
-          <p className="text-[11px] text-black">Filter the report, then print or download the current result set.</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <PrintButton
             label={printLabel || (busy ? 'Preparing…' : 'Print Register')}
@@ -92,11 +90,12 @@ export default function ReportToolbar({
       </div>
       {printError && <p role="alert" className="rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{printError}</p>}
       <DateRangeFilter
+        fromToOnly={dateFilterFromToOnly}
         value={value}
         fields={report.fields}
         onChange={onDateFilterChange}
         label={report.title}
-      />
+      >{dateFilterContent}</DateRangeFilter>
     </div>
   </>;
 }

@@ -11,6 +11,7 @@ import { getSettings } from '../services/settings.js';
 import {
   createResendDelivery, listRfqDeliveries, retryFailedDeliveries, sendRfqDeliveries
 } from '../services/rfq-email.js';
+import { requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const router = Router();
 const managers = ['admin', 'procurement'];
@@ -279,6 +280,11 @@ router.get('/committee-recommendations', allowRoles(...managers), async (req, re
           r.status, r.sent_at AS sentAt, r.submitted_at AS submittedAt,
           f.reference, q.title, f.requisition_id AS requisitionId,
           q.reference AS requisitionReference, d.name AS department,
+          q.submitted_at AS requisitionSubmittedAt, q.created_at AS requisitionCreatedAt,
+          (SELECT COUNT(*) FROM requisitions rr
+            WHERE rr.requester_id = q.requester_id
+              AND rr.department_id <=> q.department_id
+              AND rr.id <= q.id) AS departmentSequence,
           s.name AS supplier, s.contact_name AS supplierContact,
           s.phone AS supplierPhone, s.email AS supplierEmail, s.address AS supplierAddress,
           qt.id AS quotationId, qt.amount AS quotationAmount,
@@ -318,6 +324,11 @@ router.get('/committee-recommendations', allowRoles(...managers), async (req, re
           .find((entry) => Number(entry.supplierId) === Number(row.supplierId))?.items || [];
         return {
           ...row,
+          requisitionDisplayReference: requisitionDisplayReference({
+            submittedAt: row.requisitionSubmittedAt,
+            createdAt: row.requisitionCreatedAt,
+            departmentSequence: row.departmentSequence
+          }),
           supplierId: Number(row.supplierId),
           quotationId: row.quotationId ? Number(row.quotationId) : null,
           quotationAmount: row.quotationAmount === null ? null : Number(row.quotationAmount),

@@ -4,6 +4,7 @@ import BrandLogo from '../ui/BrandLogo.jsx';
 import PublicPrintToolbar from '../ui/PublicPrintToolbar.jsx';
 import { api } from '../../services/api.js';
 import { currency, dateTimeLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 export default function RequestResponsePage({ token }) {
   const [request, setRequest] = useState(null);
@@ -62,6 +63,7 @@ export default function RequestResponsePage({ token }) {
     0
   );
   const responded = Boolean(request?.responded);
+  const displayReference = requisitionDisplayReference(request || {});
 
   return <div className="min-h-screen bg-canvas">
     <header className="border-b bg-white">
@@ -83,13 +85,13 @@ export default function RequestResponsePage({ token }) {
       {!loading && request && <>
         <PublicPrintToolbar
           title="Requested items form"
-          reference={request.reference}
+          reference={displayReference}
           label="Print request form"
           note="Print this signed-link request and your response for your records."
         />
         <section className="rounded-xl border bg-white p-6 shadow-sm">
           <p className="text-[10px] font-bold uppercase tracking-widest text-black">Requested items form</p>
-          <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{request.reference}</h1>
+          <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{displayReference}</h1>
           <p className="mt-1 text-sm text-black">{request.title || 'Procurement request'}</p>
           <div className="mt-5 grid gap-3 text-xs sm:grid-cols-3">
             <div className="rounded-lg border p-3"><span className="block text-black">Department</span><strong className="mt-1 block">{request.department || '—'}</strong></div>
@@ -97,6 +99,13 @@ export default function RequestResponsePage({ token }) {
             <div className="rounded-lg border p-3"><span className="block text-black">Grand total</span><strong className="mt-1 block text-black">{currency(total)}</strong></div>
           </div>
         </section>
+
+        {(request.senderName || request.senderSignature) && <section className="rounded-xl border bg-white p-6 shadow-sm">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-black">Sent by</p>
+          <p className="mt-1 text-sm font-extrabold">{request.senderName || '—'}</p>
+          {request.senderSignature && <img src={request.senderSignature} alt={`${request.senderName || 'Sender'} signature`}
+            className="mt-3 max-h-20 max-w-full object-contain" />}
+        </section>}
 
         {request.message && <section className="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-6 shadow-sm">
           <strong className="block text-sm font-extrabold uppercase tracking-wide text-black">Message from Procurement</strong>

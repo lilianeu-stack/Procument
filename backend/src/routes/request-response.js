@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import { requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const router = Router();
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/i;
@@ -11,7 +12,13 @@ async function loadThread(token) {
   const [[thread]] = await pool.execute(
     `SELECT t.id, t.requisition_id AS requisitionId, t.recipient_email AS recipientEmail,
        t.response_submitted_at AS responseSubmittedAt, t.message,
-       r.reference, r.title, d.name AS department, u.name AS requester
+       t.sender_name AS senderName, t.sender_signature AS senderSignature,
+       r.reference, r.title, d.name AS department, u.name AS requester,
+       r.submitted_at AS submittedAt, r.created_at AS createdAt,
+       (SELECT COUNT(*) FROM requisitions rr
+         WHERE rr.requester_id = r.requester_id
+           AND rr.department_id <=> r.department_id
+           AND rr.id <= r.id) AS departmentSequence
      FROM requisition_email_threads t
      JOIN requisitions r ON r.id = t.requisition_id
      LEFT JOIN departments d ON d.id = r.department_id
@@ -19,6 +26,7 @@ async function loadThread(token) {
     WHERE t.token = ? LIMIT 1`,
     [token]
   );
+  if (thread) thread.displayReference = requisitionDisplayReference(thread);
   return thread || null;
 }
 
@@ -45,10 +53,13 @@ router.get('/request-response/:token', async (req, res, next) => {
     return res.json({
       request: {
         reference: thread.reference,
+        displayReference: thread.displayReference,
         title: thread.title,
         department: thread.department,
         requester: thread.requester,
         recipientEmail: thread.recipientEmail,
+        senderName: thread.senderName || '',
+        senderSignature: thread.senderSignature || null,
         message: thread.message || '',
         responded: Boolean(thread.responseSubmittedAt || response),
         response: response ? {
@@ -102,7 +113,7 @@ router.post('/request-response/:token/comment', async (req, res, next) => {
       ? `${responderName} <${thread.recipientEmail}>`
       : thread.recipientEmail;
     const gmailMessageId = `form:${randomBytes(12).toString('hex')}`;
-    const subject = `Response form - ${thread.reference}`;
+    const subject = `Response form - ${thread.displayReference}`;
 
     await connection.execute(
       `INSERT INTO requisition_email_comments
@@ -138,7 +149,7 @@ router.post('/request-response/:token/comment', async (req, res, next) => {
         connection,
         manager.id,
         'Response comment received',
-        `${thread.reference}: ${comment.slice(0, 120)}`,
+        `${thread.displayReference}: ${comment.slice(0, 120)}`,
         link,
         'email'
       );

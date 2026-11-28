@@ -87,16 +87,16 @@ export default function SupervisorStock({ portalApi, initial = null, user = {} }
       user={reportUser}
       department={user.department || ''}
       scope="department stock items"
+      dateFilterFromToOnly
+      dateFilterContent={<>
+        {TABS.map((item) => <button key={item.value} type="button" onClick={() => setTab(item.value)}
+          className={`h-10 self-end rounded-lg px-3 text-[11px] font-bold transition ${tab === item.value ? 'border border-black bg-white text-black' : 'border border-brand bg-white text-black hover:border-black hover:text-black'}`}>
+          {item.label}
+        </button>)}
+      </>}
     />
-    <PageCard title="Department stock overview"
-      description="Read-only view of inventory available to your Department. Stock is managed by Procurement and Store teams.">
+    <PageCard>
       <FilterBar>
-        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-          {TABS.map((item) => <button key={item.value} type="button" onClick={() => setTab(item.value)}
-            className={`rounded-lg px-3 py-2 text-[11px] font-bold transition ${tab === item.value ? 'border border-black bg-white text-black' : 'border border-brand bg-white text-black hover:border-black hover:text-black'}`}>
-            {item.label}
-          </button>)}
-        </div>
         <SearchField value={search} onChange={setSearch} placeholder="SKU, name or category…" className="w-full sm:w-64" />
         <FilterField label="Category" className="w-full sm:w-48">
           <select value={category} onChange={(event) => setCategory(event.target.value)} className="field">

@@ -381,6 +381,7 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
 .official-approval-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; margin-top: 16px; border-top: 1px solid var(--pims-border); border-left: 1px solid var(--pims-border); }
 .official-approval-grid > div { min-height: 46px; padding: 6px 8px; border-right: 1px solid var(--pims-border); border-bottom: 1px solid var(--pims-border); }
 .official-signature-line { display: block; min-height: 14px; }
+.official-signature-image { display: block; max-width: 100%; height: 32px; object-fit: contain; object-position: left center; }
 
 .official-po-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; margin-bottom: 14px; }
 .official-po-field { display: grid; grid-template-columns: 33mm 1fr; gap: 6px; padding: 4px 0; }

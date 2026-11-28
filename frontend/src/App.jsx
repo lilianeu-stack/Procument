@@ -10,10 +10,10 @@ import RoleBasedDashboard from './components/portals/RoleBasedDashboard.jsx';
 import RequesterDashboard from './components/portals/RequesterDashboard.jsx';
 import PortalPlaceholder from './components/portals/PortalPlaceholder.jsx';
 import RequesterRequests from './components/portals/RequesterRequests.jsx';
-import CreatePurchaseRequest from './components/portals/CreatePurchaseRequest.jsx';
+import CreatePurchaseRequestModal from './components/portals/CreatePurchaseRequestModal.jsx';
 import PortalMessages from './components/portals/PortalMessages.jsx';
 import PortalNotifications from './components/portals/PortalNotifications.jsx';
-import PortalProfile from './components/portals/PortalProfile.jsx';
+import PortalProfileModal from './components/portals/PortalProfileModal.jsx';
 import SupervisorOverview from './components/portals/SupervisorOverview.jsx';
 import SupervisorRequesters from './components/portals/SupervisorRequesters.jsx';
 import SupervisorRequests from './components/portals/SupervisorRequests.jsx';
@@ -673,8 +673,14 @@ export default function App() {
   const shellProps = {
     user: displayUser,
     page: activePage,
-    hidePageHeading: portal === 'requester' && (activePage === dashboardPage
-      || activePage === 'My Procurement Requests' || activePage === 'My Request History'),
+    hidePageHeading: (portal === 'requester' && (activePage === dashboardPage
+      || activePage === 'My Procurement Requests' || activePage === 'My Request History'
+      || activePage === 'Create Purchase Request'))
+      || (portal === 'supervisor' && (
+        activePage === 'My Department'
+        || activePage === 'Procurement Requests'
+        || activePage === 'Stock Overview'
+      )),
     counts: sidebarCounts,
     notifications: data.notifications,
     refreshing: loading,
@@ -782,7 +788,7 @@ export default function App() {
         user={displayUser}
       />;
     } else if (activePage === 'Profile') {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
+      portalContent = <PortalProfileModal user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} onClose={() => navigatePage(dashboardPage)} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;
@@ -800,7 +806,7 @@ export default function App() {
         summary={data.portalSummary}
       />;
     } else if (activePage === 'Create Purchase Request') {
-      portalContent = <CreatePurchaseRequest portalApi={portalApi} query={route.query || {}} navigate={navigatePage} user={displayUser} />;
+      portalContent = <CreatePurchaseRequestModal portalApi={portalApi} query={route.query || {}} navigate={navigatePage} user={displayUser} />;
     } else if (activePage === 'Messages') {
       portalContent = <PortalMessages
         portal="requester"
@@ -819,7 +825,7 @@ export default function App() {
         navigate={navigatePage}
       />;
     } else if (activePage === PROFILE_PAGE) {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
+      portalContent = <PortalProfileModal user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} onClose={() => navigatePage(dashboardPage)} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;
@@ -859,7 +865,7 @@ export default function App() {
         navigate={navigatePage}
       />;
     } else if (activePage === PROFILE_PAGE) {
-      portalContent = <PortalProfile user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} />;
+      portalContent = <PortalProfileModal user={displayUser} summary={data.portalSummary} portal={portal} onUpdated={applyProfileUpdate} onClose={() => navigatePage(dashboardPage)} />;
     } else {
       portalContent = <PortalPlaceholder portal={portal} page={activePage} user={displayUser}
         summary={data.portalSummary} notifications={data.notifications} onNavigate={navigatePage} />;

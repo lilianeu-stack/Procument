@@ -5,10 +5,11 @@ import StatusBadge from '../ui/StatusBadge.jsx';
 import ReportToolbar from '../ui/ReportToolbar.jsx';
 import RequestDetail from './RequestDetail.jsx';
 import {
-  EmptyState, ErrorState, FilterBar, FilterField, LoadingState, Pagination,
+  EmptyState, ErrorState, FilterBar, LoadingState, Pagination,
   SearchField, TableScroll, TextLink
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 import { roleLabel } from '../../utils/access.js';
 import { REQUEST_STATUS_OPTIONS, normalizeStatus } from '../../utils/status.js';
 
@@ -34,13 +35,11 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
     from: query.from || '',
     to: query.to || '',
     dateField: query.dateField || REPORT.defaultField,
-    requesterId: query.requesterId || '',
     page: Number(query.page) || 1
   });
   const [result, setResult] = useState(initial);
   const [loading, setLoading] = useState(!initial);
   const [error, setError] = useState('');
-  const [requesters, setRequesters] = useState([]);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
@@ -57,20 +56,12 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
     } finally {
       setLoading(false);
     }
-  }, [portalApi, filters.search, filters.status, filters.from, filters.to, filters.dateField, filters.requesterId, filters.page]);
+  }, [portalApi, filters.search, filters.status, filters.from, filters.to, filters.dateField, filters.page]);
 
   useEffect(() => {
     const timer = window.setTimeout(load, 200);
     return () => window.clearTimeout(timer);
   }, [load]);
-
-  useEffect(() => {
-    let active = true;
-    portalApi.getRequesters()
-      .then((response) => { if (active) setRequesters(response.requesters || []); })
-      .catch(() => { if (active) setRequesters([]); });
-    return () => { active = false; };
-  }, [portalApi]);
 
   const loadDetail = useCallback(async () => {
     if (!requestId) { setDetail(null); return; }
@@ -102,6 +93,13 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
     }));
   }
 
+  function clearFilters() {
+    setFilters({
+      search: '', status: '', preset: '', from: '', to: '',
+      dateField: REPORT.defaultField, page: 1
+    });
+  }
+
   function openRequest(id) { navigate(PAGE, { ...query, request: id }); }
   function closeRequest() {
     const next = { ...query }; delete next.request; navigate(PAGE, next);
@@ -117,32 +115,26 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
       report={REPORT}
       dateFilter={filters}
       onDateFilterChange={updateDateFilter}
-      params={{ search: filters.search, status: filters.status, requesterId: filters.requesterId }}
+      params={{ search: filters.search, status: filters.status }}
       user={reportUser}
       department={user.department || ''}
       scope="department requisitions"
-    />
-    <PageCard title="Department procurement requests"
-      description="Every request raised by Requesters in your Department, with approval and procurement status.">
-      <FilterBar>
-        <SearchField value={filters.search} onChange={(value) => updateFilter('search', value)} placeholder="Reference, title, requester…" />
-        <FilterField label="Status" className="w-full sm:w-56">
-          <select value={filters.status} onChange={(event) => updateFilter('status', normalizeStatus(event.target.value))} className="field">
+      dateFilterFromToOnly
+      dateFilterContent={<>
+        <label className="block min-w-0">
+          <span className="block text-[10px] font-bold uppercase leading-4 tracking-[.08em] text-black">Status</span>
+          <select value={filters.status} onChange={(event) => updateFilter('status', normalizeStatus(event.target.value))} className="field mt-0">
             <option value="">All statuses</option>
             {REQUEST_STATUS_OPTIONS.map((status) => <option key={status}>{status}</option>)}
           </select>
-        </FilterField>
-        <FilterField label="Requester" className="w-full sm:w-48">
-          <select value={filters.requesterId} onChange={(event) => updateFilter('requesterId', event.target.value)} className="field">
-            <option value="">All requesters</option>
-            {requesters.map((requester) => <option key={requester.id} value={requester.id}>{requester.name}</option>)}
-          </select>
-        </FilterField>
-        {(filters.search || filters.status || filters.from || filters.to || filters.requesterId) &&
-          <button type="button" onClick={() => setFilters({
-            search: '', status: '', preset: '', from: '', to: '',
-            dateField: REPORT.defaultField, requesterId: '', page: 1
-          })}
+        </label>
+      </>}
+    />
+    <PageCard>
+      <FilterBar>
+        <SearchField value={filters.search} onChange={(value) => updateFilter('search', value)} placeholder="Reference, title, requester…" />
+        {(filters.search || filters.status || filters.from || filters.to) &&
+          <button type="button" onClick={clearFilters}
             className="mb-0.5 text-xs font-bold text-black hover:text-black">Clear filters</button>}
       </FilterBar>
 
@@ -153,13 +145,15 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
           <TableScroll minWidth={1160}>
             <table className="w-full text-left text-xs">
               <thead className="bg-white text-[10px] uppercase text-black">
-                <tr>{['Reference', 'Requester', 'Title', 'Submission date', 'Estimated cost', 'Priority', 'Approval status', 'Procurement status', 'Actions'].map((heading) =>
+                <tr>{['Reference', 'Requester', 'Title', 'Submission date', 'Estimated cost', 'Approval status', 'Actions'].map((heading) =>
                   <th key={heading} className="whitespace-nowrap px-4 py-3 font-bold">{heading}</th>)}</tr>
               </thead>
               <tbody className="divide-y divide-subtle">
                 {requisitions.map((request) => <tr key={request.id} className="hover:bg-white">
                   <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
-                    <TextLink onClick={() => openRequest(request.id)}>{request.reference}</TextLink>
+                    <TextLink onClick={() => openRequest(request.id)} title={requisitionDisplayReference(request)}>
+                      {requisitionDisplayReference(request)}
+                    </TextLink>
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div className="font-semibold">{request.requester}</div>
@@ -168,14 +162,9 @@ export default function SupervisorRequests({ portalApi, query = {}, navigate, in
                   <td className="min-w-[180px] px-4 py-3">{request.title}</td>
                   <td className="whitespace-nowrap px-4 py-3">{dateLabel(request.submittedAt || request.createdAt)}</td>
                   <td className="whitespace-nowrap px-4 py-3 font-bold">{currency(request.total)}</td>
-                  <td className="whitespace-nowrap px-4 py-3">{request.priority || 'Medium'}</td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div><StatusBadge value={request.status} /></div>
                     {request.supervisorDecision && <div className="mt-1 text-[10px] text-black">Decision: {request.supervisorDecision}</div>}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-black">
-                    {['Forwarded to Procurement', 'Under Procurement Review', 'Procurement Approved', 'Procurement Rejected', 'Processing', 'Completed'].includes(request.status)
-                      ? request.status : '—'}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <div className="flex items-center gap-3">

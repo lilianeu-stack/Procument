@@ -13,6 +13,7 @@ const NOISE_PATTERNS = [
   /^keep the subject line/i,
   /^reply (above|below) this line/i,
   /^message from procurement:\s*$/i,
+  /^sent by:\s/i,
   /^request:\s/i,
   /^title:\s/i,
   /^department:\s/i,
@@ -81,6 +82,27 @@ export function formatRwf(value) {
   })}`;
 }
 
+const SENDER_SIGNATURE_CID = 'requisition-sender-signature';
+
+export function inlineSignatureImage(value, cid = 'sender-signature', filename = 'signature') {
+  const raw = typeof value === 'string' ? value : value?.data;
+  const match = /^data:image\/(jpeg|png|webp);base64,([\s\S]+)$/i.exec(String(raw || ''));
+  if (!match) return [];
+  const content = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!content.length) return [];
+  const format = match[1].toLowerCase();
+  return [{
+    cid,
+    contentType: `image/${format}`,
+    filename: `${filename}.${format === 'jpeg' ? 'jpg' : format}`,
+    content
+  }];
+}
+
+function senderSignatureImage(value) {
+  return inlineSignatureImage(value, SENDER_SIGNATURE_CID, 'sender-signature');
+}
+
 function lineTotal(item) {
   if (item.lineTotal !== undefined && item.lineTotal !== null) return Number(item.lineTotal);
   return Number(item.quantity) * Number(item.estimatedUnitCost);
@@ -89,6 +111,7 @@ function lineTotal(item) {
 export function buildRequestedItemsEmail({
   requisitionId, reference, title, department, requester, recipientPhone,
   items = [], token, message = '', responseUrl = '',
+  senderName = '', senderSignature = '',
   subject = null, greeting = '', details = null, noteLabel = 'Message from Procurement:',
   responseLabel = 'Add a comment / respond online',
   responseIntro = 'Open this link, write your comment and submit it',
@@ -118,12 +141,15 @@ export function buildRequestedItemsEmail({
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
   const note = String(message || '').trim();
+  const sender = String(senderName || '').trim();
+  const inlineImages = senderSignatureImage(senderSignature);
 
   const itemHeader = includeDescription
     ? 'Item | Description | Quantity | Unit price | Total'
     : 'Item | Quantity | Unit price | Total';
   const textLines = [
     greeting || null,
+    sender ? `Sent by: ${sender}` : null,
     `Request: ${reference}`,
     `Title: ${title || '—'}`,
     ...detailRows.map(([label, value]) => `${label}: ${value || '—'}`),
@@ -173,6 +199,11 @@ export function buildRequestedItemsEmail({
     ? `<tfoot><tr><td colspan="${totalLabelColumns}" style="padding:12px;text-align:right;font-weight:bold">Grand total</td>
         <td style="padding:12px;text-align:right;font-weight:bold;color:#123d3a">${escapeHtml(formatRwf(total))}</td></tr></tfoot>`
     : '';
+  const senderHtml = (sender || inlineImages.length) ? `<div style="margin:18px 0 0;padding:14px;border:1px solid #cbd5e1;border-radius:8px">
+      <p style="margin:0 0 4px;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:.06em;color:#64748b">Sent by</p>
+      <p style="margin:0;font-size:13px;font-weight:bold;color:#172a39">${escapeHtml(sender || '—')}</p>
+      ${inlineImages.length ? `<img src="cid:${SENDER_SIGNATURE_CID}" alt="Sender signature" style="display:block;max-width:240px;max-height:80px;margin-top:8px" />` : ''}
+    </div>` : '';
 
   const html = `<!doctype html><html><body style="margin:0;background:#f4f7f6;padding:24px;font-family:Arial,sans-serif;color:#172a39">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:760px;margin:auto;background:#fff;border-radius:12px;overflow:hidden">
@@ -183,6 +214,7 @@ export function buildRequestedItemsEmail({
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">
           ${detailRows.map(([label, value]) => `<tr><td style="padding:4px 0;color:#64748b">${escapeHtml(label)}</td><td style="padding:4px 0;font-weight:bold">${escapeHtml(value || '—')}</td></tr>`).join('')}
         </table>
+        ${senderHtml}
         ${note ? `<p style="margin:18px 0;padding:12px;background:#f8fafc;border-left:3px solid #123d3a;font-size:13px"><strong>${escapeHtml(noteLabel)}</strong><br>${escapeHtml(note).replace(/\n/g, '<br>')}</p>` : ''}
         <h2 style="font-size:14px;margin:24px 0 8px;text-transform:uppercase;letter-spacing:.06em">Requested items</h2>
         <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px">
@@ -202,5 +234,5 @@ export function buildRequestedItemsEmail({
       </td></tr>
     </table></body></html>`;
 
-  return { subject: subjectLine, text: textLines, html };
+  return { subject: subjectLine, text: textLines, html, inlineImages };
 }

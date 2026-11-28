@@ -8,6 +8,7 @@ import {
 import { RFQForm, emailResultNotice } from '../../pages/RfqsPage.jsx';
 import { currency, dateTimeLabel } from '../../utils/format.js';
 import { RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 export default function ProcurementProcessingPage({ data, query = {}, actions, portalApi, navigate }) {
   const requestId = Number(query.request || query.view);
@@ -70,7 +71,7 @@ export default function ProcurementProcessingPage({ data, query = {}, actions, p
       <button type="button" onClick={backToDocument} className={secondaryButtonClass()}>Back to Received Requests</button>
     </> : null}
 
-    {request ? <PageCard title={`Processing ${request.reference}`} description={request.title}>
+    {request ? <PageCard title={`Processing ${requisitionDisplayReference(request)}`} description={request.title}>
       <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
         <KeyValue label="Department">{request.department || '—'}</KeyValue>
         <KeyValue label="Request status"><StatusBadge value={request.status} /></KeyValue>

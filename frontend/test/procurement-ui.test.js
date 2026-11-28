@@ -77,11 +77,7 @@ test('official purchase order follows the supplied template and requires image s
   assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
 });
 
-<<<<<<< HEAD
-test('official purchase order uses the supplied design palette with large signatures', () => {
-=======
 test('official purchase order document uses the supplied design palette with large signatures', () => {
->>>>>>> origin/master
   const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
   const css = source('../src/index.css');
 
@@ -335,11 +331,167 @@ test('Invoices is absent from the shared sidebar for all roles', () => {
   assert.doesNotMatch(sidebar, /name === 'Invoices'/);
 });
 
+test('Requester purchase form hides its page heading and requested optional sections', () => {
+  const form = source('../src/components/portals/CreatePurchaseRequest.jsx');
+  const app = source('../src/App.jsx');
+
+  assert.match(app, /activePage === 'Create Purchase Request'/);
+  assert.doesNotMatch(form, /PageHeader|Describe what your Department needs/);
+  assert.doesNotMatch(form, /Budget code \*|<KeyValue label="Budget code">|budgetCode/);
+  assert.doesNotMatch(form, /Priority\s*<select|<KeyValue label="Priority">|priority/);
+  assert.match(form, /Requested date/);
+  assert.doesNotMatch(form, /Required by/);
+  assert.doesNotMatch(form, /PageCard title="Authorization"|Requested by|Approved by/);
+  assert.doesNotMatch(form, /Supporting documents|AttachmentPicker|Attachments \(/);
+});
+
+test('Requester request register keeps controls without descriptive text above them', () => {
+  const requests = source('../src/components/portals/RequesterRequests.jsx');
+  const toolbar = source('../src/components/ui/ReportToolbar.jsx');
+
+  assert.doesNotMatch(requests, /requests-date|requests-title|requests-context/);
+  assert.doesNotMatch(requests, /Search register|Track every request/);
+  assert.doesNotMatch(toolbar, /Filter the report, then print or download/);
+});
+
+test('My Department hides the heading above department cards', () => {
+  const app = source('../src/App.jsx');
+  const overview = source('../src/components/portals/SupervisorOverview.jsx');
+
+  assert.match(app, /portal === 'supervisor' && \([\s\S]*?activePage === 'My Department'[\s\S]*?activePage === 'Procurement Requests'/);
+  assert.doesNotMatch(overview, /eyebrow="Department"|title="My Department"|Details of your assigned Department/);
+  assert.match(overview, /View all Requesters/);
+});
+
+test('Supervisor sidebar hides Requesters and the Procurement section title', () => {
+  const sidebar = source('../src/components/portals/SupervisorSidebar.jsx');
+
+  assert.doesNotMatch(sidebar, /SUPERVISOR_PAGES\[3\]/);
+  assert.match(sidebar, /name: SUPERVISOR_PAGES\[4\], label: 'Requests'/);
+  assert.doesNotMatch(sidebar, /section: 'PROCUREMENT'/);
+  const workspace = sidebar.slice(sidebar.indexOf("section: 'SUPERVISOR WORKSPACE'"), sidebar.indexOf("section: 'COMMUNICATION'"));
+  assert.match(workspace, /name: SUPERVISOR_PAGES\[2\][\s\S]*name: SUPERVISOR_PAGES\[4\]/);
+});
+
+test('Supervisor Stock Overview hides headings and reduces date filters to From and To', () => {
+  const app = source('../src/App.jsx');
+  const stock = source('../src/components/portals/SupervisorStock.jsx');
+  const dateFilter = source('../src/components/ui/DateRangeFilter.jsx');
+
+  assert.match(app, /activePage === 'Stock Overview'/);
+  assert.match(stock, /dateFilterFromToOnly/);
+  assert.match(stock, /dateFilterContent=\{<>[\s\S]*TABS\.map/);
+  assert.match(stock, /Available Stock[\s\S]*Low Stock[\s\S]*Out of Stock/);
+  assert.doesNotMatch(stock, /<PageCard title="Department stock overview"|Read-only view of inventory available/);
+  assert.match(dateFilter, /xl:grid-cols-6/);
+});
+
+test('Supervisor request filters keep Status next to dates and remove the card heading and Requester filter', () => {
+  const requests = source('../src/components/portals/SupervisorRequests.jsx');
+
+  assert.match(requests, /dateFilterFromToOnly/);
+  assert.match(requests, /dateFilterContent=\{<>[\s\S]*>Status<\/span>/);
+  assert.doesNotMatch(requests, />Requester<\/span>|All requesters|getRequesters|filters\.requesterId/);
+  assert.doesNotMatch(requests, /Department procurement requests|Every request raised by Requesters/);
+  const filterBarStart = requests.indexOf('<FilterBar>');
+  const filterBarEnd = requests.indexOf('</FilterBar>', filterBarStart);
+  const cardFilters = requests.slice(filterBarStart, filterBarEnd);
+  assert.match(cardFilters, /<SearchField/);
+  assert.doesNotMatch(cardFilters, /Status|Requester/);
+});
+
+test('requisition details use the HHR reference and requested-at details everywhere', () => {
+  const detail = source('../src/components/portals/RequestDetail.jsx');
+  const documentView = source('../src/components/portals/ProcurementDocumentView.jsx');
+  const officialForm = source('../src/components/documents/MaterialRequestDocument.jsx');
+  const register = source('../src/components/portals/RequesterRequests.jsx');
+
+  assert.match(detail, /requisitionDisplayReference\(requisition\)/);
+  assert.match(detail, /<KeyValue label="Requested At">/);
+  assert.doesNotMatch(detail, /label="Priority"/);
+  assert.doesNotMatch(detail, /label="Budget code"/);
+  assert.doesNotMatch(detail, /label="Decision at"/);
+  assert.doesNotMatch(detail, /label="Required by"/);
+
+  assert.match(documentView, /requisitionDisplayReference\(request\)/);
+  assert.doesNotMatch(documentView, /label="Priority"/);
+  assert.doesNotMatch(documentView, /label="Budget code"/);
+  assert.doesNotMatch(documentView, /label="Decision date"/);
+  assert.match(documentView, /label="Requested At"/);
+
+  assert.match(officialForm, /requisitionDisplayReference\(requisition\)/);
+  assert.match(officialForm, /Requested At:/);
+
+  assert.match(register, /requisitionDisplayReference\(request\)/);
+});
+
+test('request view hides attachments and activity history in every portal', () => {
+  const detail = source('../src/components/portals/RequestDetail.jsx');
+
+  assert.doesNotMatch(detail, /DetailSection title=\{`Attachments/);
+  assert.doesNotMatch(detail, /Approval & activity history/);
+  assert.doesNotMatch(detail, /ActivityTimeline/);
+  assert.doesNotMatch(detail, /AttachmentList/);
+  assert.match(detail, /AttachmentPicker/);
+});
+
+test('Supervisor approval provides a signature uploader and Approved by field below items', () => {
+  const detail = source('../src/components/portals/RequestDetail.jsx');
+  const official = source('../src/components/documents/MaterialRequestDocument.jsx');
+
+  const itemsStart = detail.indexOf('<DetailSection title={`Items');
+  const itemsEnd = detail.indexOf('</DetailSection>', itemsStart);
+  const itemsSection = detail.slice(itemsStart, itemsEnd);
+  assert.match(itemsSection, /Approved by/);
+  assert.match(itemsSection, /<SignatureUpload/);
+  assert.match(detail, /signature: approvalSignature/);
+  assert.match(official, /requisition\.supervisorSignature/);
+});
+
+test('Requester register hides current status and procurement status columns', () => {
+  const requests = source('../src/components/portals/RequesterRequests.jsx');
+
+  assert.doesNotMatch(requests, /Current status/);
+  assert.doesNotMatch(requests, /Procurement status/);
+  assert.doesNotMatch(requests, /procurementStatus/);
+  assert.match(requests, /'Supervisor decision'\]/);
+});
+
+test('Supervisor request register hides Priority and Procurement status columns', () => {
+  const requests = source('../src/components/portals/SupervisorRequests.jsx');
+
+  assert.doesNotMatch(requests, /'Priority'/);
+  assert.doesNotMatch(requests, /request\.priority/);
+  assert.doesNotMatch(requests, /'Procurement status'/);
+  assert.doesNotMatch(requests, /Under Procurement Review.*includes/);
+});
+
+test('Requester report places search and status beside date range without date type or preset', () => {
+  const requests = source('../src/components/portals/RequesterRequests.jsx');
+  const dateFilter = source('../src/components/ui/DateRangeFilter.jsx');
+
+  assert.match(requests, /dateFilterFromToOnly/);
+  assert.match(requests, /dateFilterContent=\{<>[\s\S]*>Status<\/span>[\s\S]*New Request/);
+  const cardStart = requests.indexOf('<PageCard');
+  const cardEnd = requests.indexOf('<ErrorState message={error}', cardStart);
+  const cardContent = requests.slice(cardStart, cardEnd);
+  assert.match(cardContent, /<SearchField/);
+  assert.doesNotMatch(cardContent, /New Request/);
+  assert.match(dateFilter, /children \? 'xl:grid-cols-6' : ''/);
+});
+
 test('received-request and RFQ registers keep their tools without top summary cards', () => {
   const received = source('../src/components/portals/ReceivedRequests.jsx');
   const rfqs = source('../src/pages/RfqsPage.jsx');
+  const dateFilter = source('../src/components/ui/DateRangeFilter.jsx');
   assert.doesNotMatch(received, /SUMMARY_CARDS|aria-label="Received request summary"/);
-  assert.match(received, /Received requests register/);
+  assert.doesNotMatch(received, /Requests Received from Departments/);
+  assert.doesNotMatch(received, /Review and manage procurement requests formally forwarded/);
+  assert.doesNotMatch(received, /Received requests register/);
+  assert.doesNotMatch(received, /title="Requests register"/);
+  assert.doesNotMatch(received, /Only complete requests explicitly forwarded/);
+  assert.match(received, /grid grid-cols-3 gap-3/);
+  assert.match(received, /col-span-2 w-full min-w-0/);
   assert.match(received, /<DateRangeFilter\s+fromToOnly/);
   assert.match(received, /label="Search request"/);
   assert.match(received, /placeholder="Search request"/);
@@ -354,10 +506,16 @@ test('received-request and RFQ registers keep their tools without top summary ca
   assert.match(rfqs, /Create RFQ/);
   assert.match(rfqs, /Filter by response/);
   assert.match(rfqs, /RFQ status/);
+  assert.match(rfqs, /dateFilterFromToOnly/);
+  assert.match(rfqs, /dateFilterContent=\{<>[\s\S]*RFQ status[\s\S]*Filter by response/);
+  assert.doesNotMatch(rfqs, /<div className="mb-4 grid gap-3 sm:grid-cols-2 sm:justify-end">/);
+  assert.match(dateFilter, /fromToOnly = false/);
 });
 
 test('add supplier form does not ask for a contact person', () => {
   const suppliers = source('../src/pages/SuppliersPage.jsx');
+  const layout = source('../src/components/layout/AppLayout.jsx');
+  const pageContent = source('../src/pages/PageContent.jsx');
   assert.match(suppliers, /Supplier name/);
   assert.match(suppliers, /Email/);
   assert.match(suppliers, /Phone/);
@@ -366,6 +524,9 @@ test('add supplier form does not ask for a contact person', () => {
   assert.match(suppliers, /'Address'/);
   assert.doesNotMatch(suppliers, /Contact person/);
   assert.doesNotMatch(suppliers, /contactName: ''/);
+  assert.match(layout, /page !== 'Suppliers' && page !== 'Purchase orders'/);
+  assert.doesNotMatch(layout, /Search suppliers/);
+  assert.match(pageContent, /dateFilterFromToOnly=\{page === 'Suppliers'\}/);
 });
 
 test('supplier directory hides rating and status columns and wires edit and safe removal', () => {
@@ -433,17 +594,21 @@ test('public response forms show a single submitted response instead of an edita
   assert.match(requestPage, /\{request\.message && <section/);
   assert.match(requestPage, /Message from Procurement/);
   assert.match(requestPage, /\{request\.message\}/);
+  assert.match(requestPage, /request\.senderName \|\| request\.senderSignature/);
+  assert.match(requestPage, /Sent by/);
+  assert.match(requestPage, /request\.senderSignature/);
 });
 
 test('Procurement can resend a working response link for an already-sent form', () => {
   const documentView = source('../src/components/portals/ProcurementDocumentView.jsx');
   const app = source('../src/App.jsx');
 
-  assert.match(documentView, /Sent response forms \(\$\{sentForms\.length\}\)/);
-  assert.match(documentView, /Resend working link/);
+  assert.match(documentView, /<Link2 size=\{14\} \/>Response links/);
+  assert.match(documentView, /<Modal title="Response links"/);
   assert.match(documentView, /portalApi\.resendRequisitionForm\(id, threadId\)/);
-  assert.match(documentView, /await portalApi\.getRequisitionForms\(id\)/);
-  assert.match(documentView, /localhost link\. Resend a form/);
+  assert.match(documentView, /const forms = await portalApi\.getRequisitionForms\(id\)/);
+  assert.match(documentView, /form\.responseUrl/);
+  assert.match(documentView, /opens the requested items and response form on any phone, tablet or computer/);
   assert.match(app, /getRequisitionForms: \(id\) => api\(`\/email\/requisitions\/\$\{id\}\/forms`\)/);
   assert.match(app, /resendRequisitionForm: \(id, threadId\) => mutate\(`\/email\/requisitions\/\$\{id\}\/forms\/\$\{threadId\}\/resend`, \{\}\)/);
 });
@@ -460,9 +625,23 @@ test('forwarded request can send requested items to another user', () => {
   assert.match(documentView, /portalApi\.sendRequisitionEmail\(id, \{/);
   assert.match(documentView, /to: recipientEmail/);
   assert.match(documentView, /recipientPhone: recipientPhone\.trim\(\)/);
+  assert.match(documentView, /senderName: senderName\.trim\(\)/);
+  assert.match(documentView, /senderSignature/);
+  assert.match(documentView, /<SignatureUpload/);
+  assert.match(documentView, /Your name \*/);
   assert.match(documentView, /message: senderNote\.trim\(\)/);
+  assert.match(documentView, /!senderName\.trim\(\) \|\| !senderSignature/);
   assert.match(documentView, /\{busy \? 'Sending…' : 'Send by email'\}/);
-  assert.match(documentView, /Sent response forms \(\$\{sentForms\.length\}\)/);
+
+  const modalStart = documentView.indexOf('<Modal title="Send requested items to another user"');
+  const modal = documentView.slice(modalStart, documentView.indexOf('</Modal>', modalStart));
+  const itemsAt = modal.indexOf('<Section title={`Requested items');
+  const nameAt = modal.indexOf('Your name *');
+  const messageAt = modal.indexOf('Message to recipient (optional)');
+  assert.ok(itemsAt > -1 && nameAt > itemsAt && messageAt > nameAt,
+    'name, signature and message must appear below the requested items table');
+
+  assert.match(documentView, /<Link2 size=\{14\} \/>Response links/);
   assert.match(app, /sendRequisitionEmail: \(id, payload\) => api\(`\/email\/requisitions\/\$\{id\}\/send`, \{ method: 'POST', body: JSON\.stringify\(payload\) \}\)/);
 });
 
@@ -489,6 +668,16 @@ test('page containers fill the available width and stay left aligned everywhere'
     assert.match(page, /w-full max-w-none/);
     assert.doesNotMatch(page, /mx-auto[^"]*max-w-(?:5|6)xl/);
   }
+});
+
+test('signature replacement stays inside the upload box and sits under the image', () => {
+  const upload = source('../src/components/ui/SignatureUpload.jsx');
+
+  assert.match(upload, /className="flex min-h-\[64px\] min-w-0 items-center"/);
+  assert.match(upload, /className="max-h-16 max-w-full object-contain"/);
+  assert.match(upload, /<button type="button" disabled=\{disabled \|\| busy\}/);
+  assert.match(upload, /className="mt-2 inline-flex items-center gap-1\.5 rounded-lg border border-brand/);
+  assert.doesNotMatch(upload, /ml-auto/);
 });
 
 test('date range filter can show only From and To inputs', () => {
@@ -524,4 +713,28 @@ test('Goods receipts page exposes only the role-gated supplier Create GRN action
   // Stock receipts stay on the purchase-order workflow; Stock overview no
   // longer exposes a second stock-moving form.
   assert.doesNotMatch(inventory, /GoodsReceiptForm|onReceive|Record receipt/);
+});
+
+test('Create RFQ includes the Procurement signature in the supplier email and form', () => {
+  const rfqs = source('../src/pages/RfqsPage.jsx');
+  const supplierForm = source('../src/components/portals/SupplierRfqPage.jsx');
+  assert.match(rfqs, /<SignatureUpload label="Procurement signature"/);
+  assert.match(rfqs, /Upload a Procurement signature to include with the supplier emails/);
+  assert.match(rfqs, /senderSignature,/);
+  assert.match(supplierForm, /Sent by/);
+  assert.match(supplierForm, /rfq\.senderSignature/);
+});
+
+test('Email Inbox refreshes incoming mail automatically', () => {
+  const inbox = source('../src/pages/EmailInboxPage.jsx');
+  const server = source('../../backend/src/server.js');
+  // The backend owns mailbox syncing. The page reads the stored messages so a
+  // temporary Gmail failure cannot replace the visible inbox with an error.
+  assert.match(server, /inboxSyncTimer = setInterval\(\(\) => \{ void runInboxSync\(\); \}, intervalMs\)/);
+  const mountEffect = /useEffect\(\(\) => \{([\s\S]*?)\}, \[\]\);/.exec(inbox)?.[1] || '';
+  assert.match(mountEffect, /void loadInbox\(\)/);
+  assert.doesNotMatch(mountEffect, /syncInbox/);
+  assert.match(inbox, /window\.setInterval\(\(\) => \{ void loadInbox\(\); \}, 30000\)/);
+  assert.match(inbox, /window\.clearInterval\(interval\)/);
+  assert.match(inbox, /Showing the most recently synced messages/);
 });

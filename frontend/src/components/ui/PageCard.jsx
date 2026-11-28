@@ -3,13 +3,13 @@ export default function PageCard({ title, description, action, children, surface
   // keeping the card itself pure white like every other panel.
   const surfaceClass = surface === 'card' ? 'bg-white shadow-dashboard' : 'bg-white';
   return <section className={`overflow-hidden rounded-2xl border border-brand ${surfaceClass} ${className}`}>
-    <header className={`flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-5 ${professional ? 'py-5 sm:px-6' : 'py-4'}`}>
-      <div>
-        <h2 className={professional ? 'display-font text-base font-extrabold tracking-tight' : 'text-sm font-bold'}>{title}</h2>
+    {(title || description || action) && <header className={`flex flex-wrap items-center justify-between gap-3 border-b border-subtle px-5 ${professional ? 'py-5 sm:px-6' : 'py-4'}`}>
+      {(title || description) && <div>
+        {title && <h2 className={professional ? 'display-font text-base font-extrabold tracking-tight' : 'text-sm font-bold'}>{title}</h2>}
         {description && <p className="mt-1 text-xs text-black">{description}</p>}
-      </div>
+      </div>}
       {action}
-    </header>
+    </header>}
     {children}
   </section>;
 }

@@ -88,7 +88,7 @@ export default function SupplierRfqPage({ token }) {
       {!loading && rfq && <form onSubmit={submit} className="space-y-5">
         <PublicPrintToolbar
           title="Supplier quotation form"
-          reference={`${rfq.requisitionReference} · RFQ ${rfq.reference}`}
+          reference={`${rfq.requisitionDisplayReference || rfq.requisitionReference} · RFQ ${rfq.reference}`}
           label="Print quotation form"
           note="Print the signed-link RFQ and your submitted prices for your records."
         />
@@ -96,7 +96,7 @@ export default function SupplierRfqPage({ token }) {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-black">Requested items form</p>
-              <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{rfq.requisitionReference}</h1>
+              <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{rfq.requisitionDisplayReference || rfq.requisitionReference}</h1>
               <p className="mt-1 text-sm text-black">RFQ {rfq.reference} · {rfq.title || 'Procurement request'}</p>
             </div>
             <div className="rounded-lg bg-slate-50 px-4 py-3 text-right text-xs">
@@ -108,6 +108,11 @@ export default function SupplierRfqPage({ token }) {
           {rfq.message && <div className="mt-5 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-5 shadow-sm">
             <strong className="block text-sm font-extrabold uppercase tracking-wide text-black">Message from Procurement</strong>
             <p className="mt-2 whitespace-pre-wrap text-base font-bold leading-relaxed text-black">{rfq.message}</p>
+          </div>}
+          {(rfq.senderName || rfq.senderSignature) && <div className="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <strong className="block text-xs font-extrabold uppercase tracking-wide text-black">Sent by</strong>
+            <p className="mt-2 text-sm font-bold text-black">{rfq.senderName || 'Hope Haven Procurement'}</p>
+            {rfq.senderSignature && <img src={rfq.senderSignature} alt="Procurement signature" className="mt-3 max-h-20 max-w-full object-contain" />}
           </div>}
         </section>
 

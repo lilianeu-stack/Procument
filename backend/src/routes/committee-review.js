@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import { requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const router = Router();
 const TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
@@ -47,6 +48,11 @@ async function loadReview(token, connection = pool) {
         r.submitted_at AS submittedAt,
         f.reference, f.issued_at AS issuedAt, f.due_date AS dueDate, f.message,
         q.id AS requisitionId, q.reference AS requisitionReference, q.title,
+        q.submitted_at AS requisitionSubmittedAt, q.created_at AS requisitionCreatedAt,
+        (SELECT COUNT(*) FROM requisitions rr
+          WHERE rr.requester_id = q.requester_id
+            AND rr.department_id <=> q.department_id
+            AND rr.id <= q.id) AS departmentSequence,
         d.name AS department
        FROM rfq_committee_reviews r
        JOIN rfqs f ON f.id = r.rfq_id
@@ -100,6 +106,11 @@ function reviewPayload(review) {
     rfqId: review.rfqId,
     reference: review.reference,
     requisitionReference: review.requisitionReference,
+    requisitionDisplayReference: requisitionDisplayReference({
+      submittedAt: review.requisitionSubmittedAt,
+      createdAt: review.requisitionCreatedAt,
+      departmentSequence: review.departmentSequence
+    }),
     title: review.title,
     department: review.department || null,
     message: review.message || '',

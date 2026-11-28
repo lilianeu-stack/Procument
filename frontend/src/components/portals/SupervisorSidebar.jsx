@@ -1,6 +1,6 @@
 import {
   Bell, Boxes, Building2, ClipboardList, LayoutDashboard,
-  MessageSquare, UserRound, UsersRound
+  MessageSquare, UserRound
 } from 'lucide-react';
 import PortalSidebarFrame from './PortalSidebarFrame.jsx';
 import { SUPERVISOR_PAGES } from '../../utils/access.js';
@@ -9,10 +9,7 @@ const groups = [
   { section: 'SUPERVISOR WORKSPACE', links: [
     { name: SUPERVISOR_PAGES[0], icon: LayoutDashboard },
     { name: SUPERVISOR_PAGES[2], icon: Building2 },
-    { name: SUPERVISOR_PAGES[3], icon: UsersRound }
-  ] },
-  { section: 'PROCUREMENT', links: [
-    { name: SUPERVISOR_PAGES[4], icon: ClipboardList },
+    { name: SUPERVISOR_PAGES[4], label: 'Requests', icon: ClipboardList },
     { name: SUPERVISOR_PAGES[6], icon: Boxes }
   ] },
   { section: 'COMMUNICATION', links: [

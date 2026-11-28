@@ -47,7 +47,13 @@ export default function EmailInboxPage({ actions, query = {} }) {
     }
   }
 
-  useEffect(() => { void loadInbox(); }, []);
+  useEffect(() => {
+    // The backend already syncs the mailbox on a timer. Reading the stored
+    // messages keeps the inbox open even when Gmail is temporarily unreachable.
+    void loadInbox();
+    const interval = window.setInterval(() => { void loadInbox(); }, 30000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function connect() {
     setBusy('connect');
@@ -73,7 +79,9 @@ export default function EmailInboxPage({ actions, query = {} }) {
       setNotice(`Inbox sync complete. ${result.synced} recent message(s) checked.${linked}`);
       await loadInbox();
     } catch (exception) {
-      setError(exception.message || 'Inbox sync failed.');
+      // Keep the last synced messages visible; a provider outage must not hide
+      // the mailbox that staff already have on screen.
+      setNotice(`${exception.message || 'Inbox sync failed.'} Showing the most recently synced messages.`);
     } finally {
       setBusy('');
     }
@@ -193,7 +201,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
                 </span>
                 <span className="mt-1 block truncate text-xs font-bold">{message.subject}</span>
                 {message.requisitionReference && <span className="mt-1 inline-block rounded bg-brand-light px-2 py-0.5 text-[10px] font-bold text-black">
-                  Comment · {message.requisitionReference}
+                  Comment · {message.requisitionDisplayReference || message.requisitionReference}
                 </span>}
                 <span className="mt-1 block line-clamp-2 text-[11px] text-black">{message.snippet}</span>
                 <span className="mt-2 block text-[10px] text-black">{displayDate(message.receivedAt)}</span>
@@ -212,7 +220,7 @@ export default function EmailInboxPage({ actions, query = {} }) {
           </dl>
           {selected.comment && <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
             <div className="text-[11px] font-extrabold text-black">
-              Recipient comment linked to {selected.requisitionReference || 'a request'}
+              Recipient comment linked to {selected.requisitionDisplayReference || selected.requisitionReference || 'a request'}
             </div>
             <p className="mt-1 whitespace-pre-wrap text-xs leading-6 text-black">{selected.comment}</p>
           </div>}

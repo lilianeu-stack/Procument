@@ -98,7 +98,11 @@ test('portal roles can only open pages in their own portal', () => {
 
 test('public requisition response links remain outside the staff portals', () => {
   const token = 'a'.repeat(32);
-  const route = parseRoute(`#/response?token=${token}`);
+  const legacyRoute = parseRoute(`#/response?token=${token}`);
+  assert.equal(legacyRoute.portal, PORTALS.RESPONSE);
+  assert.equal(legacyRoute.query.token, token);
+
+  const route = readRouteFromLocation({ pathname: `/response/${token}`, search: '', hash: '' });
   assert.equal(route.portal, PORTALS.RESPONSE);
   assert.equal(route.query.token, token);
   assert.equal(defaultPageForPortal(PORTALS.RESPONSE), 'Response');

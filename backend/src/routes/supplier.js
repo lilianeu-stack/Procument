@@ -3,20 +3,66 @@ import { timingSafeEqual } from 'node:crypto';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
 import { log } from '../lib/logger.js';
+import { findSentToken } from '../services/google-email.js';
 import { markRfqLinkOpened } from '../services/rfq-email.js';
 import { normalizeEmail, validEmail } from '../utils/email-config.js';
-import { parseRfqToken } from '../utils/rfq-link.js';
+import { extractRfqIdentity, hashRfqToken, parseRfqToken } from '../utils/rfq-link.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const router = Router();
 const OPEN_STATUSES = ['Sent', 'Evaluating'];
 
+async function recoverLegacyRfqToken(token) {
+  const identity = extractRfqIdentity(token);
+  if (!identity) return null;
+  // The payload is untrusted until Gmail proves the exact token was sent. Even
+  // then the RFQ and its invited supplier must still exist before this token is
+  // cached; otherwise a stale link must fail cleanly instead of breaking on a
+  // foreign key.
+  const [[pair]] = await pool.execute(
+    `SELECT 1 FROM rfq_suppliers fs
+       JOIN rfqs f ON f.id = fs.rfq_id
+       JOIN suppliers s ON s.id = fs.supplier_id
+      WHERE fs.rfq_id = ? AND fs.supplier_id = ? LIMIT 1`,
+    [identity.rfqId, identity.supplierId]
+  );
+  if (!pair) return null;
+  const tokenHash = hashRfqToken(token);
+  const [[cached]] = await pool.execute(
+    `SELECT rfq_id AS rfqId, supplier_id AS supplierId
+       FROM rfq_link_tokens WHERE token_hash = ? LIMIT 1`,
+    [tokenHash]
+  );
+  if (cached) {
+    return { rfqId: Number(cached.rfqId), supplierId: Number(cached.supplierId) };
+  }
+  let sentByMailbox = false;
+  try {
+    sentByMailbox = await findSentToken(token);
+  } catch (error) {
+    log('WARN', `Could not verify a legacy RFQ link against sent mail: ${error.message}`);
+    return null;
+  }
+  if (!sentByMailbox) return null;
+  await pool.execute(
+    `INSERT INTO rfq_link_tokens (token_hash, rfq_id, supplier_id)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE rfq_id = VALUES(rfq_id), supplier_id = VALUES(supplier_id)`,
+    [tokenHash, identity.rfqId, identity.supplierId]
+  );
+  return identity;
+}
+
 async function invitedRfq(token) {
-  const identity = parseRfqToken(token);
+  let identity = parseRfqToken(token);
+  if (!identity) identity = await recoverLegacyRfqToken(token);
   if (!identity) return { error: 404, message: 'This quotation link is invalid or has expired.' };
   const [rows] = await pool.execute(
     `SELECT f.id, f.reference, f.due_date AS dueDate, f.status,
        f.instructions, f.terms, f.message,
+       f.sender_name AS senderName, f.sender_signature AS senderSignature,
        r.id AS requisitionId, r.reference AS requisitionReference, r.title,
+       ${REQUISITION_DISPLAY_SQL},
        r.priority, r.required_by AS requiredBy,
        s.id AS supplierId, s.name AS supplierName, s.contact_name AS contactName
      FROM rfqs f
@@ -82,7 +128,10 @@ router.get('/supplier/rfq/:token', async (req, res, next) => {
         instructions: rfq.instructions || '',
         terms: rfq.terms || '',
         message: rfq.message || '',
+        senderName: rfq.senderName || '',
+        senderSignature: rfq.senderSignature || null,
         requisitionReference: rfq.requisitionReference,
+        requisitionDisplayReference: requisitionDisplayReference(rfq),
         title: rfq.title,
         priority: rfq.priority,
         requiredBy: rfq.requiredBy,

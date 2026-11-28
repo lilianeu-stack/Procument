@@ -114,7 +114,7 @@ export default function CommitteeReviewPage({ token }) {
           <h1 className="display-font mt-1 text-2xl font-extrabold text-black">{review.reference}</h1>
           <p className="mt-1 text-sm text-black">{review.title || 'Supplier response review'}</p>
           <div className="mt-5 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-lg border p-3"><span className="block text-black">Requisition</span><strong className="mt-1 block">{review.requisitionReference || '—'}</strong></div>
+            <div className="rounded-lg border p-3"><span className="block text-black">Requisition</span><strong className="mt-1 block">{review.requisitionDisplayReference || review.requisitionReference || '—'}</strong></div>
             <div className="rounded-lg border p-3"><span className="block text-black">Department</span><strong className="mt-1 block">{review.department || '—'}</strong></div>
             <div className="rounded-lg border p-3"><span className="block text-black">Form sent</span><strong className="mt-1 block">{dateTimeLabel(review.sentAt)}</strong></div>
             <div className="rounded-lg border p-3"><span className="block text-black">Response deadline</span><strong className="mt-1 block">{dateTimeLabel(review.dueDate)}</strong></div>

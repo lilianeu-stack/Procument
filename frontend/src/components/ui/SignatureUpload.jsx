@@ -45,11 +45,14 @@ export default function SignatureUpload({ label, value, onChange, disabled = fal
         <Trash2 size={12} />Remove
       </button>}
     </div>
-    <div className="mt-2 flex min-h-[86px] items-center gap-3 rounded-lg border border-dashed border-brand bg-white px-3 py-2">
-      {value ? <img src={value} alt={`${label} signature`} className="h-16 max-w-[220px] object-contain" />
-        : <span className="text-[10px] text-black">No signature uploaded yet.</span>}
+    <div className="mt-2 rounded-lg border border-dashed border-brand bg-white px-3 py-2">
+      <div className="flex min-h-[64px] min-w-0 items-center">
+        {value
+          ? <img src={value} alt={`${label} signature`} className="max-h-16 max-w-full object-contain" />
+          : <span className="text-[10px] text-black">No signature uploaded yet.</span>}
+      </div>
       <button type="button" disabled={disabled || busy} onClick={() => inputRef.current?.click()}
-        className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-brand px-2.5 py-1.5 text-[10px] font-bold text-black disabled:opacity-50">
+        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brand px-2.5 py-1.5 text-[10px] font-bold text-black disabled:opacity-50">
         <ImagePlus size={13} />{busy ? 'Reading…' : value ? 'Replace image' : 'Upload image'}
       </button>
       <input ref={inputRef} type="file" accept={ACCEPTED.join(',')} onChange={choose} className="hidden" aria-label={`Upload ${label} signature`} />

@@ -4,6 +4,7 @@ import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-co
 import { createNotification } from '../lib/events.js';
 import { log } from '../lib/logger.js';
 import { extractReplyComment, findRequisitionReplyTag } from '../utils/email-reply.js';
+import { REQUISITION_DISPLAY_SQL, requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -232,20 +233,39 @@ async function accessToken(requiredScope = 'gmail.readonly') {
   return tokens.access_token;
 }
 
-async function gmailRequest(path, token, options = {}) {
-  const response = await fetch(`${GOOGLE_API_URL}${path}`, {
-    method: options.method || 'GET',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(options.body ? { 'Content-Type': 'application/json' } : {})
-    },
-    ...(options.body ? { body: JSON.stringify(options.body) } : {})
-  });
+async function gmailRequest(path, token, options = {}, attempt = 1) {
+  let response;
+  try {
+    response = await fetch(`${GOOGLE_API_URL}${path}`, {
+      method: options.method || 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(options.body ? { 'Content-Type': 'application/json' } : {})
+      },
+      ...(options.body ? { body: JSON.stringify(options.body) } : {})
+    });
+  } catch {
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      return gmailRequest(path, token, options, attempt + 1);
+    }
+    const error = new Error('Google Gmail is temporarily unreachable. The last synced messages are still available.');
+    error.status = 502;
+    error.code = 'GOOGLE_GMAIL_API_ERROR';
+    throw error;
+  }
+
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    const retryable = response.status === 429 || response.status >= 500;
+    if (retryable && attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, 300 * attempt));
+      return gmailRequest(path, token, options, attempt + 1);
+    }
+    const reason = data?.error?.message || data?.error || '';
     const error = new Error(response.status === 401
       ? 'Google authorization expired or was revoked. Reconnect the mailbox.'
-      : 'Google could not complete the inbox request.');
+      : `Google could not complete the inbox request${reason ? `: ${String(reason).slice(0, 240)}` : ''}.`);
     error.status = response.status === 401 ? 409 : 502;
     error.code = 'GOOGLE_GMAIL_API_ERROR';
     throw error;
@@ -285,6 +305,32 @@ function normalizedAttachments(value) {
   return attachments;
 }
 
+function normalizedInlineImages(value) {
+  if (!Array.isArray(value)) return [];
+  const images = value.map((image) => {
+    const content = Buffer.isBuffer(image?.content) ? image.content : null;
+    const cid = String(image?.cid || '').replace(/[^A-Za-z0-9@.-]/g, '').slice(0, 120);
+    if (!content?.length || !cid) {
+      const error = new Error('An inline email image is invalid.');
+      error.code = 'INVALID_EMAIL_MESSAGE';
+      throw error;
+    }
+    return {
+      cid,
+      filename: attachmentFilename(image.filename || `${cid}.image`),
+      contentType: String(image.contentType || 'application/octet-stream').replace(/[\r\n]/g, ''),
+      content
+    };
+  });
+  const totalBytes = images.reduce((sum, image) => sum + image.content.length, 0);
+  if (totalBytes > 20 * 1024 * 1024) {
+    const error = new Error('Inline email images must be 20 MB or smaller.');
+    error.code = 'INVALID_EMAIL_MESSAGE';
+    throw error;
+  }
+  return images;
+}
+
 export async function sendGoogleEmail(message) {
   const config = requireGoogleConfig();
   const to = normalizeEmail(message.to);
@@ -318,83 +364,70 @@ export async function sendGoogleEmail(message) {
   ];
   const html = String(message.html || '').trim();
   const attachments = normalizedAttachments(message.attachments);
-  let rawMessage;
+  const inlineImages = normalizedInlineImages(message.inlineImages);
+  const alternativeBoundary = `----HopeHavenAlternative${randomBytes(12).toString('hex')}`;
+  const textPart = [
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8'))
+  ];
+  const alternativePart = html ? [
+    `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
+    '',
+    `--${alternativeBoundary}`,
+    ...textPart,
+    `--${alternativeBoundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    base64Lines(Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8')),
+    `--${alternativeBoundary}--`
+  ] : textPart;
 
-  if (!attachments.length) {
-    if (html) {
-      const boundary = `----HopeHavenBoundary${randomBytes(12).toString('hex')}`;
-      rawMessage = [
-        ...headers,
-        `Content-Type: multipart/alternative; boundary="${boundary}"`,
-        '',
-        `--${boundary}`,
-        'Content-Type: text/plain; charset=UTF-8',
+  let bodyPart = alternativePart;
+  if (inlineImages.length) {
+    const relatedBoundary = `----HopeHavenRelated${randomBytes(12).toString('hex')}`;
+    bodyPart = [
+      `Content-Type: multipart/related; boundary="${relatedBoundary}"`,
+      '',
+      `--${relatedBoundary}`,
+      ...alternativePart,
+      ...inlineImages.flatMap((image) => [
+        `--${relatedBoundary}`,
+        `Content-Type: ${image.contentType}; name="${image.filename}"`,
+        `Content-Disposition: inline; filename="${image.filename}"`,
+        `Content-ID: <${image.cid}>`,
         'Content-Transfer-Encoding: base64',
         '',
-        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
-        `--${boundary}`,
-        'Content-Type: text/html; charset=UTF-8',
-        'Content-Transfer-Encoding: base64',
-        '',
-        base64Lines(Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8')),
-        `--${boundary}--`,
-        ''
-      ].join('\r\n');
-    } else {
-      rawMessage = [
-        ...headers,
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: base64',
-        '',
-        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
-        ''
-      ].join('\r\n');
-    }
-  } else {
+        base64Lines(image.content)
+      ]),
+      `--${relatedBoundary}--`
+    ];
+  }
+
+  let rawMessage;
+  if (attachments.length) {
     const mixedBoundary = `----HopeHavenMixed${randomBytes(12).toString('hex')}`;
-    const alternativeBoundary = `----HopeHavenAlternative${randomBytes(12).toString('hex')}`;
-    const parts = [
+    rawMessage = [
       ...headers,
       `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
       '',
-      `--${mixedBoundary}`
-    ];
-    if (html) {
-      parts.push(
-        `Content-Type: multipart/alternative; boundary="${alternativeBoundary}"`,
-        '',
-        `--${alternativeBoundary}`,
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: base64',
-        '',
-        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8')),
-        `--${alternativeBoundary}`,
-        'Content-Type: text/html; charset=UTF-8',
-        'Content-Transfer-Encoding: base64',
-        '',
-        base64Lines(Buffer.from(html.replace(/\r?\n/g, '\r\n'), 'utf8')),
-        `--${alternativeBoundary}--`
-      );
-    } else {
-      parts.push(
-        'Content-Type: text/plain; charset=UTF-8',
-        'Content-Transfer-Encoding: base64',
-        '',
-        base64Lines(Buffer.from(text.replace(/\r?\n/g, '\r\n'), 'utf8'))
-      );
-    }
-    for (const attachment of attachments) {
-      parts.push(
+      `--${mixedBoundary}`,
+      ...bodyPart,
+      ...attachments.flatMap((attachment) => [
         `--${mixedBoundary}`,
         `Content-Type: ${attachment.contentType}; name="${attachment.filename}"`,
         `Content-Disposition: attachment; filename="${attachment.filename}"`,
         'Content-Transfer-Encoding: base64',
         '',
         base64Lines(attachment.content)
-      );
-    }
-    parts.push(`--${mixedBoundary}--`, '');
-    rawMessage = parts.join('\r\n');
+      ]),
+      `--${mixedBoundary}--`,
+      ''
+    ].join('\r\n');
+  } else {
+    rawMessage = [...headers, ...bodyPart, ''].join('\r\n');
   }
   const result = await gmailRequest('/messages/send', await accessToken('gmail.send'), {
     method: 'POST',
@@ -420,6 +453,31 @@ function decodePart(part) {
     if (content) return content;
   }
   return '';
+}
+
+function decodeAllParts(payload) {
+  let text = '';
+  function walk(part) {
+    if (part?.body?.data) text += `${Buffer.from(part.body.data, 'base64url').toString('utf8')}\n`;
+    for (const child of part?.parts || []) walk(child);
+  }
+  walk(payload || {});
+  return text;
+}
+
+// Legacy RFQ links were signed before a JWT_SECRET rotation. A link is only
+// trusted again when the exact token is found in this mailbox's sent mail; a
+// guessed rfq/supplier id pair can never satisfy this check.
+export async function findSentToken(token) {
+  if (!/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(String(token || ''))) return false;
+  const access = await accessToken('gmail.readonly');
+  const query = `in:sent "${token}"`;
+  const listed = await gmailRequest(`/messages?q=${encodeURIComponent(query)}&maxResults=10`, access);
+  for (const item of listed.messages || []) {
+    const message = await gmailRequest(`/messages/${encodeURIComponent(item.id)}?format=full`, access);
+    if (decodeAllParts(message.payload).includes(token)) return true;
+  }
+  return false;
 }
 
 export function parseGoogleMessage(message) {
@@ -479,7 +537,8 @@ async function ingestRequisitionComments(messages) {
           continue;
         }
         const [[requisition]] = await connection.execute(
-          'SELECT reference FROM requisitions WHERE id = ? LIMIT 1',
+          `SELECT reference, ${REQUISITION_DISPLAY_SQL}
+             FROM requisitions r WHERE r.id = ? LIMIT 1`,
           [thread.requisitionId]
         );
         if (!requisition) {
@@ -530,7 +589,7 @@ async function ingestRequisitionComments(messages) {
             connection,
             manager.id,
             'Email comment received',
-            `${requisition.reference}: ${comment.slice(0, 120)}`,
+            `${requisitionDisplayReference(requisition)}: ${comment.slice(0, 120)}`,
             link,
             'email'
           );
@@ -603,14 +662,18 @@ export async function listInboxMessages() {
     `SELECT g.gmail_message_id AS id, g.sender, g.recipient, g.subject, g.snippet,
        g.unread, g.received_at AS receivedAt,
        c.id AS commentId, c.requisition_id AS requisitionId,
-       r.reference AS requisitionReference
+       r.reference AS requisitionReference,
+       ${REQUISITION_DISPLAY_SQL}
      FROM google_email_messages g
      LEFT JOIN requisition_email_comments c ON c.gmail_message_id = g.gmail_message_id
      LEFT JOIN requisitions r ON r.id = c.requisition_id
      ORDER BY g.received_at DESC, g.gmail_message_id DESC
      LIMIT 100`
   );
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    requisitionDisplayReference: row.requisitionReference ? requisitionDisplayReference(row) : null
+  }));
 }
 
 export async function getInboxMessage(id) {
@@ -618,13 +681,19 @@ export async function getInboxMessage(id) {
     `SELECT g.gmail_message_id AS id, g.thread_id AS threadId, g.sender, g.recipient,
        g.subject, g.snippet, g.body_text AS body, g.unread, g.received_at AS receivedAt,
        c.id AS commentId, c.requisition_id AS requisitionId,
-       r.reference AS requisitionReference, c.comment
+       r.reference AS requisitionReference, c.comment,
+       ${REQUISITION_DISPLAY_SQL}
      FROM google_email_messages g
      LEFT JOIN requisition_email_comments c ON c.gmail_message_id = g.gmail_message_id
      LEFT JOIN requisitions r ON r.id = c.requisition_id
      WHERE g.gmail_message_id = ? LIMIT 1`,
     [id]
   );
+  if (message) {
+    message.requisitionDisplayReference = message.requisitionReference
+      ? requisitionDisplayReference(message)
+      : null;
+  }
   return message || null;
 }
 

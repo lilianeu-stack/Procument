@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ArrowLeft, ClipboardList, Download, Eye, FileCheck2, FileText,
-  Paperclip, RefreshCw, Send
-} from 'lucide-react';
+import { ArrowLeft, ClipboardList, Copy, Eye, FileCheck2, FileText, Link2, RefreshCw, Send } from 'lucide-react';
 import Modal from '../ui/Modal.jsx';
+import SignatureUpload from '../ui/SignatureUpload.jsx';
 import PrintButton from '../ui/PrintButton.jsx';
 import PrintHeader from '../ui/PrintHeader.jsx';
 import StatusBadge from '../ui/StatusBadge.jsx';
@@ -13,26 +11,9 @@ import {
   primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 import MaterialRequestDocument from '../documents/MaterialRequestDocument.jsx';
-import { currency, dateLabel, dateTimeLabel } from '../../utils/format.js';
-import { downloadBinary, previewBinary } from '../../utils/attachments.js';
+import { currency, dateTimeLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 import { PROCUREMENT_PROCESSING_PAGE, RECEIVED_REQUESTS_PAGE } from '../../utils/access.js';
-
-const HISTORY_LABELS = {
-  created: 'Created by Requester',
-  submitted: 'Submitted to Department Supervisor',
-  resubmitted: 'Resubmitted to Department Supervisor',
-  information_requested: 'Additional information requested by Supervisor',
-  approved_by_supervisor: 'Reviewed and approved by Supervisor',
-  rejected_by_supervisor: 'Rejected by Supervisor',
-  forwarded_to_procurement: 'Forwarded to Procurement',
-  received_by_procurement: 'Received by Procurement',
-  procurement_review_started: 'Procurement review started',
-  procurement_review_started_by_rfq: 'Procurement processing started'
-};
-
-const PREVIEWABLE = new Set([
-  'application/pdf', 'text/plain', 'text/csv', 'image/png', 'image/jpeg', 'image/webp'
-]);
 
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
@@ -53,48 +34,46 @@ function Section({ title, icon: Icon, children, id }) {
   </section>;
 }
 
-function historySummary(entry) {
-  const parts = [];
-  if (entry.previousStatus || entry.newStatus) {
-    parts.push(`${entry.previousStatus || '—'} → ${entry.newStatus || '—'}`);
-  }
-  if (entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details)) {
-    const detailText = Object.entries(entry.details)
-      .map(([key, value]) => `${key.replace(/_/g, ' ')}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
-      .join(' · ');
-    if (detailText) parts.push(detailText);
-  }
-  return parts.join(' · ');
-}
-
 export default function ProcurementDocumentView({ id, portalApi, navigate, query = {} }) {
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [recipientEmail, setRecipientEmail] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
+  const [senderName, setSenderName] = useState('');
+  const [senderSignature, setSenderSignature] = useState(null);
   const [senderNote, setSenderNote] = useState('');
   const [sendError, setSendError] = useState('');
-  const [sentForms, setSentForms] = useState([]);
   const [showOfficial, setShowOfficial] = useState(false);
+  const [linksOpen, setLinksOpen] = useState(false);
+  const [sentForms, setSentForms] = useState([]);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [linkError, setLinkError] = useState('');
+  const [copiedThreadId, setCopiedThreadId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const response = await portalApi.getReceivedRequest(id);
       setRequest(response.requisition);
-      if (portalApi.getRequisitionForms) {
-        const forms = await portalApi.getRequisitionForms(id);
-        setSentForms(forms.forms || []);
-      }
     } catch (exception) {
       setError(exception.message || 'The document could not be opened.');
     } finally {
       setLoading(false);
+    }
+  }, [portalApi, id]);
+
+  const loadForms = useCallback(async () => {
+    setLinkError('');
+    if (!portalApi.getRequisitionForms) return;
+    try {
+      const forms = await portalApi.getRequisitionForms(id);
+      setSentForms(forms.forms || []);
+    } catch (exception) {
+      setLinkError(exception.message || 'The response links could not be loaded.');
     }
   }, [portalApi, id]);
 
@@ -107,38 +86,6 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
     navigate(RECEIVED_REQUESTS_PAGE, next);
   }
 
-  function attachmentPath(attachmentId) {
-    return `/procurement/received-requests/${id}/attachments/${attachmentId}`;
-  }
-
-  async function downloadAttachment(file) {
-    try {
-      setActionError('');
-      await downloadBinary(attachmentPath(file.id), file.fileName);
-    } catch (exception) { setActionError(exception.message); }
-  }
-
-  async function previewAttachment(file) {
-    try {
-      setActionError('');
-      // previewBinary() appends inline=1 with the authenticated request.
-      await previewBinary(attachmentPath(file.id), file.fileName);
-    } catch (exception) { setActionError(exception.message); }
-  }
-
-  async function resendForm(threadId) {
-    if (!window.confirm('Resend this response form with a fresh working link? The original link stays open but only one response can be submitted.')) return;
-    setBusy(true); setActionError(''); setNotice('');
-    try {
-      const result = await portalApi.resendRequisitionForm(id, threadId);
-      setNotice(result.message || 'Response form resent.');
-      const forms = await portalApi.getRequisitionForms(id);
-      setSentForms(forms.forms || []);
-    } catch (exception) {
-      setActionError(exception.message || 'The response form could not be resent.');
-    } finally { setBusy(false); }
-  }
-
   function continueProcessing() {
     navigate(PROCUREMENT_PROCESSING_PAGE, { request: id, tab: 'rfqs' });
   }
@@ -146,9 +93,51 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   function openSendModal() {
     setRecipientEmail('');
     setRecipientPhone('');
+    setSenderName('');
+    setSenderSignature(null);
     setSenderNote('');
     setSendError('');
     setSendOpen(true);
+  }
+
+  function openLinksModal() {
+    setLinkError('');
+    setCopiedThreadId(null);
+    setLinksOpen(true);
+    void loadForms();
+  }
+
+  async function copyResponseLink(form) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(form.responseUrl);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = form.responseUrl;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+      }
+      setCopiedThreadId(form.id);
+    } catch {
+      setLinkError('Copy failed. Select the link in the box and copy it manually.');
+    }
+  }
+
+  async function resendForm(threadId) {
+    if (!window.confirm('Resend this response form to the original recipient with the current public link?')) return;
+    setLinkBusy(true); setLinkError('');
+    try {
+      const result = await portalApi.resendRequisitionForm(id, threadId);
+      setNotice(result.message || 'Response form resent.');
+      await loadForms();
+    } catch (exception) {
+      setLinkError(exception.message || 'The response form could not be resent.');
+    } finally { setLinkBusy(false); }
   }
 
   async function sendToAnotherUser(event) {
@@ -158,6 +147,8 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
       const result = await portalApi.sendRequisitionEmail(id, {
         to: recipientEmail,
         recipientPhone: recipientPhone.trim(),
+        senderName: senderName.trim(),
+        senderSignature,
         message: senderNote.trim()
       });
       setNotice(result.message || 'Request sent successfully.');
@@ -177,8 +168,8 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   </>;
 
   const items = request.items || [];
-  const attachments = request.attachments || [];
-  const title = hasValue(request.title) ? request.title : `Request ${request.reference}`;
+  const displayReference = requisitionDisplayReference(request);
+  const title = hasValue(request.title) ? request.title : `Request ${displayReference}`;
   const sendTotal = items.reduce((sum, item) => sum + Number(
     item.lineTotal ?? (Number(item.quantity) || 0) * (Number(item.estimatedUnitCost) || 0)
   ), 0);
@@ -186,8 +177,8 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
   return <div className="space-y-5">
     <PrintHeader
       title={title}
-      reference={request.reference}
-      dates={`Submitted ${dateTimeLabel(request.submittedAt || request.createdAt)} · Forwarded ${dateTimeLabel(request.forwardedAt)}`}
+      reference={displayReference}
+      dates={`Requested ${dateTimeLabel(request.submittedAt || request.createdAt)} · Forwarded ${dateTimeLabel(request.forwardedAt)}`}
     />
 
     <section className="overflow-hidden rounded-xl border border-brand bg-white">
@@ -202,12 +193,12 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           </div>
           <h1 className="display-font text-2xl font-extrabold tracking-tight">{title}</h1>
           <p className="mt-2 text-xs leading-5 text-black">
-            Original submission details, Supervisor decision and attachments are preserved exactly as received.
+            Original submission details and Supervisor decision are preserved exactly as received.
           </p>
         </div>
         <div className="min-w-[180px] rounded-xl border border-brand bg-white px-5 py-4">
           <div className="text-[10px] font-extrabold uppercase tracking-[.12em] text-black">Request reference</div>
-          <div className="display-font mt-1 text-xl font-extrabold tracking-tight">{request.reference}</div>
+          <div className="display-font mt-1 text-xl font-extrabold tracking-tight">{displayReference}</div>
           <div className="mt-3"><StatusBadge value={request.status} /></div>
         </div>
       </div>
@@ -221,6 +212,9 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           <button type="button" onClick={openSendModal} disabled={busy} className={secondaryButtonClass('disabled:opacity-50')}>
             <Send size={14} />Send to another user
           </button>
+          <button type="button" onClick={openLinksModal} disabled={busy} className={secondaryButtonClass('disabled:opacity-50')}>
+            <Link2 size={14} />Response links
+          </button>
         </div>
         <button type="button" onClick={continueProcessing} className={primaryButtonClass()}>
           <FileCheck2 size={14} />Continue Procurement Processing
@@ -228,25 +222,20 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
       </div>
     </section>
 
-    {actionError && <p role="alert" className="no-print rounded-lg border border-brand bg-white px-3 py-2 text-xs text-black">{actionError}</p>}
     {notice && <p role="status" className="no-print rounded-lg border border-brand bg-white px-3 py-2 text-xs font-semibold text-black">{notice}</p>}
 
     <div className="grid gap-5 xl:grid-cols-2">
       <Section title="Request information" icon={ClipboardList}>
         <dl className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-          <Field label="Request reference" value={request.reference}>{request.reference}</Field>
+          <Field label="Request reference" value={displayReference}>{displayReference}</Field>
           <Field label="Requesting department" value={request.department}>{request.department}</Field>
           <Field label="Requester name" value={request.requester}>{request.requester}</Field>
-          <Field label="Submission date" value={request.submittedAt || request.createdAt}>
+          <Field label="Requested At" value={request.submittedAt || request.createdAt}>
             {dateTimeLabel(request.submittedAt || request.createdAt)}
           </Field>
           <Field label="Current status" value={request.status}><StatusBadge value={request.status} /></Field>
           <Field label="Location where items are needed" value={request.location}>{request.location}</Field>
           <Field label="Request title" value={request.title}>{request.title}</Field>
-          <Field label="Request date" value={request.createdAt}>{dateTimeLabel(request.createdAt)}</Field>
-          <Field label="Priority" value={request.priority}>{request.priority}</Field>
-          <Field label="Required by" value={request.requiredBy}>{dateLabel(request.requiredBy)}</Field>
-          <Field label="Budget code" value={request.budgetCode}>{request.budgetCode}</Field>
           <Field label="Requester email" value={request.requesterEmail}>{request.requesterEmail}</Field>
           <Field label="Requester phone" value={request.requesterPhone}>{request.requesterPhone}</Field>
         </dl>
@@ -266,9 +255,6 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           <Field label="Approval or rejection status" value={request.supervisorDecision}>
             {request.supervisorDecision}
           </Field>
-          <Field label="Decision date" value={request.supervisorDecisionAt}>
-            {dateTimeLabel(request.supervisorDecisionAt)}
-          </Field>
           <Field label="Forwarded to Procurement date" value={request.forwardedAt}>
             {dateTimeLabel(request.forwardedAt)}
           </Field>
@@ -282,6 +268,13 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
         <Field label="Supervisor comments" value={request.supervisorNotes} className="mt-5 border-t border-subtle pt-4">
           <p className="whitespace-pre-wrap text-xs leading-6 text-black">{request.supervisorNotes}</p>
         </Field>
+        {request.supervisorDecision === 'Approved' && <div className="mt-5 border-t border-subtle pt-4">
+          <div className="text-[10px] font-extrabold uppercase tracking-wide text-black">Approved by signature</div>
+          {request.supervisorSignature
+            ? <img src={request.supervisorSignature} alt="Approved by signature"
+                className="mt-2 max-h-16 max-w-full object-contain" />
+            : <p className="mt-2 text-[11px] leading-5 text-black">Digitally approved — no signature image was uploaded.</p>}
+        </div>}
         <div className="mt-5 flex items-start gap-2 rounded-lg border border-brand px-3 py-3 text-[11px] leading-5 text-black">
           <FileCheck2 size={15} className="mt-0.5 shrink-0" />
           <span>
@@ -320,81 +313,6 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
       />}
     </Section>
 
-    <Section id="received-attachments" title={`Attachments (${attachments.length})`} icon={Paperclip}>
-      {attachments.length ? <ul className="space-y-2">
-        {attachments.map((file) => <li key={file.id}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand px-3 py-2">
-          <span className="flex min-w-0 items-center gap-2">
-            <Paperclip size={14} className="shrink-0 text-black" />
-            <span className="truncate text-xs font-bold text-black">{file.fileName}</span>
-            <span className="shrink-0 text-[10px] text-black">
-              {Math.max(1, Math.round(Number(file.fileSize) / 1024))} KB
-            </span>
-          </span>
-          <span className="flex items-center gap-3">
-            {PREVIEWABLE.has(file.mimeType) && <button type="button" onClick={() => previewAttachment(file)}
-              className="inline-flex items-center gap-1 text-[11px] font-bold text-black hover:underline">
-              <Eye size={12} />View
-            </button>}
-            <button type="button" onClick={() => downloadAttachment(file)}
-              className="inline-flex items-center gap-1 text-[11px] font-bold text-black hover:underline">
-              <Download size={12} />Download
-            </button>
-          </span>
-        </li>)}
-      </ul> : <EmptyState
-        title="No attachments"
-        description="No documents were attached to the original request."
-      />}
-      <p className="mt-3 text-[10px] text-black">
-        Attachments are served securely to authorized Procurement and Administrator accounts only.
-      </p>
-    </Section>
-
-    <Section title={`Sent response forms (${sentForms.length})`} icon={Send}>
-      {sentForms.length ? <TableScroll minWidth={760}>
-        <table className="w-full text-left text-xs">
-          <thead className="text-[10px] uppercase text-black">
-            <tr>{['Recipient', 'Sent', 'Message', 'Response', 'Action'].map((heading) =>
-              <th key={heading} className="border-b border-subtle px-3 py-2.5 font-extrabold">{heading}</th>)}</tr>
-          </thead>
-          <tbody className="divide-y divide-subtle">
-            {sentForms.map((form) => <tr key={form.id}>
-              <td className="px-3 py-3 font-bold">{form.recipientEmail}</td>
-              <td className="px-3 py-3">{dateTimeLabel(form.createdAt)}</td>
-              <td className="max-w-[260px] px-3 py-3 text-black">{form.message || '—'}</td>
-              <td className="px-3 py-3">{form.responded ? `Submitted ${dateTimeLabel(form.responseSubmittedAt || form.createdAt)}` : 'Awaiting response'}</td>
-              <td className="px-3 py-3"><button type="button" disabled={busy} onClick={() => resendForm(form.id)} className="font-bold text-black disabled:opacity-50">
-                Resend working link
-              </button></td>
-            </tr>)}
-          </tbody>
-        </table>
-      </TableScroll> : <EmptyState title="No response forms sent" description="Use “Send to another user” to send the requested items with an online response link." />}
-      <p className="mt-3 text-[11px] leading-5 text-black">
-        Older emails may contain a localhost link. Resend a form to give the recipient the current public link. Each form accepts only one response.
-      </p>
-    </Section>
-
-    <Section title="Request history" icon={RefreshCw}>
-      {!request.activity?.length ? <EmptyState title="No history recorded" /> : <ol className="space-y-5">
-        {request.activity.map((entry, index) => <li key={entry.id} className="relative pl-7">
-          {index < request.activity.length - 1 && <span className="absolute left-[5px] top-4 h-full w-px bg-black/20" />}
-          <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-reference ring-1 ring-brand" />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs font-bold text-black">
-              {HISTORY_LABELS[entry.action] || String(entry.action).replace(/_/g, ' ')}
-            </span>
-            <span className="text-[10px] text-black">{dateTimeLabel(entry.createdAt)}</span>
-          </div>
-          <div className="mt-0.5 text-[11px] text-black">{entry.actor ? `by ${entry.actor}` : 'System'}</div>
-          {hasValue(historySummary(entry)) && <div className="mt-1 rounded-lg border border-brand px-2 py-1 text-[10px] leading-4 text-black">
-            {historySummary(entry)}
-          </div>}
-        </li>)}
-      </ol>}
-    </Section>
-
     <div className="no-print flex flex-wrap justify-end gap-2 pb-4">
       <button type="button" onClick={back} className={secondaryButtonClass()}>
         <ArrowLeft size={14} />Back to Received Requests
@@ -419,13 +337,6 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
               placeholder="Phone number" className="field" />
           </label>
         </div>
-        <label className="block text-xs font-bold">
-          Message to recipient (optional)
-          <textarea rows="3" maxLength={2000} value={senderNote} onChange={(event) => setSenderNote(event.target.value)}
-            placeholder="Add a short note, for example: Please confirm the quantities and comment if anything needs changing."
-            className="field h-auto py-2" />
-        </label>
-
         <Section title={`Requested items (${items.length})`} icon={FileText}>
           {items.length ? <TableScroll minWidth={700}>
             <table className="w-full text-left text-xs">
@@ -452,19 +363,74 @@ export default function ProcurementDocumentView({ id, portalApi, navigate, query
           </div>
         </Section>
 
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block text-xs font-bold">
+            Your name *
+            <input required maxLength={150} value={senderName} onChange={(event) => setSenderName(event.target.value)}
+              placeholder="Name of sender" className="field" />
+          </label>
+          <SignatureUpload
+            label="Sender signature"
+            value={senderSignature}
+            onChange={setSenderSignature}
+            disabled={busy}
+          />
+        </div>
+        <label className="block text-xs font-bold">
+          Message to recipient (optional)
+          <textarea rows="3" maxLength={2000} value={senderNote} onChange={(event) => setSenderNote(event.target.value)}
+            placeholder="Add a short note, for example: Please confirm the quantities and comment if anything needs changing."
+            className="field h-auto py-2" />
+        </label>
+
         <div className="rounded-lg border border-brand bg-white p-3 text-[11px] leading-5 text-black">
-          The recipient will receive this as a table with quantities and a private response link.
+          The recipient will receive this as a table with quantities, your name, your signature and a private response link.
         </div>
 
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" disabled={busy} onClick={() => setSendOpen(false)} className={secondaryButtonClass('disabled:opacity-50')}>
             Cancel
           </button>
-          <button type="submit" disabled={busy || !recipientEmail.trim()} className={primaryButtonClass()}>
+          <button type="submit" disabled={busy || !recipientEmail.trim() || !senderName.trim() || !senderSignature} className={primaryButtonClass()}>
             <Send size={14} />{busy ? 'Sending…' : 'Send by email'}
           </button>
         </div>
       </form>
+    </Modal>}
+
+    {linksOpen && <Modal title="Response links" size="lg" onClose={() => !linkBusy && setLinksOpen(false)}>
+      <div className="space-y-4">
+        <p className="text-xs leading-5 text-black">
+          Each link opens the requested items and response form on any phone, tablet or computer.
+          The recipient does not need a staff account. Only one response can be submitted per form.
+        </p>
+        {linkError && <p role="alert" className="rounded-lg border border-brand bg-white px-3 py-2 text-xs font-semibold text-black">{linkError}</p>}
+        {sentForms.length ? <ul className="space-y-3">
+          {sentForms.map((form) => <li key={form.id} className="rounded-xl border border-brand bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-extrabold break-all text-black">{form.recipientEmail}</span>
+              <span className="text-[10px] font-bold text-black">
+                {form.responded ? `Submitted ${dateTimeLabel(form.responseSubmittedAt)}` : `Sent ${dateTimeLabel(form.createdAt)}`}
+              </span>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input readOnly value={form.responseUrl || ''} aria-label={`Response link for ${form.recipientEmail}`}
+                onFocus={(event) => event.target.select()} className="field min-w-[220px] flex-1 text-[11px]" />
+              <button type="button" disabled={!form.responseUrl} onClick={() => copyResponseLink(form)}
+                className={secondaryButtonClass('disabled:opacity-50')}>
+                <Copy size={13} />{copiedThreadId === form.id ? 'Copied' : 'Copy link'}
+              </button>
+              <button type="button" disabled={linkBusy} onClick={() => resendForm(form.id)}
+                className={secondaryButtonClass('disabled:opacity-50')}>
+                <RefreshCw size={13} />{linkBusy ? 'Sending…' : 'Resend email'}
+              </button>
+            </div>
+          </li>)}
+        </ul> : <EmptyState
+          title="No response links yet"
+          description="Use Send to another user to create a public response form."
+        />}
+      </div>
     </Modal>}
 
     {showOfficial && <Modal title="Official material request form" size="xl" onClose={() => setShowOfficial(false)}>

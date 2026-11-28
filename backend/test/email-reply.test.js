@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildRequestedItemsEmail, extractReplyComment, findRequisitionReplyTag, replyTag
 } from '../src/utils/email-reply.js';
+import { buildRfqEmail } from '../src/services/email.js';
 
 const token = 'a'.repeat(32);
 
@@ -61,6 +62,59 @@ test('requested items email contains a quantity form and reply instructions', ()
   assert.match(email.html, /Add a comment \/ respond online/);
   assert.match(email.html, /To add a comment/);
   assert.match(email.html, /\[REQ:42:a{32}\]/);
+});
+
+test('requested items email carries the sender name and inline signature image', () => {
+  const signature = `data:image/webp;base64,${Buffer.from('signature-bytes').toString('base64')}`;
+  const email = buildRequestedItemsEmail({
+    requisitionId: 42,
+    reference: 'HHR/28/11/26/0003',
+    title: 'IT office requirements',
+    senderName: 'Jane Sender',
+    senderSignature: signature,
+    token,
+    responseUrl: `https://public.example.test/response/${token}`,
+    items: [{
+      itemName: 'PC',
+      quantity: 2,
+      unit: 'pieces',
+      estimatedUnitCost: 300,
+      lineTotal: 600
+    }]
+  });
+
+  assert.match(email.text, /Sent by: Jane Sender/);
+  assert.match(email.html, /Sent by/);
+  assert.match(email.html, /Jane Sender/);
+  assert.match(email.html, /src="cid:requisition-sender-signature"/);
+  assert.equal(email.inlineImages.length, 1);
+  assert.equal(email.inlineImages[0].cid, 'requisition-sender-signature');
+  assert.equal(email.inlineImages[0].contentType, 'image/webp');
+  assert.equal(email.inlineImages[0].content.toString('utf8'), 'signature-bytes');
+  assert.doesNotMatch(email.html, /data:image/);
+});
+
+test('RFQ email carries the Procurement name and inline signature image', () => {
+  const signature = `data:image/webp;base64,${Buffer.from('rfq-signature-bytes').toString('base64')}`;
+  const email = buildRfqEmail({
+    supplierName: 'Test Supplier',
+    reference: 'RFQ-2026-0001',
+    requisitionReference: 'PR-2026-F1',
+    title: 'IT office requirements',
+    items: [{ itemName: 'Laptop', quantity: 2, unit: 'unit' }],
+    senderName: 'Jane Procurement',
+    senderSignature: signature,
+    rawToken: 'v1.payload.signature'
+  });
+
+  assert.match(email.text, /Sent by: Jane Procurement/);
+  assert.match(email.html, /Sent by/);
+  assert.match(email.html, /Jane Procurement/);
+  assert.match(email.html, /src="cid:rfq-sender-signature"/);
+  assert.equal(email.inlineImages.length, 1);
+  assert.equal(email.inlineImages[0].cid, 'rfq-sender-signature');
+  assert.equal(email.inlineImages[0].content.toString('utf8'), 'rfq-signature-bytes');
+  assert.doesNotMatch(email.html, /data:image/);
 });
 
 test('supplier form email reuses the requisition item table and secure supplier link', () => {

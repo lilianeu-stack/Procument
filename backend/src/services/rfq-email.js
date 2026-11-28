@@ -1,7 +1,7 @@
 import pool from '../config/db.js';
 import { log } from '../lib/logger.js';
 import { normalizeEmail, validEmail } from '../utils/email-config.js';
-import { createRfqToken } from '../utils/rfq-link.js';
+import { createRfqToken, hashRfqToken } from '../utils/rfq-link.js';
 import { buildRfqEmail, sendEmail } from './email.js';
 
 const OPEN_RFQ_STATUSES = ['Sent', 'Evaluating'];
@@ -59,7 +59,8 @@ async function loadDeliveries({ rfqId, onlyFailed = false, deliveryIds = null })
     `SELECT d.id, d.supplier_id AS supplierId, d.recipient_email AS recipientEmail,
        d.rfq_reference AS rfqReference, d.attempts,
        f.due_date AS dueDate, f.status AS rfqStatus, f.id AS rfqId,
-       f.instructions, f.terms,
+       f.instructions, f.terms, f.sender_name AS senderName,
+       f.sender_signature AS senderSignature,
        r.id AS requisitionId, r.reference AS requisitionReference, r.title,
        r.required_by AS requiredBy, s.name AS supplierName
      FROM rfq_email_deliveries d
@@ -107,6 +108,12 @@ export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds
     );
 
     const token = createRfqToken(delivery.rfqId, delivery.supplierId);
+    await pool.execute(
+      `INSERT INTO rfq_link_tokens (token_hash, rfq_id, supplier_id)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE rfq_id = VALUES(rfq_id), supplier_id = VALUES(supplier_id)`,
+      [hashRfqToken(token), delivery.rfqId, delivery.supplierId]
+    );
     const message = buildRfqEmail({
       supplierName: delivery.supplierName,
       reference: delivery.rfqReference,
@@ -117,6 +124,8 @@ export async function sendRfqDeliveries({ rfqId, onlyFailed = false, deliveryIds
       items,
       instructions: delivery.instructions,
       terms: delivery.terms,
+      senderName: delivery.senderName || '',
+      senderSignature: delivery.senderSignature || null,
       rawToken: token
     });
     const result = await sendEmail({ ...message, to: delivery.recipientEmail }, transport);

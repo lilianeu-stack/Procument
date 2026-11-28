@@ -8,10 +8,12 @@ import Modal from '../components/ui/Modal.jsx';
 import DownloadButton from '../components/ui/DownloadButton.jsx';
 import ReportToolbar from '../components/ui/ReportToolbar.jsx';
 import CommitteeReviewModal from './CommitteeReviewModal.jsx';
+import SignatureUpload from '../components/ui/SignatureUpload.jsx';
 import { currency, dateTimeLabel } from '../utils/format.js';
 import { toDateTimeInputValue, toUtcDateTimeInputValue } from '../utils/dates.js';
 import { reportForPage } from '../utils/reportFields.js';
 import { roleLabel } from '../utils/access.js';
+import { requisitionDisplayReference } from '../utils/requisitionDisplay.js';
 
 function newIdempotencyKey() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -89,6 +91,7 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
     message: ''
   });
   const [supplierIds, setSupplierIds] = useState([]);
+  const [senderSignature, setSenderSignature] = useState(null);
   const [idempotencyKey] = useState(newIdempotencyKey);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,6 +112,10 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
       setError('Select at least one supplier.');
       return;
     }
+    if (!senderSignature) {
+      setError('Upload a Procurement signature to include with the supplier emails.');
+      return;
+    }
     submitting.current = true;
     setBusy(true); setError('');
     try {
@@ -118,6 +125,7 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
         dueDate: toUtcDateTimeInputValue(form.dueDate),
         requisitionId: Number(initialRequisitionId || form.requisitionId),
         supplierIds,
+        senderSignature,
         idempotencyKey
       });
     } catch (exception) { setError(exception.message); }
@@ -128,7 +136,7 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
   const nowDateTime = toDateTimeInputValue();
 
   return <Modal title="Create request for quotation" size="md" onClose={onClose}><form onSubmit={submit} className="space-y-3">
-    {!initialRequisitionId && <label className="block text-xs font-bold">Request<select required value={form.requisitionId} onChange={(event) => setForm({ ...form, requisitionId: event.target.value })} className="field"><option value="">Select a request…</option>{eligibleRequests.map((request) => <option value={request.id} key={request.id}>{request.reference} · {request.requester}</option>)}</select></label>}
+    {!initialRequisitionId && <label className="block text-xs font-bold">Request<select required value={form.requisitionId} onChange={(event) => setForm({ ...form, requisitionId: event.target.value })} className="field"><option value="">Select a request…</option>{eligibleRequests.map((request) => <option value={request.id} key={request.id}>{requisitionDisplayReference(request)} · {request.requester}</option>)}</select></label>}
     <fieldset>
       <legend className="mb-2 text-xs font-bold">Send date</legend>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -138,6 +146,8 @@ export function RFQForm({ requisitions = [], suppliers = [], initialRequisitionI
     </fieldset>
     <SupplierMultiSelect suppliers={suppliers} selectedIds={supplierIds} onChange={setSupplierIds} />
     <label className="block text-xs font-bold">Message to suppliers<textarea rows="3" value={form.message} onChange={(event) => setForm({ ...form, message: event.target.value })} placeholder="Add a message that will be included in the email sent to the selected suppliers…" className="field h-auto py-2" /></label>
+    <SignatureUpload label="Procurement signature" value={senderSignature} onChange={setSenderSignature} disabled={busy} />
+    <p className="text-[11px] text-black">The signature is included in the supplier email and on the public supplier form.</p>
     {busy && <p role="status" className="rounded-lg bg-sky-50 px-3 py-2 text-xs font-bold text-black">Sending RFQ emails… Please keep this window open.</p>}
     <ErrorMessage>{error}</ErrorMessage><FormActions busy={busy} close={onClose} label="Send RFQ" busyLabel="Sending RFQ emails…" />
   </form></Modal>;
@@ -441,26 +451,27 @@ export default function RfqsPage({
       user={reportUser}
       printLabel="Print RFQ register"
       scope="matching RFQs"
+      dateFilterFromToOnly
+      dateFilterContent={<>
+        <label className="block min-w-0">
+          <span className="block text-[10px] font-bold uppercase leading-4 tracking-[.08em] text-black">RFQ status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="field mt-0">
+            <option value="">All statuses</option>
+            {['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'].map((status) =>
+              <option key={status} value={status}>{status}</option>)}
+          </select>
+        </label>
+        <label className="block min-w-0">
+          <span className="block text-[10px] font-bold uppercase leading-4 tracking-[.08em] text-black">Filter by response</span>
+          <select value={responseFilter} onChange={(event) => setResponseFilter(event.target.value)} className="field mt-0">
+            <option value="all">All RFQs</option>
+            <option value="responded">Supplier responded</option>
+            <option value="awaiting">Awaiting response</option>
+          </select>
+        </label>
+      </>}
     />
 
-    <div className="mb-4 grid gap-3 sm:grid-cols-2 sm:justify-end">
-      <label className="block w-full text-xs font-bold sm:w-56">
-        RFQ status
-        <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="field mt-1">
-          <option value="">All statuses</option>
-          {['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'].map((status) =>
-            <option key={status} value={status}>{status}</option>)}
-        </select>
-      </label>
-      <label className="block w-full text-xs font-bold sm:w-56">
-        Filter by response
-        <select value={responseFilter} onChange={(event) => setResponseFilter(event.target.value)} className="field mt-1">
-          <option value="all">All RFQs</option>
-          <option value="responded">Supplier responded</option>
-          <option value="awaiting">Awaiting response</option>
-        </select>
-      </label>
-    </div>
     <PageCard title="RFQs" description={`${visibleRfqs.length} of ${rfqs.length} RFQs · ${respondedCount} with supplier responses`}
         action={<div className="flex flex-wrap justify-end gap-2">
           {canCreateRfq && <button type="button" onClick={() => setCreateOpen(true)}
@@ -495,7 +506,7 @@ export default function RfqsPage({
         <td className="px-5 py-4 font-bold">
           <button type="button" onClick={() => viewQuotes(rfq)} className="text-black hover:underline">{rfq.reference}</button>
         </td>
-        <td className="px-5 py-4">{rfq.requisition}</td>
+        <td className="px-5 py-4">{rfq.requisitionDisplayReference || rfq.requisition}</td>
         <td className="px-5 py-4">{dateTimeLabel(rfq.dueDate)}</td>
         <td className="px-5 py-4">{rfq.invitedSuppliers}</td>
         <td className="px-5 py-4">{rfq.quotations}</td>
@@ -536,7 +547,7 @@ export default function RfqsPage({
             <section className="border-b border-slate-100 px-5 py-4">
               <h3 className="text-xs font-extrabold uppercase tracking-wide">Invitation sent to suppliers</h3>
               <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
-                <div><dt className="text-black">Requisition</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.requisitionReference}</dd></div>
+                <div><dt className="text-black">Requisition</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.requisitionDisplayReference || loadedResponseDetails.rfq.requisitionReference}</dd></div>
                 <div><dt className="text-black">Request title</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.title}</dd></div>
                 <div><dt className="text-black">Department</dt><dd className="mt-1 font-semibold">{loadedResponseDetails.rfq.department || '—'}</dd></div>
                 <div><dt className="text-black">Sent</dt><dd className="mt-1 font-semibold">{dateTimeLabel(loadedResponseDetails.rfq.issuedAt)}</dd></div>

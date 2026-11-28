@@ -12,6 +12,7 @@ import { getSettings } from './settings.js';
 import {
   RECEIVED_STATUS_GROUPS, REQUISITION_STATUS
 } from '../utils/requisition-status.js';
+import { requisitionDisplayReference } from '../utils/requisition-display.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOGO_CANDIDATES = [
@@ -31,13 +32,9 @@ const THEME = {
   surface: '#FFFFFF',
   ink: '#000000',
   border: '#000000',
-<<<<<<< HEAD
-  // Palette sampled from the supplied design image.
-=======
   green: '#7CB342',
   // Palette sampled from the supplied design image: light page, white card,
   // deep teal masthead, navy/slate type and soft blue-grey table panels.
->>>>>>> origin/master
   page: '#F4F7F6',
   card: '#FFFFFF',
   teal: '#123D3A',
@@ -547,9 +544,14 @@ const RECORD_QUERIES = {
         r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
         r.supervisor_decision AS supervisorDecision,
         r.supervisor_decision_at AS supervisorDecisionAt,
+        r.supervisor_signature AS supervisorSignature,
         r.supervisor_notes AS supervisorNotes,
         r.procurement_decision_at AS procurementDecisionAt,
         r.completed_at AS completedAt, r.created_at AS createdAt,
+        (SELECT COUNT(*) FROM requisitions rr
+          WHERE rr.requester_id = r.requester_id
+            AND rr.department_id <=> r.department_id
+            AND rr.id <= r.id) AS departmentSequence,
         u.name AS requester, u.department_id AS requesterDepartmentId,
         d.name AS department, su.name AS supervisorName,
         fwd.name AS forwardedByName, su.department_id AS supervisorDepartmentId,
@@ -865,6 +867,9 @@ export async function fetchRecord(type, id, user) {
     type,
     label: definition.label,
     reference: row.reference || String(id),
+    displayReference: type === 'requisition'
+      ? requisitionDisplayReference(row)
+      : row.reference || String(id),
     row,
     meta: recordMeta(row, definition),
     items,
@@ -888,18 +893,11 @@ function recordFooter(doc) {
   const generated = `Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`;
   for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     doc.switchToPage(index);
-<<<<<<< HEAD
-    doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
-      .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, doc.page.height - 34);
-    doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, doc.page.height - 34, {
-      width: doc.page.width - 80, align: 'right'
-=======
     const footerY = doc.page.height - doc.page.margins.bottom - 12;
     doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
       .text(generated, 40, footerY, { width: 260, lineBreak: false });
     doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, footerY, {
       width: doc.page.width - 80, align: 'right', lineBreak: false
->>>>>>> origin/master
     });
   }
 }
@@ -925,14 +923,9 @@ function moneyText(value) {
 function officialHeader(doc, record, title) {
   const inset = paintDocumentPage(doc);
   const margin = 40;
-<<<<<<< HEAD
-  doc.save()
-    .rect(inset, inset, doc.page.width - inset * 2, 70)
-=======
   const bandHeight = 70;
   doc.save()
     .rect(inset, inset, doc.page.width - inset * 2, bandHeight)
->>>>>>> origin/master
     .fill(THEME.teal)
     .restore();
 
@@ -951,7 +944,7 @@ function officialHeader(doc, record, title) {
   doc.font('Helvetica-Bold').fontSize(16).fillColor(THEME.navy)
     .text(title, margin, 106, { width: doc.page.width - 80, align: 'center', lineBreak: false });
   const meta = [
-    `Reference: ${documentValue(record.reference)}`,
+    `Reference: ${documentValue(record.displayReference || record.reference)}`,
     `Status: ${documentValue(record.row.status)}`,
     `Date: ${documentDate(record.row.submittedAt || record.row.createdAt)}`
   ].filter((part) => !part.endsWith(': '));
@@ -982,29 +975,18 @@ function drawOfficialField(doc, label, value, x, y, width) {
 
 async function signatureBuffer(value) {
   if (typeof value !== 'string') return null;
-<<<<<<< HEAD
-  const match = value.trim().match(/^data:image\/([a-z0-9.+-]+);base64,([\s\S]+)$/i);
-  const base64 = match ? match[2] : value.trim();
-=======
   const dataUrl = value.trim().match(/^data:image\/([a-z0-9.+-]+);base64,([\s\S]+)$/i);
   const base64 = dataUrl ? dataUrl[2] : value.trim();
->>>>>>> origin/master
   if (!base64 || !/^[A-Za-z0-9+/=\s]+$/.test(base64)) return null;
   let buffer;
   try {
     buffer = Buffer.from(base64, 'base64');
   } catch { return null; }
   if (!buffer.length) return null;
-<<<<<<< HEAD
-  const mime = match ? match[1].toLowerCase() : '';
-  if (mime === 'image/png' || mime === 'image/jpeg') return buffer;
-  // Signature pads upload WebP, which PDFKit cannot embed directly.
-=======
   const mime = dataUrl ? dataUrl[1].toLowerCase() : '';
   if (mime === 'image/png' || mime === 'image/jpeg') return buffer;
   // Browser signature pads commonly arrive as WebP, which PDFKit cannot embed.
   // Normalising unsupported formats to PNG keeps the uploaded image visible.
->>>>>>> origin/master
   try {
     return await sharp(buffer).png().toBuffer();
   } catch { return null; }
@@ -1074,7 +1056,7 @@ function drawOfficialTable(doc, { columns, rows, y, emptyRows = 0, pageStart, ro
   return currentY + 12;
 }
 
-function drawRequisitionDocument(doc, record) {
+async function drawRequisitionDocument(doc, record) {
   const row = record.row;
   const pageStart = officialPageStart(record, 'MATERIAL REQUEST FORM');
   let y = pageStart(doc);
@@ -1114,7 +1096,7 @@ function drawRequisitionDocument(doc, record) {
     .text(documentValue(row.justification), 40, y, { width: doc.page.width - 80 });
   y = Math.max(doc.y + 10, y + 24);
 
-  y = ensureSpace(doc, y, 80, pageStart);
+  y = ensureSpace(doc, y, 110, pageStart);
   const approved = row.supervisorDecision === 'Approved' && Boolean(row.supervisorDecisionAt);
   const signatureColumns = [
     ['Name(Requested by):', documentValue(row.requester)],
@@ -1123,7 +1105,6 @@ function drawRequisitionDocument(doc, record) {
   ];
   const approvalColumns = [
     ['Name(Approved by):', approved ? documentValue(row.supervisorName) : ''],
-    ['Signature:', approved ? documentValue(row.supervisorName) : ''],
     ['Date:', approved ? documentDate(row.supervisorDecisionAt) : '']
   ];
   const signatureWidth = (doc.page.width - 100) / 3;
@@ -1131,9 +1112,12 @@ function drawRequisitionDocument(doc, record) {
     drawOfficialField(doc, label, value, 40 + index * (signatureWidth + 8), y, signatureWidth);
   }
   y += 42;
-  for (const [index, [label, value]] of approvalColumns.entries()) {
-    drawOfficialField(doc, label, value, 40 + index * (signatureWidth + 8), y, signatureWidth);
-  }
+  drawOfficialField(doc, approvalColumns[0][0], approvalColumns[0][1], 40, y, signatureWidth);
+  await drawSignatureField(
+    doc, 'Signature:', approved ? documentValue(row.supervisorName) : '',
+    approved ? row.supervisorSignature : null, 40 + signatureWidth + 8, y, signatureWidth
+  );
+  drawOfficialField(doc, approvalColumns[1][0], approvalColumns[1][1], 40 + 2 * (signatureWidth + 8), y, signatureWidth);
 }
 
 async function drawPurchaseOrderDocument(doc, record) {
@@ -1457,12 +1441,9 @@ export async function renderRecordPdf(record) {
     doc.on('error', reject);
   });
 
-  if (record.type === 'requisition') drawRequisitionDocument(doc, record);
+  if (record.type === 'requisition') await drawRequisitionDocument(doc, record);
   else if (record.type === 'purchaseOrder') await drawPurchaseOrderDocument(doc, record);
-<<<<<<< HEAD
-=======
   else if (record.type === 'goodsReceipt') await drawGoodsReceiptDocument(doc, record);
->>>>>>> origin/master
   else await drawGenericRecordDocument(doc, record);
   recordFooter(doc);
   doc.end();

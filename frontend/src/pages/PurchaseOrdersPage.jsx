@@ -10,6 +10,7 @@ import SendForApprovalModal from '../components/portals/SendForApprovalModal.jsx
 import StatusBadge from '../components/ui/StatusBadge.jsx';
 import SignatureUpload from '../components/ui/SignatureUpload.jsx';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
+import { requisitionDisplayReference } from '../utils/requisitionDisplay.js';
 import {
   PURCHASE_ORDER_TYPES, calculatePurchaseTotals,
   canEditPurchaseOrder, configuredVatRate, formatRwf
@@ -529,7 +530,7 @@ function RecommendedSupplierDetail({ entry, canCreate, onClose, onViewPurchaseOr
 
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div><dt className="text-[10px] font-bold uppercase text-black">RFQ</dt><dd className="font-bold">{entry.reference || '—'}</dd></div>
-        <div><dt className="text-[10px] font-bold uppercase text-black">Requisition</dt><dd className="font-bold">{entry.requisitionReference || '—'}</dd></div>
+        <div><dt className="text-[10px] font-bold uppercase text-black">Requisition</dt><dd className="font-bold">{entry.requisitionDisplayReference || entry.requisitionReference || '—'}</dd></div>
         <div><dt className="text-[10px] font-bold uppercase text-black">Department</dt><dd className="font-bold">{entry.department || '—'}</dd></div>
         <div><dt className="text-[10px] font-bold uppercase text-black">Recommended by</dt><dd className="font-bold">{entry.recipientName || 'Procurement'}</dd></div>
         <div><dt className="text-[10px] font-bold uppercase text-black">Sent</dt><dd className="font-bold">{dateTimeLabel(entry.sentAt)}</dd></div>
@@ -852,7 +853,7 @@ export default function PurchaseOrdersPage({
   }
 
   return <>
-    <PageCard className="shadow-dashboard" title="Purchase orders" description={`${visibleOrders.length} orders${requisition?.reference ? ` · ${requisition.reference}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => { setPoSelection(null); setCreating(true); }} className={createPoButtonClass}><Plus size={15} />Create PO</button>}>
+    <PageCard className="shadow-dashboard" title="Purchase orders" description={`${visibleOrders.length} orders${requisition ? ` · ${requisitionDisplayReference(requisition)}` : ''} · Official forms, approval and delivery tracking`} action={canCreate && <button type="button" onClick={() => { setPoSelection(null); setCreating(true); }} className={createPoButtonClass}><Plus size={15} />Create PO</button>}>
       {error && <div className="p-4"><ErrorMessage>{error}</ErrorMessage></div>}
       {detailError && <div className="p-4"><ErrorMessage>{detailError}</ErrorMessage></div>}
       {recommendationError && <div className="px-4 pb-3"><ErrorMessage>{recommendationError}</ErrorMessage></div>}
@@ -875,7 +876,7 @@ export default function PurchaseOrdersPage({
             <span className="min-w-0">
               <span className="block break-words text-xs font-extrabold text-black">{entry.recommendedSupplier}</span>
               <span className="mt-0.5 block break-words text-[10px] text-black">
-                {entry.reference}{entry.requisitionReference ? ` · ${entry.requisitionReference}` : ''}
+                {entry.reference}{entry.requisitionReference ? ` · ${entry.requisitionDisplayReference || entry.requisitionReference}` : ''}
                 {entry.purchaseOrderReference ? ` · ${entry.purchaseOrderReference}` : ''}
               </span>
             </span>
@@ -914,7 +915,7 @@ export default function PurchaseOrdersPage({
                   {order.supplierContact || 'No contact recorded'}{order.supplierAddress ? ` · ${order.supplierAddress}` : ''}
                 </div>
               </td>
-              <td className="break-words px-3 py-4 font-medium text-black">{order.requisition || '—'}</td>
+              <td className="break-words px-3 py-4 font-medium text-black">{order.requisitionDisplayReference || order.requisition || '—'}</td>
               <td className="px-3 py-4">
                 <span className="inline-flex rounded-md border border-brand bg-white px-2 py-1 text-[10px] font-semibold text-black">
                   {order.type || 'Standard'}

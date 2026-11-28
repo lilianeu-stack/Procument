@@ -60,11 +60,12 @@ app.get('/api/health', async (_req, res) => {
 });
 app.use('/api', api);
 app.use((err, _req, res, _next) => {
-  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 500 ? err.status : 500;
-  if (status === 500) log('ERROR', `An API request failed (${errorCode(err)}): ${err.message}`);
-  return res.status(status).json({
-    message: status === 500 ? 'An unexpected server error occurred.' : err.message
-  });
+  const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  if (status >= 500) log('ERROR', `An API request failed (${errorCode(err)}): ${err.message}`);
+  // Provider failures (502/503/504) carry a deliberately user-facing message;
+  // only truly unexpected 500s are reduced to the generic notice.
+  const message = status === 500 ? 'An unexpected server error occurred.' : err.message;
+  return res.status(status).json({ message });
 });
 
 export default app;

@@ -45,6 +45,11 @@ function partsInTimezone(date) {
   return values;
 }
 
+export function dateParts(value) {
+  const date = parseInstant(value);
+  return date ? partsInTimezone(date) : null;
+}
+
 export function formatDate(value) {
   const date = parseInstant(value);
   if (!date) return '—';

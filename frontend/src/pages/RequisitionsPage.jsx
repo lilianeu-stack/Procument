@@ -3,6 +3,7 @@ import PageCard, { EmptyState, ErrorMessage } from '../components/ui/PageCard.js
 import StatusBadge from '../components/ui/StatusBadge.jsx';
 import { canAccessPage } from '../utils/access.js';
 import { currency, dateLabel, dateTimeLabel } from '../utils/format.js';
+import { requisitionDisplayReference } from '../utils/requisitionDisplay.js';
 
 // Legacy approval queue. Creation now happens only in the official Material
 // Request form in the Requester portal; the old compact requisition modal was
@@ -12,7 +13,7 @@ export default function RequisitionsPage({ page, requisitions, user, search, onD
   const approver = canAccessPage(user.role, 'Approvals');
   const visible = requisitions
     .filter((request) => page !== 'Approvals' || request.status === 'Pending')
-    .filter((request) => `${request.reference} ${request.requester} ${request.department} ${request.supervisorName} ${request.supervisorDecision} ${request.status}`
+    .filter((request) => `${request.reference} ${requisitionDisplayReference(request)} ${request.requester} ${request.department} ${request.supervisorName} ${request.supervisorDecision} ${request.status}`
       .toLowerCase()
       .includes(search.toLowerCase()));
 
@@ -27,7 +28,7 @@ export default function RequisitionsPage({ page, requisitions, user, search, onD
       <table className="w-full min-w-[960px] text-left text-xs">
         <thead className="bg-white text-[10px] uppercase tracking-wider text-black"><tr>{['Request', 'Requester', 'Supervisor decision', 'Items', 'Budget code', 'Est. total', 'Status', 'Actions'].map((cell) => <th key={cell} className="px-4 py-3">{cell}</th>)}</tr></thead>
         <tbody className="divide-y divide-subtle">{visible.map((request) => <tr key={request.id}>
-          <td className="px-4 py-4"><strong>{request.reference}</strong><div className="mt-1 text-[10px] text-black">{dateLabel(request.createdAt)}</div></td>
+          <td className="px-4 py-4"><strong>{requisitionDisplayReference(request)}</strong><div className="mt-1 text-[10px] text-black">{dateLabel(request.submittedAt || request.createdAt)}</div></td>
           <td className="px-4 py-4">{request.requester}<div className="mt-1 text-[10px] text-black">{request.department || '—'}</div></td>
           <td className="max-w-[220px] px-4 py-4">
             <span className="font-semibold">{request.supervisorName || '—'}</span>

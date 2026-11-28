@@ -83,7 +83,7 @@ export default function SupplierQuoteComparisonModal({
       <div className="no-print flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-[10px] font-extrabold uppercase tracking-widest text-black">Private procurement review</p>
-          <h3 className="display-font mt-1 text-lg font-extrabold">{comparison.request?.reference || `Pricing request ${requestId || '—'}`}</h3>
+          <h3 className="display-font mt-1 text-lg font-extrabold">{comparison.request?.requisitionDisplayReference || comparison.request?.reference || `Pricing request ${requestId || '—'}`}</h3>
           <p className="mt-1 text-xs text-black">
             {comparison.request?.poReference || comparison.request?.purchaseOrderReference || 'Purchase order'}
             {comparison.request?.submissionDeadline ? ` · Deadline ${dateLabel(comparison.request.submissionDeadline)}` : ''}

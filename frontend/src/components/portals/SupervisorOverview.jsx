@@ -10,6 +10,7 @@ import {
   TableScroll, TextLink, secondaryButtonClass
 } from './PortalUi.jsx';
 import { currency, dateLabel } from '../../utils/format.js';
+import { requisitionDisplayReference } from '../../utils/requisitionDisplay.js';
 
 function useDepartmentExtras(portalApi, includeRequests = true) {
   const [state, setState] = useState({ requests: [], stock: [], requesters: [], loading: true, error: '' });
@@ -49,14 +50,11 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
   ];
 
   if (mode === 'department') return <>
-    <PageHeader
-      eyebrow="Department"
-      title="My Department"
-      description="Details of your assigned Department and the Requesters who work in it."
-      actions={<button type="button" onClick={() => navigate('Requesters')} className={secondaryButtonClass()}>
+    <div className="mb-5 flex justify-end">
+      <button type="button" onClick={() => navigate('Requesters')} className={secondaryButtonClass()}>
         <UsersRound size={14} />View all Requesters
-      </button>}
-    />
+      </button>
+    </div>
     <div className="grid gap-5 lg:grid-cols-[340px_1fr]">
       <PageCard title="Department details">
         <dl className="space-y-4 p-5 text-xs">
@@ -128,7 +126,7 @@ export default function SupervisorOverview({ mode = 'overview', summary, portalA
                 <tbody className="divide-y">
                   {extras.requests.slice(0, 6).map((request) => <tr key={request.id}>
                     <td className="whitespace-nowrap px-4 py-3 font-bold text-black">
-                      <TextLink onClick={() => navigate('Procurement Requests', { request: request.id })}>{request.reference}</TextLink>
+                      <TextLink onClick={() => navigate('Procurement Requests', { request: request.id })}>{requisitionDisplayReference(request)}</TextLink>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{request.requester}</td>
                     <td className="max-w-[200px] truncate px-4 py-3">{request.title}</td>
