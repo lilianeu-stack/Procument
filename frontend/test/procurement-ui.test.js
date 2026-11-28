@@ -77,7 +77,11 @@ test('official purchase order follows the supplied template and requires image s
   assert.match(pageContent, /onSaveSignatures=\{actions\.savePurchaseOrderSignatures\}/);
 });
 
+<<<<<<< HEAD
+test('official purchase order uses the supplied design palette with large signatures', () => {
+=======
 test('official purchase order document uses the supplied design palette with large signatures', () => {
+>>>>>>> origin/master
   const documentSource = source('../src/components/documents/PurchaseOrderDocument.jsx');
   const css = source('../src/index.css');
 

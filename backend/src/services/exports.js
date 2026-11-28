@@ -31,9 +31,13 @@ const THEME = {
   surface: '#FFFFFF',
   ink: '#000000',
   border: '#000000',
+<<<<<<< HEAD
+  // Palette sampled from the supplied design image.
+=======
   green: '#7CB342',
   // Palette sampled from the supplied design image: light page, white card,
   // deep teal masthead, navy/slate type and soft blue-grey table panels.
+>>>>>>> origin/master
   page: '#F4F7F6',
   card: '#FFFFFF',
   teal: '#123D3A',
@@ -884,11 +888,18 @@ function recordFooter(doc) {
   const generated = `Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`;
   for (let index = pages.start; index < pages.start + pages.count; index += 1) {
     doc.switchToPage(index);
+<<<<<<< HEAD
+    doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
+      .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, doc.page.height - 34);
+    doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, doc.page.height - 34, {
+      width: doc.page.width - 80, align: 'right'
+=======
     const footerY = doc.page.height - doc.page.margins.bottom - 12;
     doc.font('Helvetica').fontSize(8).fillColor(THEME.muted)
       .text(generated, 40, footerY, { width: 260, lineBreak: false });
     doc.text(`Page ${index - pages.start + 1} of ${pages.count}`, 40, footerY, {
       width: doc.page.width - 80, align: 'right', lineBreak: false
+>>>>>>> origin/master
     });
   }
 }
@@ -914,9 +925,14 @@ function moneyText(value) {
 function officialHeader(doc, record, title) {
   const inset = paintDocumentPage(doc);
   const margin = 40;
+<<<<<<< HEAD
+  doc.save()
+    .rect(inset, inset, doc.page.width - inset * 2, 70)
+=======
   const bandHeight = 70;
   doc.save()
     .rect(inset, inset, doc.page.width - inset * 2, bandHeight)
+>>>>>>> origin/master
     .fill(THEME.teal)
     .restore();
 
@@ -966,18 +982,29 @@ function drawOfficialField(doc, label, value, x, y, width) {
 
 async function signatureBuffer(value) {
   if (typeof value !== 'string') return null;
+<<<<<<< HEAD
+  const match = value.trim().match(/^data:image\/([a-z0-9.+-]+);base64,([\s\S]+)$/i);
+  const base64 = match ? match[2] : value.trim();
+=======
   const dataUrl = value.trim().match(/^data:image\/([a-z0-9.+-]+);base64,([\s\S]+)$/i);
   const base64 = dataUrl ? dataUrl[2] : value.trim();
+>>>>>>> origin/master
   if (!base64 || !/^[A-Za-z0-9+/=\s]+$/.test(base64)) return null;
   let buffer;
   try {
     buffer = Buffer.from(base64, 'base64');
   } catch { return null; }
   if (!buffer.length) return null;
+<<<<<<< HEAD
+  const mime = match ? match[1].toLowerCase() : '';
+  if (mime === 'image/png' || mime === 'image/jpeg') return buffer;
+  // Signature pads upload WebP, which PDFKit cannot embed directly.
+=======
   const mime = dataUrl ? dataUrl[1].toLowerCase() : '';
   if (mime === 'image/png' || mime === 'image/jpeg') return buffer;
   // Browser signature pads commonly arrive as WebP, which PDFKit cannot embed.
   // Normalising unsupported formats to PNG keeps the uploaded image visible.
+>>>>>>> origin/master
   try {
     return await sharp(buffer).png().toBuffer();
   } catch { return null; }
@@ -1432,7 +1459,10 @@ export async function renderRecordPdf(record) {
 
   if (record.type === 'requisition') drawRequisitionDocument(doc, record);
   else if (record.type === 'purchaseOrder') await drawPurchaseOrderDocument(doc, record);
+<<<<<<< HEAD
+=======
   else if (record.type === 'goodsReceipt') await drawGoodsReceiptDocument(doc, record);
+>>>>>>> origin/master
   else await drawGenericRecordDocument(doc, record);
   recordFooter(doc);
   doc.end();
