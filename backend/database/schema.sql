@@ -8,6 +8,13 @@ USE Procument;
 -- application connection pins the session to UTC.
 SET time_zone = '+00:00';
 
+-- One-time data conversions are recorded here so a server restart cannot apply
+-- a historical backfill to newly created records.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  name VARCHAR(100) PRIMARY KEY,
+  applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS departments (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(100) NOT NULL UNIQUE,
@@ -64,6 +71,7 @@ CREATE TABLE IF NOT EXISTS procurement_committee_members (
 CREATE TABLE IF NOT EXISTS items (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   department_id INT UNSIGNED NULL,
+  storage_location VARCHAR(150) NULL,
   sku VARCHAR(50) NOT NULL UNIQUE,
   name VARCHAR(180) NOT NULL,
   category VARCHAR(100) NOT NULL,
@@ -90,7 +98,8 @@ CREATE TABLE IF NOT EXISTS requisitions (
     'Draft','Submitted','Pending Supervisor Approval','Information Required',
     'Approved by Supervisor','Rejected by Supervisor','Forwarded to Procurement',
     'Under Procurement Review','Procurement Approved','Procurement Rejected',
-    'Processing','Completed','Cancelled',
+    'Processing','Awaiting Stock Issue','Partially Issued','Returned to Supervisor',
+    'Completed','Cancelled',
     'Pending','Approved','Rejected','In procurement'
   ) NOT NULL DEFAULT 'Pending',
   reviewed_by INT UNSIGNED NULL,
@@ -103,6 +112,10 @@ CREATE TABLE IF NOT EXISTS requisitions (
   submitted_at DATETIME NULL,
   forwarded_at DATETIME NULL,
   forwarded_by_supervisor INT UNSIGNED NULL,
+  routing_destination ENUM('Procurement','Stock Keeper','Split') NULL,
+  routing_comments TEXT NULL,
+  routed_by_supervisor INT UNSIGNED NULL,
+  routed_at DATETIME NULL,
   procurement_decision_at DATETIME NULL,
   completed_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -112,6 +125,7 @@ CREATE TABLE IF NOT EXISTS requisitions (
   CONSTRAINT fk_req_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT fk_req_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE SET NULL,
   CONSTRAINT fk_req_forwarded_by FOREIGN KEY (forwarded_by_supervisor) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_req_routed_by FOREIGN KEY (routed_by_supervisor) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_req_requester_status (requester_id, status),
   INDEX idx_req_department_status (department_id, status)
 );
@@ -154,6 +168,28 @@ CREATE TABLE IF NOT EXISTS requisition_activity (
   CONSTRAINT fk_req_activity_req FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
   CONSTRAINT fk_req_activity_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
   INDEX idx_req_activity_date (requisition_id, created_at)
+);
+
+-- Supervisor routing allocations. One requested line can be split between the
+-- Stock Keeper (available quantity) and Procurement (quantity to purchase).
+-- Every quantity remains traceable to the original requisition item.
+CREATE TABLE IF NOT EXISTS requisition_routing_lines (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  requisition_item_id INT UNSIGNED NOT NULL,
+  item_id INT UNSIGNED NULL,
+  destination ENUM('Procurement','Stock Keeper') NOT NULL,
+  quantity INT UNSIGNED NOT NULL,
+  available_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+  issued_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+  returned_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('Pending','Issued','Returned') NOT NULL DEFAULT 'Pending',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_routing_line_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_routing_line_item_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_routing_line_catalog_item FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+  INDEX idx_routing_line_requisition (requisition_id, destination, status)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -208,6 +244,8 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   department_id INT UNSIGNED NULL,
   store_request_id INT UNSIGNED NULL,
   idempotency_key VARCHAR(80) NULL,
+  purchase_order_id INT UNSIGNED NULL,
+  goods_receipt_id INT UNSIGNED NULL,
   balance_after INT UNSIGNED NOT NULL,
   movement_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -603,6 +641,9 @@ CREATE TABLE IF NOT EXISTS goods_receipts (
   received_signature LONGTEXT NULL,
   verified_signature LONGTEXT NULL,
   grn_date DATE NULL,
+  comments TEXT NULL,
+  idempotency_key VARCHAR(80) NULL,
+  UNIQUE KEY uq_goods_receipt_idempotency (idempotency_key),
   CONSTRAINT fk_grn_po FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE SET NULL,
   CONSTRAINT fk_grn_user FOREIGN KEY (received_by) REFERENCES users(id),
   CONSTRAINT fk_grn_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
@@ -614,8 +655,16 @@ CREATE TABLE IF NOT EXISTS goods_receipt_items (
   item_id INT UNSIGNED NOT NULL,
   quantity INT UNSIGNED NOT NULL,
   comment TEXT NULL,
+  delivered_quantity INT UNSIGNED NULL,
+  damaged_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+  `condition` VARCHAR(40) NULL,
+  comments TEXT NULL,
+  department_id INT UNSIGNED NULL,
+  storage_location VARCHAR(150) NULL,
+  INDEX idx_grn_item_receipt (goods_receipt_id, item_id),
   CONSTRAINT fk_grn_item_receipt FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE CASCADE,
-  CONSTRAINT fk_grn_item_catalog FOREIGN KEY (item_id) REFERENCES items(id)
+  CONSTRAINT fk_grn_item_catalog FOREIGN KEY (item_id) REFERENCES items(id),
+  CONSTRAINT fk_grn_item_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
@@ -644,9 +693,18 @@ CREATE TABLE IF NOT EXISTS store_requests (
   reference VARCHAR(30) NOT NULL UNIQUE,
   requester_id INT UNSIGNED NOT NULL,
   department_id INT UNSIGNED NULL,
+  requisition_id INT UNSIGNED NULL,
   purpose TEXT NOT NULL,
   status ENUM('Pending','Approved','Rejected','Issued') NOT NULL DEFAULT 'Pending',
+  stockkeeper_decision ENUM('Pending','Accepted','Rejected') NOT NULL DEFAULT 'Pending',
+  stockkeeper_decision_by INT UNSIGNED NULL,
+  stockkeeper_decision_at DATETIME NULL,
+  stockkeeper_comments TEXT NULL,
+  rejection_reason TEXT NULL,
+  stockkeeper_viewed_at DATETIME NULL,
   reviewed_by INT UNSIGNED NULL,
+  routed_by_supervisor INT UNSIGNED NULL,
+  routed_at DATETIME NULL,
   submitted_at DATETIME NULL,
   approved_at DATETIME NULL,
   issued_at DATETIME NULL,
@@ -655,17 +713,66 @@ CREATE TABLE IF NOT EXISTS store_requests (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_store_requester FOREIGN KEY (requester_id) REFERENCES users(id),
   CONSTRAINT fk_store_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
-  CONSTRAINT fk_store_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_store_reviewer FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_store_request_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE SET NULL,
+  CONSTRAINT fk_store_request_routed_by FOREIGN KEY (routed_by_supervisor) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_store_request_decided_by FOREIGN KEY (stockkeeper_decision_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_store_request_requisition (requisition_id)
 );
 
 CREATE TABLE IF NOT EXISTS store_request_items (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   store_request_id INT UNSIGNED NOT NULL,
-  item_id INT UNSIGNED NOT NULL,
+  item_id INT UNSIGNED NULL,
+  requisition_item_id INT UNSIGNED NULL,
+  requested_item_name VARCHAR(180) NULL,
+  requested_unit VARCHAR(30) NULL,
   quantity INT UNSIGNED NOT NULL,
+  accepted_quantity INT UNSIGNED NULL,
   issued_quantity INT UNSIGNED NOT NULL DEFAULT 0,
   CONSTRAINT fk_store_item_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE CASCADE,
-  CONSTRAINT fk_store_item_catalog FOREIGN KEY (item_id) REFERENCES items(id)
+  CONSTRAINT fk_store_item_catalog FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+  CONSTRAINT fk_store_item_requisition_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE SET NULL,
+  KEY idx_store_item_requisition_line (requisition_item_id)
+);
+
+-- Recipients of a Supervisor-routed request. Explicit assignment is the
+-- authoritative per-request grant; department scope remains the default.
+CREATE TABLE IF NOT EXISTS store_request_assignments (
+  store_request_id INT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (store_request_id, user_id),
+  KEY idx_store_request_assignment_user (user_id),
+  CONSTRAINT fk_store_request_assignment_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE CASCADE,
+  CONSTRAINT fk_store_request_assignment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Physical count discrepancies discovered by a Stock Keeper. Issued quantities
+-- and their stock transactions remain untouched; only the unissued shortfall is
+-- returned to the Supervisor for a new routing decision.
+CREATE TABLE IF NOT EXISTS requisition_routing_returns (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT UNSIGNED NOT NULL,
+  store_request_id INT UNSIGNED NOT NULL,
+  requisition_item_id INT UNSIGNED NOT NULL,
+  item_id INT UNSIGNED NULL,
+  available_quantity INT UNSIGNED NOT NULL,
+  unavailable_quantity INT UNSIGNED NOT NULL,
+  reason TEXT NULL,
+  reported_by INT UNSIGNED NULL,
+  status ENUM('Awaiting Supervisor Decision','Forwarded to Procurement') NOT NULL DEFAULT 'Awaiting Supervisor Decision',
+  forwarded_by INT UNSIGNED NULL,
+  forwarded_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_routing_return_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+  CONSTRAINT fk_routing_return_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE CASCADE,
+  CONSTRAINT fk_routing_return_item_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_routing_return_catalog_item FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+  CONSTRAINT fk_routing_return_reporter FOREIGN KEY (reported_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_routing_return_forwarder FOREIGN KEY (forwarded_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_routing_return_requisition (requisition_id, status)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -680,6 +787,17 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   INDEX idx_notifications_user_date (user_id, created_at)
+);
+
+-- Per-recipient read receipts. Shared/broadcast notification rows stay visible
+-- as unread for every user until that user records a receipt.
+CREATE TABLE IF NOT EXISTS notification_read_receipts (
+  notification_id BIGINT UNSIGNED NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (notification_id, user_id),
+  CONSTRAINT fk_notification_read_notification FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+  CONSTRAINT fk_notification_read_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -730,6 +848,16 @@ CREATE TABLE IF NOT EXISTS google_email_messages (
   received_at DATETIME NULL,
   synced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_google_email_received (received_at)
+);
+
+-- A shared mailbox message is unread independently for each authorized user.
+CREATE TABLE IF NOT EXISTS email_message_read_receipts (
+  gmail_message_id VARCHAR(190) NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
+  read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (gmail_message_id, user_id),
+  CONSTRAINT fk_email_read_message FOREIGN KEY (gmail_message_id) REFERENCES google_email_messages(gmail_message_id) ON DELETE CASCADE,
+  CONSTRAINT fk_email_read_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- One row per outbound requisition form email. The token is included in the

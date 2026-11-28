@@ -533,6 +533,260 @@ const EXPORT_DEFINITIONS = {
         ) ledger
         ORDER BY sortOrder, \`Transaction date\`, Reference
       ) ordered`
+  },
+  stockkeeperStockIn: {
+    label: 'Stock In',
+    role: 'storekeeper',
+    dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
+    defaultField: 'movement',
+    textFilters: [
+      { key: 'itemId', clause: 'm.item_id = ?', exact: true },
+      { key: 'departmentId', clause: 'COALESCE(m.department_id, i.department_id) = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR m.reference_no LIKE ? OR m.source LIKE ?)' }
+    ],
+    customFilters: {
+      transactionType: {
+        Receipt: "m.movement_type = 'Receipt'",
+        Adjustment: "m.movement_type = 'Adjustment'"
+      }
+    },
+    sortable: { date: 'COALESCE(m.movement_at, m.created_at)', item: 'i.name', quantity: 'm.quantity' },
+    summaryColumns: ['Quantity'],
+    sql: `
+      SELECT i.sku AS 'Item code', i.name AS Item, i.category AS Category,
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(NULLIF(i.storage_location, ''), 'General storage') AS 'Storage location',
+        COALESCE(i.unit, 'unit') AS Unit,
+        COALESCE(m.reference_no, m.source, '—') AS Reference,
+        m.source AS Source, m.movement_type AS 'Transaction type',
+        m.quantity AS Quantity, m.balance_after AS Balance,
+        COALESCE(u.name, '—') AS 'Recorded by',
+        COALESCE(m.movement_at, m.created_at) AS 'Transaction date'
+      FROM inventory_movements m
+      JOIN items i ON i.id = m.item_id
+      LEFT JOIN departments d ON d.id = COALESCE(m.department_id, i.department_id)
+      LEFT JOIN users u ON u.id = m.user_id
+      WHERE m.direction = 'In' {{dateFilter}}
+      ORDER BY COALESCE(m.movement_at, m.created_at) DESC, m.id DESC`
+  },
+  stockkeeperStockOut: {
+    label: 'Stock Out',
+    role: 'storekeeper',
+    dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
+    defaultField: 'movement',
+    textFilters: [
+      { key: 'itemId', clause: 'm.item_id = ?', exact: true },
+      { key: 'departmentId', clause: 'COALESCE(m.department_id, i.department_id) = ?', exact: true },
+      { key: 'requesterId', clause: 'm.requester_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR m.reference_no LIKE ? OR m.source LIKE ?)' }
+    ],
+    customFilters: {
+      transactionType: {
+        Issue: "m.movement_type = 'Issue'",
+        Adjustment: "m.movement_type = 'Adjustment'"
+      }
+    },
+    sortable: { date: 'COALESCE(m.movement_at, m.created_at)', item: 'i.name', quantity: 'm.quantity' },
+    summaryColumns: ['Quantity'],
+    sql: `
+      SELECT i.sku AS 'Item code', i.name AS Item,
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(i.unit, 'unit') AS Unit,
+        COALESCE(m.reference_no, m.source, '—') AS Reference,
+        COALESCE(req.name, '—') AS Requester,
+        COALESCE(m.received_by, '—') AS 'Received by',
+        m.movement_type AS 'Transaction type', m.quantity AS Quantity,
+        m.balance_after AS 'Balance after', COALESCE(u.name, '—') AS 'Recorded by',
+        COALESCE(m.movement_at, m.created_at) AS 'Transaction date'
+      FROM inventory_movements m
+      JOIN items i ON i.id = m.item_id
+      LEFT JOIN departments d ON d.id = COALESCE(m.department_id, i.department_id)
+      LEFT JOIN users req ON req.id = m.requester_id
+      LEFT JOIN users u ON u.id = m.user_id
+      WHERE m.direction = 'Out' {{dateFilter}}
+      ORDER BY COALESCE(m.movement_at, m.created_at) DESC, m.id DESC`
+  },
+  stockkeeperCurrentBalance: {
+    label: 'Current Stock Balance',
+    role: 'storekeeper',
+    dateFields: { updated: 'i.updated_at' },
+    defaultField: 'updated',
+    textFilters: [
+      { key: 'itemId', clause: 'i.id = ?', exact: true },
+      { key: 'departmentId', clause: 'i.department_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR i.category LIKE ? OR i.storage_location LIKE ?)' }
+    ],
+    customFilters: {
+      status: {
+        Available: 'i.quantity > i.reorder_level',
+        'Low stock': 'i.quantity > 0 AND i.quantity <= i.reorder_level',
+        'Out of stock': 'i.quantity = 0'
+      }
+    },
+    sortable: { item: 'i.name', department: "COALESCE(d.name, '')", balance: 'i.quantity', updated: 'i.updated_at' },
+    summaryColumns: ['Current balance', 'Minimum level'],
+    sql: `
+      SELECT i.sku AS 'Item code', i.name AS Item, i.category AS Category,
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(NULLIF(i.storage_location, ''), 'General storage') AS 'Storage location',
+        COALESCE(i.unit, 'unit') AS Unit,
+        i.quantity AS 'Current balance', i.reorder_level AS 'Minimum level',
+        CASE WHEN i.quantity = 0 THEN 'Out of stock'
+          WHEN i.quantity <= i.reorder_level THEN 'Low stock' ELSE 'Available' END AS Status,
+        i.updated_at AS 'Last updated'
+      FROM items i LEFT JOIN departments d ON d.id = i.department_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY COALESCE(d.name, 'Unassigned'), i.storage_location, i.name`
+  },
+  stockkeeperDepartmentStock: {
+    label: 'Department Stock',
+    role: 'storekeeper',
+    dateFields: { updated: 'i.updated_at' },
+    defaultField: 'updated',
+    textFilters: [
+      { key: 'itemId', clause: 'i.id = ?', exact: true },
+      { key: 'departmentId', clause: 'i.department_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR i.storage_location LIKE ? OR d.name LIKE ?)' }
+    ],
+    sortable: { department: "COALESCE(d.name, '')", location: 'i.storage_location', item: 'i.name' },
+    summaryColumns: ['Current balance', 'Minimum level'],
+    sql: `
+      SELECT COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(NULLIF(i.storage_location, ''), 'General storage') AS 'Storage location',
+        i.sku AS 'Item code', i.name AS Item, COALESCE(i.unit, 'unit') AS Unit,
+        i.quantity AS 'Current balance', i.reorder_level AS 'Minimum level',
+        CASE WHEN i.quantity = 0 THEN 'Out of stock'
+          WHEN i.quantity <= i.reorder_level THEN 'Low stock' ELSE 'Available' END AS Status
+      FROM items i LEFT JOIN departments d ON d.id = i.department_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY COALESCE(d.name, 'Unassigned'), i.storage_location, i.name`
+  },
+  stockkeeperStockMovement: {
+    label: 'Stock Movement',
+    role: 'storekeeper',
+    dateFields: { movement: 'COALESCE(m.movement_at, m.created_at)', created: 'm.created_at' },
+    defaultField: 'movement',
+    textFilters: [
+      { key: 'itemId', clause: 'm.item_id = ?', exact: true },
+      { key: 'departmentId', clause: 'COALESCE(m.department_id, i.department_id) = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR m.reference_no LIKE ? OR m.source LIKE ?)' }
+    ],
+    customFilters: {
+      transactionType: {
+        Receipt: "m.movement_type = 'Receipt'",
+        Issue: "m.movement_type = 'Issue'",
+        Adjustment: "m.movement_type = 'Adjustment'"
+      },
+      direction: { In: "m.direction = 'In'", Out: "m.direction = 'Out'" }
+    },
+    sortable: { date: 'COALESCE(m.movement_at, m.created_at)', item: 'i.name', type: 'm.movement_type' },
+    summaryColumns: ['Stock in', 'Stock out'],
+    sql: `
+      SELECT i.sku AS 'Item code', i.name AS Item,
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(m.reference_no, m.source, '—') AS Reference,
+        COALESCE(m.description, m.source, m.movement_type, '—') AS Description,
+        m.movement_type AS 'Transaction type',
+        CASE WHEN m.direction = 'In' THEN m.quantity ELSE 0 END AS 'Stock in',
+        CASE WHEN m.direction = 'Out' THEN m.quantity ELSE 0 END AS 'Stock out',
+        m.balance_after AS Balance, COALESCE(u.name, '—') AS 'Recorded by',
+        COALESCE(m.movement_at, m.created_at) AS 'Transaction date'
+      FROM inventory_movements m
+      JOIN items i ON i.id = m.item_id
+      LEFT JOIN departments d ON d.id = COALESCE(m.department_id, i.department_id)
+      LEFT JOIN users u ON u.id = m.user_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY COALESCE(m.movement_at, m.created_at) DESC, m.id DESC`
+  },
+  stockkeeperLowStock: {
+    label: 'Low Stock',
+    role: 'storekeeper',
+    dateFields: { updated: 'i.updated_at' },
+    defaultField: 'updated',
+    textFilters: [
+      { key: 'itemId', clause: 'i.id = ?', exact: true },
+      { key: 'departmentId', clause: 'i.department_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR d.name LIKE ?)' }
+    ],
+    sortable: { item: 'i.name', department: "COALESCE(d.name, '')", balance: 'i.quantity' },
+    summaryColumns: ['Current balance', 'Minimum level', 'Shortfall'],
+    sql: `
+      SELECT i.sku AS 'Item code', i.name AS Item,
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(i.unit, 'unit') AS Unit,
+        i.quantity AS 'Current balance', i.reorder_level AS 'Minimum level',
+        GREATEST(0, i.reorder_level - i.quantity) AS Shortfall,
+        CASE WHEN i.quantity = 0 THEN 'Out of stock' ELSE 'Low stock' END AS Status,
+        i.updated_at AS 'Last updated'
+      FROM items i LEFT JOIN departments d ON d.id = i.department_id
+      WHERE i.quantity <= i.reorder_level {{dateFilter}}
+      ORDER BY i.quantity ASC, i.name`
+  },
+  stockkeeperDamagedGoods: {
+    label: 'Damaged / Rejected Goods',
+    role: 'storekeeper',
+    dateFields: { received: 'gr.received_at', expected: 'gr.expected_at' },
+    defaultField: 'received',
+    textFilters: [
+      { key: 'itemId', clause: 'gri.item_id = ?', exact: true },
+      { key: 'departmentId', clause: 'gri.department_id = ?', exact: true },
+      { key: 'supplierId', clause: 'p.supplier_id = ?', exact: true },
+      { key: 'search', clause: '(i.name LIKE ? OR i.sku LIKE ? OR gr.reference LIKE ? OR s.name LIKE ?)' }
+    ],
+    sortable: { date: 'gr.received_at', item: 'i.name', damaged: 'gri.damaged_quantity' },
+    summaryColumns: ['Delivered quantity', 'Accepted quantity', 'Damaged/rejected quantity'],
+    sql: `
+      SELECT gr.reference AS 'Receipt reference', p.reference AS 'Purchase order',
+        COALESCE(s.name, gr.source) AS Supplier,
+        i.sku AS 'Item code', i.name AS Item,
+        COALESCE(gri.delivered_quantity, gri.quantity + gri.damaged_quantity) AS 'Delivered quantity',
+        gri.quantity AS 'Accepted quantity',
+        gri.damaged_quantity AS 'Damaged/rejected quantity',
+        COALESCE(gri.condition, '—') AS 'Condition',
+        COALESCE(gri.comments, gr.comments, '—') AS Comments,
+        gr.received_at AS 'Received at'
+      FROM goods_receipt_items gri
+      JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+      JOIN items i ON i.id = gri.item_id
+      LEFT JOIN purchase_orders p ON p.id = gr.purchase_order_id
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      WHERE gri.damaged_quantity > 0 {{dateFilter}}
+      ORDER BY gr.received_at DESC, gri.id DESC`
+  },
+  stockkeeperSupplierDeliveries: {
+    label: 'Supplier Delivery / Receiving',
+    role: 'storekeeper',
+    dateFields: { received: 'gr.received_at', expected: 'gr.expected_at' },
+    defaultField: 'received',
+    textFilters: [
+      { key: 'itemId', clause: 'gri.item_id = ?', exact: true },
+      { key: 'departmentId', clause: 'gri.department_id = ?', exact: true },
+      { key: 'supplierId', clause: 'p.supplier_id = ?', exact: true },
+      { key: 'search', clause: '(gr.reference LIKE ? OR p.reference LIKE ? OR s.name LIKE ? OR i.name LIKE ?)' }
+    ],
+    sortable: { date: 'gr.received_at', supplier: "COALESCE(s.name, gr.source)", item: 'i.name' },
+    summaryColumns: ['Delivered quantity', 'Accepted quantity', 'Damaged/rejected quantity'],
+    sql: `
+      SELECT gr.reference AS 'Receipt reference', p.reference AS 'Purchase order',
+        COALESCE(s.name, gr.source) AS Supplier,
+        COALESCE(rec.name, '—') AS 'Received by',
+        gr.expected_at AS 'Expected at', gr.received_at AS 'Received at',
+        i.sku AS 'Item code', i.name AS Item,
+        COALESCE(gri.delivered_quantity, gri.quantity + gri.damaged_quantity) AS 'Delivered quantity',
+        gri.quantity AS 'Accepted quantity',
+        gri.damaged_quantity AS 'Damaged/rejected quantity',
+        COALESCE(d.name, 'Unassigned') AS Department,
+        COALESCE(NULLIF(gri.storage_location, ''), 'General storage') AS 'Storage location',
+        COALESCE(gr.comments, '—') AS Comments
+      FROM goods_receipts gr
+      JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+      JOIN items i ON i.id = gri.item_id
+      LEFT JOIN purchase_orders p ON p.id = gr.purchase_order_id
+      LEFT JOIN suppliers s ON s.id = p.supplier_id
+      LEFT JOIN users rec ON rec.id = gr.received_by
+      LEFT JOIN departments d ON d.id = gri.department_id
+      WHERE 1 = 1 {{dateFilter}}
+      ORDER BY gr.received_at DESC, gri.id DESC`
   }
 };
 
@@ -1491,7 +1745,7 @@ export async function renderRecordXlsx(record) {
 
   function addSheet(name, rows) {
     if (!rows.length) return;
-    const sheet = workbook.addWorksheet(name.slice(0, 31));
+    const sheet = workbook.addWorksheet(safeSheetName(name));
     const columns = Object.keys(rows[0]);
     sheet.addRow(columns).font = { bold: true, color: { argb: XLSX_INK } };
     sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_HEADER_FILL } };
@@ -1531,6 +1785,12 @@ function logoPath() {
 
 function safeFilename(value) {
   return String(value).replace(/[^a-z0-9-_]+/gi, '-').replace(/^-|-$/g, '').slice(0, 80) || 'record';
+}
+
+// Excel worksheet names cannot contain these characters; report titles such as
+// "Damaged / Rejected Goods" must still produce a valid workbook.
+function safeSheetName(value) {
+  return String(value).replace(/[*?:\\/[\]]+/g, '-').replace(/^-|-$/g, '').slice(0, 31) || 'Report';
 }
 
 export function exportFilename(label, format, reference = '') {
@@ -1909,6 +2169,22 @@ function describeFilters(definition, query, filter) {
   return items.join(' · ') || 'None';
 }
 
+function summaryTotals(definition, rows) {
+  return (definition.summaryColumns || []).map((column) => ({
+    column,
+    label: `Total ${column}`,
+    value: rows.reduce((sum, row) => {
+      const value = Number(row[column]);
+      return Number.isFinite(value) ? sum + value : sum;
+    }, 0)
+  }));
+}
+
+function summaryLabel(report) {
+  if (!report.summary?.length) return '';
+  return report.summary.map((total) => `${total.label}: ${displayValue(total.value)}`).join(' · ');
+}
+
 export async function fetchExportRows(key, query, user) {
   if (key === PORTAL_EXPORT_KEY) {
     if (!canExport(user, key)) {
@@ -1961,6 +2237,7 @@ export async function fetchExportRows(key, query, user) {
   return {
     label: definition.label,
     rows,
+    summary: summaryTotals(definition, rows),
     dateField: filter.field,
     from: query.from || '',
     to: query.to || '',
@@ -2010,7 +2287,12 @@ export async function renderPdf(report, reference = '') {
   }
   doc.font('Helvetica').fontSize(9).fillColor(THEME.ink)
     .text(`Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC`, 40, y);
-  y += 24;
+  y += 18;
+  if (summaryLabel(report)) {
+    doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.ink)
+      .text(`Totals: ${summaryLabel(report)}`, 40, y, { width: doc.page.width - 80 });
+    y += 22;
+  }
 
   const columns = Object.keys(report.rows[0] || { Generated: '' });
   const usableWidth = doc.page.width - 80;
@@ -2070,7 +2352,7 @@ export async function renderXlsx(report, reference = '') {
   workbook.creator = BRAND.organization;
   workbook.title = report.label;
   workbook.created = new Date();
-  const sheet = workbook.addWorksheet(report.label.slice(0, 31), {
+  const sheet = workbook.addWorksheet(safeSheetName(report.label), {
     views: [{ state: 'frozen', ySplit: 8 }]
   });
 
@@ -2091,6 +2373,10 @@ export async function renderXlsx(report, reference = '') {
   sheet.getCell('B5').font = { bold: true, size: 11 };
   sheet.getCell('B6').value = `Applied filters: ${report.filters || 'None'} · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
   sheet.getCell('B6').font = { size: 9, color: { argb: XLSX_INK } };
+  if (summaryLabel(report)) {
+    sheet.getCell('B7').value = `Totals: ${summaryLabel(report)}`;
+    sheet.getCell('B7').font = { bold: true, size: 9, color: { argb: XLSX_INK } };
+  }
 
   const columns = report.rows.length ? Object.keys(report.rows[0]) : ['No records found'];
   const headerRow = sheet.getRow(8);
@@ -2133,6 +2419,7 @@ export function renderCsv(report) {
     `"${report.label}"`,
     `"Applied filters: ${String(report.filters || 'None').replace(/"/g, '""')}"`,
     `"Generated ${new Date().toISOString().replace('T', ' ').slice(0, 16)} UTC"`,
+    ...(summaryLabel(report) ? [escape(`Totals: ${summaryLabel(report)}`)] : []),
     columns.map(escape).join(','),
     ...report.rows.map((row) => columns.map((column) => `"${exportFormatValue(row[column], column, report).replace(/"/g, '""')}"`).join(','))
   ];

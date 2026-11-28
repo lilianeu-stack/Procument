@@ -32,9 +32,14 @@ test('datetime-local values keep hours and minutes through a timezone round trip
 test('date presets cover every required range and start weeks on Monday', () => {
   const presets = datePresets();
   const keys = presets.map((preset) => preset.key);
-  for (const key of ['today', 'yesterday', 'week', 'month', 'quarter', 'year', 'custom']) {
+  for (const key of ['today', 'yesterday', 'week', 'month', 'quarter', 'year', 'lastYear', 'custom']) {
     assert.ok(keys.includes(key), `missing preset: ${key}`);
   }
+  const currentYear = new Date().getFullYear();
+  const lastYear = presets.find((preset) => preset.key === 'lastYear');
+  assert.equal(lastYear.label, 'Last year');
+  assert.equal(lastYear.from, `${currentYear - 1}-01-01`);
+  assert.equal(lastYear.to, `${currentYear - 1}-12-31`);
   const week = presets.find((preset) => preset.key === 'week');
   const weekday = new Date(`${week.from}T00:00:00Z`).getUTCDay();
   assert.equal(weekday, 1);

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import { READ_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, markNotificationRead } from '../lib/notification-reads.js';
 import { allowRoles } from '../middleware/auth.js';
 import {
   businessDate, businessDateTime, dateFilterClause, enforceDateOrder, parseDateFilter, toUtcDateTime
@@ -417,6 +418,55 @@ export async function approvalView(executor, approval) {
   };
 }
 
+async function notifyStockkeepersOfExpectedDelivery(connection, purchaseOrderId) {
+  const [[order]] = await connection.execute(
+    `SELECT p.id, p.reference, p.delivery_date AS expectedDate, p.type,
+        p.supplier_contact AS supplierContact, p.supplier_address AS supplierAddress,
+        s.name AS supplier, officer.name AS procurementOfficer,
+        f.reference AS rfqReference, r.id AS requisitionId
+     FROM purchase_orders p
+     JOIN suppliers s ON s.id = p.supplier_id
+     LEFT JOIN users officer ON officer.id = p.created_by
+     LEFT JOIN rfqs f ON f.id = p.rfq_id
+     LEFT JOIN requisitions r ON r.id = f.requisition_id
+    WHERE p.id = ? LIMIT 1`,
+    [purchaseOrderId]
+  );
+  if (!order) return;
+  const [lines] = await connection.execute(
+    `SELECT item_name AS itemName, quantity, unit
+       FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id`,
+    [purchaseOrderId]
+  );
+  const [documents] = order.requisitionId ? await connection.execute(
+    'SELECT COUNT(*) AS total FROM requisition_attachments WHERE requisition_id = ?',
+    [order.requisitionId]
+  ) : [[]];
+  const link = `#/stockkeeper/Stock%20In?purchaseOrder=${purchaseOrderId}`;
+  const expectedDate = order.expectedDate ? new Date(order.expectedDate) : null;
+  const expected = expectedDate && !Number.isNaN(expectedDate.getTime())
+    ? expectedDate.toISOString().slice(0, 10) : 'date to be confirmed';
+  const delivery = [order.type, order.supplierContact, order.supplierAddress]
+    .filter(Boolean).join(' · ') || 'Delivery details recorded on the purchase order.';
+  const items = lines.length
+    ? lines.map((line) => `${Number(line.quantity)} ${line.unit || 'unit'} ${line.itemName}`).join(', ')
+    : 'Line items on the purchase order';
+  const body = [
+    `Expected delivery for approved purchase order ${order.reference}.`,
+    `Supplier: ${order.supplier}. Expected date: ${expected}.`,
+    `Items: ${items}.`,
+    `Procurement officer: ${order.procurementOfficer || 'not recorded'}.`,
+    `Delivery information: ${delivery}.`,
+    `Documents: ${link} (${Number(documents[0]?.total) || 0} attached file(s)).`
+  ].join(' ');
+  const [stockkeepers] = await connection.execute(
+    "SELECT id FROM users WHERE role = 'storekeeper' AND active = TRUE"
+  );
+  for (const keeper of stockkeepers) {
+    await createNotification(connection, keeper.id, 'Expected delivery authorized', body, link, 'expected_delivery');
+  }
+}
+
 export async function recordPurchaseOrderDecision(connection, {
   id, approval = null, decision, comment = '', actorId
 }) {
@@ -487,6 +537,9 @@ export async function recordPurchaseOrderDecision(connection, {
       `${order.reference} was ${decision.toLowerCase()}${decisionComment ? `: ${decisionComment}` : ''}.`,
       `/purchase-orders/${id}`
     );
+  }
+  if (decision === 'Approved') {
+    await notifyStockkeepersOfExpectedDelivery(connection, id);
   }
   return { order, approval };
 }
@@ -2432,8 +2485,13 @@ router.patch('/invoices/:id/decision', allowRoles(...finance), async (req, res, 
 router.get('/notifications', async (req, res, next) => {
   try {
     const [notifications] = await pool.execute(
-      'SELECT id, title, body, link, category, is_read AS isRead, created_at AS createdAt FROM notifications WHERE user_id = ? OR user_id IS NULL ORDER BY created_at DESC LIMIT 50',
-      [req.user.id]
+      `SELECT n.id, n.title, n.body, n.link, n.category,
+         CASE WHEN ${READ_NOTIFICATION_SQL} THEN TRUE ELSE FALSE END AS isRead,
+         n.created_at AS createdAt
+       FROM notifications n
+       WHERE (n.user_id = ? OR n.user_id IS NULL) AND ${VALID_NOTIFICATION_SQL}
+       ORDER BY n.created_at DESC LIMIT 50`,
+      [req.user.id, req.user.id]
     );
     return res.json({ notifications });
   } catch (error) { return next(error); }
@@ -2441,12 +2499,17 @@ router.get('/notifications', async (req, res, next) => {
 
 router.patch('/notifications/:id/read', async (req, res, next) => {
   try {
-    const [result] = await pool.execute(
-      'UPDATE notifications SET is_read = TRUE WHERE id = ? AND (user_id = ? OR user_id IS NULL)',
-      [req.params.id, req.user.id]
+    const notificationId = Number(req.params.id);
+    if (!Number.isInteger(notificationId) || notificationId < 1) {
+      return res.status(400).json({ message: 'Invalid notification identifier.' });
+    }
+    const [[notification]] = await pool.execute(
+      'SELECT id FROM notifications WHERE id = ? AND (user_id = ? OR user_id IS NULL) LIMIT 1',
+      [notificationId, req.user.id]
     );
-    if (!result.affectedRows) return res.status(404).json({ message: 'Notification not found.' });
-    return res.json({ message: 'Notification marked as read.' });
+    if (!notification) return res.status(404).json({ message: 'Notification not found.' });
+    const ids = await markNotificationRead(pool, req.user.id, notificationId);
+    return res.json({ message: 'Notification marked as read.', updated: ids.length });
   } catch (error) { return next(error); }
 });
 

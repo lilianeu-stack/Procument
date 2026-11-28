@@ -10,6 +10,9 @@ export const REQUISITION_STATUS = {
   PROCUREMENT_APPROVED: 'Procurement Approved',
   PROCUREMENT_REJECTED: 'Procurement Rejected',
   PROCESSING: 'Processing',
+  AWAITING_STOCK_ISSUE: 'Awaiting Stock Issue',
+  PARTIALLY_ISSUED: 'Partially Issued',
+  RETURNED_TO_SUPERVISOR: 'Returned to Supervisor',
   COMPLETED: 'Completed',
   CANCELLED: 'Cancelled'
 };
@@ -26,6 +29,9 @@ export const STATUS_LABELS = {
   [REQUISITION_STATUS.PROCUREMENT_APPROVED]: 'Procurement Approved',
   [REQUISITION_STATUS.PROCUREMENT_REJECTED]: 'Procurement Rejected',
   [REQUISITION_STATUS.PROCESSING]: 'Processing',
+  [REQUISITION_STATUS.AWAITING_STOCK_ISSUE]: 'Awaiting Stock Issue',
+  [REQUISITION_STATUS.PARTIALLY_ISSUED]: 'Partially Issued',
+  [REQUISITION_STATUS.RETURNED_TO_SUPERVISOR]: 'Returned to Supervisor',
   [REQUISITION_STATUS.COMPLETED]: 'Completed',
   [REQUISITION_STATUS.CANCELLED]: 'Cancelled',
   Pending: 'Pending (legacy)',

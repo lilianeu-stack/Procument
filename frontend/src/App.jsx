@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LoginPage from './pages/LoginPage.jsx';
 import PageContent from './pages/PageContent.jsx';
 import AdminLayout from './components/portals/AdminLayout.jsx';
@@ -33,7 +33,10 @@ import PurchaseOrderApprovalPage from './components/portals/PurchaseOrderApprova
 import ErrorBoundary from './components/ui/ErrorBoundary.jsx';
 import { initialsFor } from './components/ui/UserAvatar.jsx';
 import { api } from './services/api.js';
-import { fetchSidebarCounts } from './services/sidebarCounts.js';
+import {
+  fetchSidebarCounts, markAllNotificationsRead as requestMarkAllNotificationsRead,
+  markModuleNotificationsRead, shouldMarkModuleOnOpen
+} from './services/sidebarCounts.js';
 import {
   canAccessPage, canonicalPage, defaultPageForPortal, portalForRole, roleLabel,
   PORTALS, PROCUREMENT_COMMITTEE_PAGE, PROCUREMENT_PROCESSING_PAGE, PROFILE_PAGE, RECEIVED_REQUESTS_PAGE
@@ -42,6 +45,11 @@ import { buildRoute, parseRoute, readRouteFromLocation } from './utils/routes.js
 import { dateQueryForFilter } from './utils/reportFields.js';
 
 const StockKeeperRequesters = lazy(() => import('./components/portals/StockKeeperRequesters.jsx'));
+const StockKeeperSupervisorRequests = lazy(() => import('./components/portals/StockKeeperSupervisorRequests.jsx'));
+const StockKeeperStockOverview = lazy(() => import('./components/portals/StockKeeperStockOverview.jsx'));
+const StockKeeperStockIn = lazy(() => import('./components/portals/StockKeeperStockIn.jsx'));
+const StockKeeperStockOut = lazy(() => import('./components/portals/StockKeeperStockOut.jsx'));
+const StockKeeperInventoryReports = lazy(() => import('./components/portals/StockKeeperInventoryReports.jsx'));
 
 const initialData = {
   dashboard: null,
@@ -84,13 +92,18 @@ function toQuery(params = {}) {
 // Portal pages need more than the summary; load the data each page starts with.
 async function loadPortalExtras(portal, page) {
   if (portal === 'stockkeeper') {
-    if (page === 'List of Requesters') return null;
+    if (page === 'Requests from Supervisors') {
+      return { routedRequests: (await api('/portal/stockkeeper/routed-requests')).requests || [] };
+    }
+    if (page === 'Stock Out') {
+      return { issueRequests: (await api('/portal/stockkeeper/issue-requests')).requests || [] };
+    }
+    if (page === 'Stock In') {
+      return { expectedDeliveries: (await api('/portal/stockkeeper/expected-deliveries')).deliveries || [] };
+    }
     if (page === 'Bin Card') {
-      const [items, issueRequests] = await Promise.all([
-        api('/portal/stockkeeper/items'),
-        api('/portal/stockkeeper/issue-requests')
-      ]);
-      return { stockItems: items.items || [], issueRequests: issueRequests.requests || [] };
+      const items = await api('/portal/stockkeeper/items');
+      return { stockItems: items.items || [] };
     }
     return null;
   }
@@ -151,6 +164,12 @@ export default function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [dateFilters, setDateFilters] = useState({});
   const [sidebarCounts, setSidebarCounts] = useState({});
+  // Count requests are sequenced so a slow response from an older page cannot
+  // overwrite a newer count after a module has been marked read.
+  const countSequenceRef = useRef(0);
+  const countUserRef = useRef(null);
+  const loadSequenceRef = useRef(0);
+  const markedPageRef = useRef(null);
 
   const portal = user ? portalForRole(user.role) : null;
   const activePortal = route.portal || portal;
@@ -203,11 +222,18 @@ export default function App() {
   }, [activePage]);
 
   const refreshSidebarCounts = useCallback(async () => {
-    if (!user) return;
+    if (!user) return {};
+    const scope = String(user.id);
+    const sequence = ++countSequenceRef.current;
+    countUserRef.current = scope;
     try {
-      setSidebarCounts(await fetchSidebarCounts());
+      const counts = await fetchSidebarCounts();
+      if (sequence !== countSequenceRef.current || countUserRef.current !== scope) return {};
+      setSidebarCounts(counts);
+      return counts;
     } catch {
       // Keep the last known counts when a transient refresh fails.
+      return {};
     }
   }, [user]);
 
@@ -234,6 +260,7 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     if (!user || !portal) return;
+    const loadToken = ++loadSequenceRef.current;
     setLoading(true);
     setError('');
     const filterQuery = toQuery(dateQueryForFilter(activeFilter));
@@ -314,7 +341,23 @@ export default function App() {
         ]);
         setData({ ...initialData, portalSummary: summary, notifications: notifications.notifications, portalExtras });
       }
-      await refreshSidebarCounts();
+
+      // Only a successful page/data load can clear a module's unread badge.
+      // A reload caused by an unrelated mutation does not clear a badge that
+      // arrived while the user was already on this page.
+      const markedPage = `${user.id}:${activePage}`;
+      if (loadToken === loadSequenceRef.current
+        && markedPageRef.current !== markedPage
+        && shouldMarkModuleOnOpen(activePage)
+        && canAccessPage(user.role, activePage)) {
+        markedPageRef.current = markedPage;
+        try {
+          await markModuleNotificationsRead(activePage);
+        } catch {
+          if (markedPageRef.current === markedPage) markedPageRef.current = null;
+        }
+      }
+      if (loadToken === loadSequenceRef.current) await refreshSidebarCounts();
     } catch (exception) {
       setError(exception.message);
       if (!localStorage.getItem('pims-token')) setUser(null);
@@ -357,6 +400,10 @@ export default function App() {
 
   function logout() {
     localStorage.removeItem('pims-token');
+    countSequenceRef.current += 1;
+    countUserRef.current = null;
+    loadSequenceRef.current += 1;
+    markedPageRef.current = null;
     setUser(null);
     setData(initialData);
     setSidebarCounts({});
@@ -413,6 +460,8 @@ export default function App() {
       getSupervisorRequest: (id) => api(`/portal/supervisor/requisitions/${id}`),
       decideRequest: (id, payload) => post(`/portal/supervisor/requisitions/${id}/decision`, payload),
       forwardRequest: (id) => post(`/portal/supervisor/requisitions/${id}/forward`),
+      routeRequest: (id, payload) => post(`/portal/supervisor/requisitions/${id}/route`, payload),
+      routeShortage: (id, payload) => post(`/portal/supervisor/requisitions/${id}/route-return`, payload),
       getRequesters: async () => api('/portal/supervisor/requesters'),
       getDepartmentUsers: async () => api('/portal/supervisor/department-users'),
       getDepartments: async () => api('/procurement/departments'),
@@ -446,12 +495,14 @@ export default function App() {
         return result;
       },
       markAllNotificationsRead: async () => {
-        const result = await api('/portal/stockkeeper/notifications/read-all', { method: 'PATCH' });
+        const updated = await requestMarkAllNotificationsRead();
         await refreshSidebarCounts();
-        return result;
+        return { updated };
       },
       getStockItems: (params = {}) => api(`/portal/stockkeeper/items${toQuery(params)}`),
       getBinCard: (id) => api(`/portal/stockkeeper/items/${id}`),
+      getStockOverview: (params = {}) => api(`/portal/stockkeeper/stock-overview${toQuery(params)}`),
+      updateStockLocation: (id, payload) => patch(`/portal/stockkeeper/items/${id}/location`, payload),
       getIssueRequests: () => api('/portal/stockkeeper/issue-requests'),
       getPurchaseOrderDeliveries: (params = {}) => api(`/portal/stockkeeper/deliveries${toQuery(params)}`),
       acceptPurchaseOrderDelivery: async (id, payload) => {
@@ -464,9 +515,20 @@ export default function App() {
         await refreshSidebarCounts();
         return result;
       },
+      getRoutedRequests: () => api('/portal/stockkeeper/routed-requests'),
+      getRoutedRequest: (id) => api(`/portal/stockkeeper/routed-requests/${id}`),
+      reportStockShortage: (id, payload) => post(`/portal/stockkeeper/routed-requests/${id}/return-shortage`, payload),
+      decideStockRequest: (id, payload) => post(`/portal/stockkeeper/requests/${id}/decision`, payload),
+      issueStock: (payload) => post('/portal/stockkeeper/transactions/stock-out', payload),
+      issueRequest: (id, payload) => post(`/portal/stockkeeper/requests/${id}/issue`, payload),
       getStockKeeperRequesters: (params = {}) => api(`/portal/stockkeeper/requesters${toQuery(params)}`),
       getRequesterDetails: (id) => api(`/portal/stockkeeper/requesters/${id}`),
       getRequesterHistory: (id, params = {}) => api(`/portal/stockkeeper/requesters/${id}/history${toQuery(params)}`),
+      getExpectedDeliveries: () => api('/portal/stockkeeper/expected-deliveries'),
+      getExpectedDelivery: (id) => api(`/portal/stockkeeper/expected-deliveries/${id}`),
+      receiveAll: (id, payload) => post(`/portal/stockkeeper/expected-deliveries/${id}/receive-all`, payload),
+      receiveItems: (id, payload) => post(`/portal/stockkeeper/expected-deliveries/${id}/receive-items`, payload),
+      getInventoryReport: (params = {}) => api(`/portal/stockkeeper/inventory-report${toQuery(params)}`),
       stockIn: (payload) => post('/portal/stockkeeper/transactions/stock-in', payload),
       stockOut: (payload) => post('/portal/stockkeeper/transactions/stock-out', payload),
       stockAdjustment: (payload) => post('/portal/stockkeeper/transactions/adjustment', payload)
@@ -481,23 +543,29 @@ export default function App() {
 
   async function openNotification(notification) {
     try {
-      await api(`/notifications/${notification.id}/read`, { method: 'PATCH' });
+      const link = notification.link || '';
+      // A message notification is not the message itself. Navigation to the
+      // conversation must leave it unread until that message is actually opened.
+      const isMessageNotice = notification.category === 'message' || link.includes('message=');
+      if (!isMessageNotice) {
+        await api(`/notifications/${notification.id}/read`, { method: 'PATCH' });
+        setData((current) => ({
+          ...current,
+          notifications: current.notifications.map((item) => item.id === notification.id ? { ...item, isRead: true } : item)
+        }));
+      }
       await refreshSidebarCounts();
       setNotificationsOpen(false);
-      setData((current) => ({
-        ...current,
-        notifications: current.notifications.map((item) => item.id === notification.id ? { ...item, isRead: true } : item)
-      }));
 
-      const parsed = parseRoute(notification.link || '');
+      const parsed = parseRoute(link);
       if (canonicalPage(parsed.page) === RECEIVED_REQUESTS_PAGE && canAccessPage(user.role, RECEIVED_REQUESTS_PAGE)) {
         go('admin', RECEIVED_REQUESTS_PAGE, { view: parsed.query.request });
         void loadData();
         return;
       }
-      if (parsed.portal && parsed.portal !== 'admin' && canAccessPage(user.role, parsed.page || defaultPageForPortal(parsed.portal))) {
-        const destination = canonicalPage(parsed.page) || defaultPageForPortal(parsed.portal);
-        go(parsed.portal, destination, parsed.query);
+      const routedDestination = canonicalPage(parsed.page) || defaultPageForPortal(parsed.portal);
+      if (parsed.portal && parsed.portal !== 'admin' && canAccessPage(user.role, routedDestination)) {
+        go(parsed.portal, routedDestination, parsed.query);
         void loadData();
         return;
       }
@@ -506,7 +574,6 @@ export default function App() {
         void loadData();
         return;
       }
-      const link = notification.link || '';
       // Purchase-order notifications open the original request's workflow,
       // because POs are no longer a standalone Administrator page.
       const purchaseOrderId = Number(link.match(/\/purchase-orders\/(\d+)/)?.[1]);
@@ -616,6 +683,11 @@ export default function App() {
     disconnectGoogleEmail: () => mutate('/email/google/disconnect', {}),
     getInboxMessages: () => api('/email/inbox/messages'),
     getInboxMessage: (id) => api(`/email/inbox/messages/${encodeURIComponent(id)}`),
+    markEmailRead: async (id) => {
+      const result = await api(`/email/inbox/messages/${encodeURIComponent(id)}/read`, { method: 'PATCH' });
+      await refreshSidebarCounts();
+      return result;
+    },
     syncInbox: () => mutate('/email/inbox/sync', {}),
     sendEmail: (message) => mutate('/email/send', message),
     listRfqs: (params = {}) => api(`/rfqs${toQuery(params)}`),
@@ -760,11 +832,33 @@ export default function App() {
       />;
     }
   } else if (portal === 'stockkeeper') {
-    if (activePage === 'List of Requesters') {
-      portalContent = <Suspense fallback={<div role="status" className="p-8 text-sm text-black">Loading requester directory…</div>}>
-        <StockKeeperRequesters portalApi={portalApi} initial={extras} user={displayUser} />
+    const stockLoader = (label) => <div role="status" className="p-8 text-sm text-black">Loading {label}…</div>;
+    if (activePage === 'Requests from Supervisors') {
+      portalContent = <Suspense fallback={stockLoader('Supervisor requests')}>
+        <StockKeeperSupervisorRequests
+          portalApi={portalApi}
+          query={route.query || {}}
+          initial={extras.routedRequests}
+          user={displayUser}
+        />
       </Suspense>;
-    } else if (activePage === 'Notification') {
+    } else if (activePage === 'Stock Overview') {
+      portalContent = <Suspense fallback={stockLoader('stock overview')}>
+        <StockKeeperStockOverview portalApi={portalApi} />
+      </Suspense>;
+    } else if (activePage === 'Stock In') {
+      portalContent = <Suspense fallback={stockLoader('expected deliveries')}>
+        <StockKeeperStockIn portalApi={portalApi} query={route.query || {}} initial={extras.expectedDeliveries} />
+      </Suspense>;
+    } else if (activePage === 'Stock Out') {
+      portalContent = <Suspense fallback={stockLoader('accepted requests')}>
+        <StockKeeperStockOut portalApi={portalApi} initial={extras.issueRequests} />
+      </Suspense>;
+    } else if (activePage === 'Inventory Reports') {
+      portalContent = <Suspense fallback={stockLoader('inventory reports')}>
+        <StockKeeperInventoryReports portalApi={portalApi} user={displayUser} department={displayUser?.departmentName || displayUser?.department || ''} />
+      </Suspense>;
+    } else if (activePage === 'Notifications') {
       portalContent = <StockKeeperNotifications
         notifications={data.notifications}
         portalApi={portalApi}
@@ -776,7 +870,6 @@ export default function App() {
       portalContent = <StockKeeperBinCards
         portalApi={portalApi}
         initialItems={extras.stockItems}
-        initialIssueRequests={extras.issueRequests}
         query={route.query || {}}
         navigate={navigatePage}
         user={displayUser}

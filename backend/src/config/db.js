@@ -55,7 +55,8 @@ const REQUISITION_STATUSES = [
   'Draft', 'Submitted', 'Pending Supervisor Approval', 'Information Required',
   'Approved by Supervisor', 'Rejected by Supervisor', 'Forwarded to Procurement',
   'Under Procurement Review', 'Procurement Approved', 'Procurement Rejected',
-  'Processing', 'Completed', 'Cancelled',
+  'Processing', 'Awaiting Stock Issue', 'Partially Issued', 'Returned to Supervisor',
+  'Completed', 'Cancelled',
   // Legacy statuses are retained so existing procurement records keep working.
   'Pending', 'Approved', 'Rejected', 'In procurement'
 ];
@@ -255,6 +256,7 @@ export async function applySchemaMigrations() {
     { table: 'departments', column: 'parent_id', ddl: 'ALTER TABLE departments ADD COLUMN parent_id INT UNSIGNED NULL AFTER description' },
     { table: 'users', column: 'phone', ddl: 'ALTER TABLE users ADD COLUMN phone VARCHAR(50) NULL AFTER email' },
     { table: 'items', column: 'department_id', ddl: 'ALTER TABLE items ADD COLUMN department_id INT UNSIGNED NULL AFTER id' },
+    { table: 'items', column: 'storage_location', ddl: 'ALTER TABLE items ADD COLUMN storage_location VARCHAR(150) NULL AFTER department_id' },
     { table: 'requisitions', column: 'title', ddl: 'ALTER TABLE requisitions ADD COLUMN title VARCHAR(180) NULL AFTER department_id' },
     { table: 'requisitions', column: 'required_by', ddl: 'ALTER TABLE requisitions ADD COLUMN required_by DATE NULL AFTER budget_code' },
     { table: 'requisitions', column: 'priority', ddl: "ALTER TABLE requisitions ADD COLUMN priority ENUM('Low','Medium','High','Urgent') NOT NULL DEFAULT 'Medium' AFTER budget_code" },
@@ -268,6 +270,34 @@ export async function applySchemaMigrations() {
     // Authoritative marker that a Department Supervisor explicitly forwarded the
     // request. A status alone is not enough: approval never forwards a document.
     { table: 'requisitions', column: 'forwarded_by_supervisor', ddl: 'ALTER TABLE requisitions ADD COLUMN forwarded_by_supervisor INT UNSIGNED NULL AFTER forwarded_at' },
+    // Supervisor routing decision metadata. The destination is independent of
+    // the legacy approval decision; `Split` records a controlled partial issue.
+    { table: 'requisitions', column: 'routing_destination', ddl: "ALTER TABLE requisitions ADD COLUMN routing_destination ENUM('Procurement','Stock Keeper','Split') NULL AFTER forwarded_by_supervisor" },
+    { table: 'requisitions', column: 'routing_comments', ddl: 'ALTER TABLE requisitions ADD COLUMN routing_comments TEXT NULL AFTER routing_destination' },
+    { table: 'requisitions', column: 'routed_by_supervisor', ddl: 'ALTER TABLE requisitions ADD COLUMN routed_by_supervisor INT UNSIGNED NULL AFTER routing_comments' },
+    { table: 'requisitions', column: 'routed_at', ddl: 'ALTER TABLE requisitions ADD COLUMN routed_at DATETIME NULL AFTER routed_by_supervisor' },
+    { table: 'store_requests', column: 'requisition_id', ddl: 'ALTER TABLE store_requests ADD COLUMN requisition_id INT UNSIGNED NULL AFTER department_id' },
+    { table: 'store_requests', column: 'routed_by_supervisor', ddl: 'ALTER TABLE store_requests ADD COLUMN routed_by_supervisor INT UNSIGNED NULL AFTER reviewed_by' },
+    { table: 'store_requests', column: 'routed_at', ddl: 'ALTER TABLE store_requests ADD COLUMN routed_at DATETIME NULL AFTER routed_by_supervisor' },
+    // Stock Keeper decision is separate from the legacy approval status. A
+    // Supervisor-routed request is authorized for preparation only after this
+    // decision is Accepted; issuing stock remains a later physical transaction.
+    { table: 'store_requests', column: 'stockkeeper_decision', ddl: "ALTER TABLE store_requests ADD COLUMN stockkeeper_decision ENUM('Pending','Accepted','Rejected') NOT NULL DEFAULT 'Pending' AFTER status" },
+    { table: 'store_requests', column: 'stockkeeper_decision_by', ddl: 'ALTER TABLE store_requests ADD COLUMN stockkeeper_decision_by INT UNSIGNED NULL AFTER stockkeeper_decision' },
+    { table: 'store_requests', column: 'stockkeeper_decision_at', ddl: 'ALTER TABLE store_requests ADD COLUMN stockkeeper_decision_at DATETIME NULL AFTER stockkeeper_decision_by' },
+    { table: 'store_requests', column: 'stockkeeper_comments', ddl: 'ALTER TABLE store_requests ADD COLUMN stockkeeper_comments TEXT NULL AFTER stockkeeper_decision_at' },
+    { table: 'store_requests', column: 'rejection_reason', ddl: 'ALTER TABLE store_requests ADD COLUMN rejection_reason TEXT NULL AFTER stockkeeper_comments' },
+    // A new Supervisor-routed request stays "New Request" until the assigned
+    // Stock Keeper opens it. This is display metadata, not an approval decision.
+    { table: 'store_requests', column: 'stockkeeper_viewed_at', ddl: 'ALTER TABLE store_requests ADD COLUMN stockkeeper_viewed_at DATETIME NULL AFTER rejection_reason' },
+    { table: 'store_request_items', column: 'accepted_quantity', ddl: 'ALTER TABLE store_request_items ADD COLUMN accepted_quantity INT UNSIGNED NULL AFTER quantity' },
+    // A Supervisor can route free-text request lines that have no catalog
+    // match. The original requested name/unit and requisition line must survive
+    // so the Stock Keeper can review and return a shortage instead of losing
+    // the line entirely.
+    { table: 'store_request_items', column: 'requisition_item_id', ddl: 'ALTER TABLE store_request_items ADD COLUMN requisition_item_id INT UNSIGNED NULL AFTER quantity' },
+    { table: 'store_request_items', column: 'requested_item_name', ddl: 'ALTER TABLE store_request_items ADD COLUMN requested_item_name VARCHAR(180) NULL AFTER requisition_item_id' },
+    { table: 'store_request_items', column: 'requested_unit', ddl: 'ALTER TABLE store_request_items ADD COLUMN requested_unit VARCHAR(30) NULL AFTER requested_item_name' },
     { table: 'requisition_items', column: 'description', ddl: 'ALTER TABLE requisition_items ADD COLUMN description TEXT NULL AFTER item_name' },
     { table: 'requisition_items', column: 'unit', ddl: "ALTER TABLE requisition_items ADD COLUMN unit VARCHAR(30) NOT NULL DEFAULT 'unit' AFTER quantity" },
 
@@ -323,6 +353,8 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', column: 'department_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN department_id INT UNSIGNED NULL AFTER requester_id' },
     { table: 'inventory_movements', column: 'store_request_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN store_request_id INT UNSIGNED NULL AFTER department_id' },
     { table: 'inventory_movements', column: 'idempotency_key', ddl: 'ALTER TABLE inventory_movements ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER store_request_id' },
+    { table: 'inventory_movements', column: 'purchase_order_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN purchase_order_id INT UNSIGNED NULL AFTER idempotency_key' },
+    { table: 'inventory_movements', column: 'goods_receipt_id', ddl: 'ALTER TABLE inventory_movements ADD COLUMN goods_receipt_id INT UNSIGNED NULL AFTER purchase_order_id' },
     { table: 'rfqs', column: 'issued_at', ddl: 'ALTER TABLE rfqs ADD COLUMN issued_at DATETIME NULL AFTER selected_quotation_id' },
     { table: 'rfqs', column: 'message', ddl: 'ALTER TABLE rfqs ADD COLUMN message TEXT NULL AFTER issued_at' },
     { table: 'rfqs', column: 'instructions', ddl: 'ALTER TABLE rfqs ADD COLUMN instructions TEXT NULL AFTER due_date' },
@@ -355,6 +387,14 @@ export async function applySchemaMigrations() {
     { table: 'goods_receipts', column: 'verified_signature', ddl: 'ALTER TABLE goods_receipts ADD COLUMN verified_signature LONGTEXT NULL AFTER received_signature' },
     { table: 'goods_receipts', column: 'grn_date', ddl: 'ALTER TABLE goods_receipts ADD COLUMN grn_date DATE NULL AFTER verified_signature' },
     { table: 'goods_receipt_items', column: 'comment', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN comment TEXT NULL AFTER quantity' },
+    { table: 'goods_receipts', column: 'comments', ddl: 'ALTER TABLE goods_receipts ADD COLUMN comments TEXT NULL AFTER updated_at' },
+    { table: 'goods_receipts', column: 'idempotency_key', ddl: 'ALTER TABLE goods_receipts ADD COLUMN idempotency_key VARCHAR(80) NULL AFTER comments' },
+    { table: 'goods_receipt_items', column: 'delivered_quantity', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN delivered_quantity INT UNSIGNED NULL AFTER quantity' },
+    { table: 'goods_receipt_items', column: 'damaged_quantity', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN damaged_quantity INT UNSIGNED NOT NULL DEFAULT 0 AFTER delivered_quantity' },
+    { table: 'goods_receipt_items', column: 'condition', ddl: "ALTER TABLE goods_receipt_items ADD COLUMN `condition` VARCHAR(40) NULL AFTER damaged_quantity" },
+    { table: 'goods_receipt_items', column: 'comments', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN comments TEXT NULL AFTER `condition`' },
+    { table: 'goods_receipt_items', column: 'department_id', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN department_id INT UNSIGNED NULL AFTER comments' },
+    { table: 'goods_receipt_items', column: 'storage_location', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN storage_location VARCHAR(150) NULL AFTER department_id' },
     { table: 'invoices', column: 'invoice_date', ddl: 'ALTER TABLE invoices ADD COLUMN invoice_date DATE NULL AFTER status' },
     { table: 'invoices', column: 'due_date', ddl: 'ALTER TABLE invoices ADD COLUMN due_date DATE NULL AFTER invoice_date' },
     { table: 'invoices', column: 'submitted_at', ddl: 'ALTER TABLE invoices ADD COLUMN submitted_at DATETIME NULL AFTER reviewed_by' },
@@ -379,6 +419,45 @@ export async function applySchemaMigrations() {
     if (!(await tableExists(migration.table))) continue;
     if (!(await columnExists(migration.table, migration.column))) await pool.query(migration.ddl);
   }
+
+  // Some conversions are deliberately one-time. Without a marker, a restart
+  // would turn newly routed Pending requests into historical Accepted ones.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      name VARCHAR(100) PRIMARY KEY,
+      applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  const migrationApplied = async (name) => {
+    const [[row]] = await pool.query('SELECT name FROM schema_migrations WHERE name = ?', [name]);
+    return Boolean(row);
+  };
+
+  if (!(await migrationApplied('stockkeeper-decision-backfill'))) {
+    // Historical routed requests were already accepted by workflow convention.
+    // Backfill them once so their Bin Card history remains readable; requests
+    // routed after this migration start with an explicit pending decision.
+    await pool.query(`
+      UPDATE store_requests
+         SET stockkeeper_decision = 'Accepted',
+             stockkeeper_decision_at = COALESCE(approved_at, routed_at, created_at)
+       WHERE stockkeeper_decision = 'Pending' AND status IN ('Approved', 'Issued')
+    `);
+    await pool.query(`
+      UPDATE store_request_items
+         SET accepted_quantity = quantity
+       WHERE accepted_quantity IS NULL
+         AND EXISTS (SELECT 1 FROM store_requests sr
+                      WHERE sr.id = store_request_id AND sr.stockkeeper_decision <> 'Pending')
+    `);
+    await pool.query(`
+      UPDATE goods_receipt_items
+         SET delivered_quantity = quantity
+       WHERE delivered_quantity IS NULL
+    `);
+    await pool.query("INSERT INTO schema_migrations (name) VALUES ('stockkeeper-decision-backfill')");
+  }
+
   await pool.query("UPDATE inventory_movements SET direction = 'Out' WHERE movement_type = 'Issue'");
   await pool.query("UPDATE inventory_movements SET reference_no = CONCAT('LEGACY-', id) WHERE reference_no IS NULL");
 
@@ -388,6 +467,14 @@ export async function applySchemaMigrations() {
     { table: 'items', name: 'fk_items_department', ddl: 'ALTER TABLE items ADD CONSTRAINT fk_items_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
     { table: 'requisitions', name: 'fk_req_supervisor', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_supervisor FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE SET NULL' },
     { table: 'requisitions', name: 'fk_req_forwarded_by', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_forwarded_by FOREIGN KEY (forwarded_by_supervisor) REFERENCES users(id) ON DELETE SET NULL' },
+    { table: 'requisitions', name: 'fk_req_routed_by', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_routed_by FOREIGN KEY (routed_by_supervisor) REFERENCES users(id) ON DELETE SET NULL' },
+    { table: 'store_requests', name: 'fk_store_request_requisition', ddl: 'ALTER TABLE store_requests ADD CONSTRAINT fk_store_request_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE SET NULL' },
+    { table: 'store_requests', name: 'fk_store_request_routed_by', ddl: 'ALTER TABLE store_requests ADD CONSTRAINT fk_store_request_routed_by FOREIGN KEY (routed_by_supervisor) REFERENCES users(id) ON DELETE SET NULL' },
+    { table: 'store_requests', name: 'fk_store_request_decided_by', ddl: 'ALTER TABLE store_requests ADD CONSTRAINT fk_store_request_decided_by FOREIGN KEY (stockkeeper_decision_by) REFERENCES users(id) ON DELETE SET NULL' },
+    { table: 'store_request_items', name: 'fk_store_item_requisition_line', ddl: 'ALTER TABLE store_request_items ADD CONSTRAINT fk_store_item_requisition_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE SET NULL' },
+    { table: 'goods_receipt_items', name: 'fk_grn_item_department', ddl: 'ALTER TABLE goods_receipt_items ADD CONSTRAINT fk_grn_item_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
+    { table: 'inventory_movements', name: 'fk_movement_purchase_order', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_purchase_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE SET NULL' },
+    { table: 'inventory_movements', name: 'fk_movement_goods_receipt', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_goods_receipt FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE SET NULL' },
     { table: 'inventory_movements', name: 'fk_movement_requester', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE SET NULL' },
     { table: 'inventory_movements', name: 'fk_movement_department', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
     { table: 'inventory_movements', name: 'fk_movement_store_request', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE SET NULL' },
@@ -408,6 +495,15 @@ export async function applySchemaMigrations() {
     { table: 'inventory_movements', name: 'uq_inventory_movement_idempotency', ddl: 'CREATE UNIQUE INDEX uq_inventory_movement_idempotency ON inventory_movements (idempotency_key)' },
     { table: 'inventory_movements', name: 'idx_inventory_movement_requester_date', ddl: 'CREATE INDEX idx_inventory_movement_requester_date ON inventory_movements (requester_id, movement_at)' },
     { table: 'inventory_movements', name: 'idx_inventory_movement_request', ddl: 'CREATE INDEX idx_inventory_movement_request ON inventory_movements (store_request_id)' },
+    { table: 'inventory_movements', name: 'idx_inventory_movement_purchase_order', ddl: 'CREATE INDEX idx_inventory_movement_purchase_order ON inventory_movements (purchase_order_id)' },
+    { table: 'inventory_movements', name: 'idx_inventory_movement_receipt', ddl: 'CREATE INDEX idx_inventory_movement_receipt ON inventory_movements (goods_receipt_id)' },
+    { table: 'goods_receipts', name: 'uq_goods_receipt_idempotency', ddl: 'CREATE UNIQUE INDEX uq_goods_receipt_idempotency ON goods_receipts (idempotency_key)' },
+    { table: 'goods_receipt_items', name: 'idx_grn_item_receipt', ddl: 'CREATE INDEX idx_grn_item_receipt ON goods_receipt_items (goods_receipt_id, item_id)' },
+    { table: 'items', name: 'idx_items_department', ddl: 'CREATE INDEX idx_items_department ON items (department_id)' },
+    // One authoritative Stock Keeper register per Supervisor-routed request.
+    // Historical rows with NULL requisition_id remain unrestricted.
+    { table: 'store_requests', name: 'uq_store_request_requisition', ddl: 'CREATE UNIQUE INDEX uq_store_request_requisition ON store_requests (requisition_id)' },
+    { table: 'store_request_items', name: 'idx_store_item_requisition_line', ddl: 'CREATE INDEX idx_store_item_requisition_line ON store_request_items (requisition_item_id)' },
     { table: 'rfqs', name: 'uq_rfqs_idempotency', ddl: 'CREATE UNIQUE INDEX uq_rfqs_idempotency ON rfqs (idempotency_key)' }
   ];
   for (const index of indexes) {
@@ -416,7 +512,7 @@ export async function applySchemaMigrations() {
 
   const enumUpdates = [
     { table: 'users', column: 'role', values: USER_ROLES, required: "'storekeeper'", definition: `ENUM(${USER_ROLES.map((role) => `'${role}'`).join(', ')}) NOT NULL DEFAULT 'requestor'` },
-    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Forwarded to Procurement'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` },
+    { table: 'requisitions', column: 'status', values: REQUISITION_STATUSES, required: "'Awaiting Stock Issue'", definition: `ENUM(${REQUISITION_STATUSES.map((status) => `'${status}'`).join(', ')}) NOT NULL DEFAULT 'Pending'` },
     { table: 'rfqs', column: 'status', values: ['Draft', 'Sent', 'Evaluating', 'Awarded', 'Closed'], required: "'Draft'", definition: "ENUM('Draft','Sent','Evaluating','Awarded','Closed') NOT NULL DEFAULT 'Sent'" }
   ];
   for (const update of enumUpdates) {
@@ -431,7 +527,103 @@ export async function applySchemaMigrations() {
     }
   }
 
+  // Store request lines may now represent a free-text requested item that has
+  // no catalog match. Older installations declared item_id NOT NULL with a
+  // CASCADE foreign key, which made the earlier routing logic drop those lines.
+  const dropColumnForeignKeys = async (table, column) => {
+    const [keys] = await pool.query(
+      `SELECT CONSTRAINT_NAME AS constraintName
+         FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+          AND REFERENCED_TABLE_NAME IS NOT NULL`,
+      [table, column]
+    );
+    for (const key of keys) {
+      const name = String(key.constraintName || '');
+      if (!/^[A-Za-z0-9_]+$/.test(name)) continue;
+      await pool.query(`ALTER TABLE ${table} DROP FOREIGN KEY \`${name}\``);
+    }
+  };
+  const [itemIdColumn] = await pool.query(
+    `SELECT IS_NULLABLE AS nullable FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'store_request_items'
+        AND COLUMN_NAME = 'item_id' LIMIT 1`
+  );
+  const [catalogForeignKeys] = await pool.query(
+    `SELECT kcu.CONSTRAINT_NAME AS constraintName, rc.DELETE_RULE AS deleteRule
+       FROM information_schema.KEY_COLUMN_USAGE kcu
+       LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+         ON rc.CONSTRAINT_SCHEMA = kcu.TABLE_SCHEMA
+        AND rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+      WHERE kcu.TABLE_SCHEMA = DATABASE() AND kcu.TABLE_NAME = 'store_request_items'
+        AND kcu.COLUMN_NAME = 'item_id' AND kcu.REFERENCED_TABLE_NAME IS NOT NULL`
+  );
+  const nullableCatalogFk = catalogForeignKeys.find((key) =>
+    key.constraintName === 'fk_store_item_catalog' && key.deleteRule === 'SET NULL');
+  if (String(itemIdColumn[0]?.nullable || '').toUpperCase() === 'NO' || !nullableCatalogFk) {
+    await dropColumnForeignKeys('store_request_items', 'item_id');
+    await pool.query('ALTER TABLE store_request_items MODIFY COLUMN item_id INT UNSIGNED NULL');
+    await pool.query(`ALTER TABLE store_request_items ADD CONSTRAINT fk_store_item_catalog
+      FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL`);
+  }
+
   await pool.query('ALTER TABLE notifications MODIFY COLUMN link VARCHAR(255) NULL');
+
+  // Committee review records store the Procurement recommendation that was
+  // emailed with each signed decision link. Older databases predate these two
+  // columns even though the send-to-committee flow writes them.
+  const reviewColumns = [
+    { column: 'recommended_supplier_id', ddl: 'ALTER TABLE rfq_committee_reviews ADD COLUMN recommended_supplier_id INT UNSIGNED NULL AFTER recipient_email' },
+    { column: 'reason', ddl: 'ALTER TABLE rfq_committee_reviews ADD COLUMN reason TEXT NULL AFTER recommended_supplier_id' }
+  ];
+  for (const reviewColumn of reviewColumns) {
+    const [rows] = await pool.query(
+      `SELECT COUNT(*) AS total FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rfq_committee_reviews'
+          AND COLUMN_NAME = ?`,
+      [reviewColumn.column]
+    );
+    if (!Number(rows[0]?.total)) await pool.query(reviewColumn.ddl);
+  }
+  const [reviewSupplierFk] = await pool.query(
+    `SELECT COUNT(*) AS total FROM information_schema.TABLE_CONSTRAINTS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rfq_committee_reviews'
+        AND CONSTRAINT_NAME = 'fk_rfq_committee_review_supplier'`
+  );
+  if (!Number(reviewSupplierFk[0]?.total)) {
+    await pool.query(`ALTER TABLE rfq_committee_reviews ADD CONSTRAINT fk_rfq_committee_review_supplier
+      FOREIGN KEY (recommended_supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL`);
+  }
+
+  // Read state for shared/broadcast notifications must be per recipient. The
+  // legacy notifications.is_read flag still serves rows addressed to one user;
+  // this receipt table prevents one account from clearing another account's
+  // view of the same broadcast row.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notification_read_receipts (
+      notification_id BIGINT UNSIGNED NOT NULL,
+      user_id INT UNSIGNED NOT NULL,
+      read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (notification_id, user_id),
+      CONSTRAINT fk_notification_read_notification FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE,
+      CONSTRAINT fk_notification_read_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Explicit recipients of a Supervisor-routed request. Department scope is
+  // the default, but an assignment is the authoritative per-request grant and
+  // is written in the same transaction as the routing decision.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS store_request_assignments (
+      store_request_id INT UNSIGNED NOT NULL,
+      user_id INT UNSIGNED NOT NULL,
+      assigned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (store_request_id, user_id),
+      KEY idx_store_request_assignment_user (user_id),
+      CONSTRAINT fk_store_request_assignment_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE CASCADE,
+      CONSTRAINT fk_store_request_assignment_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
 
   const tables = [
     `CREATE TABLE IF NOT EXISTS application_settings (
@@ -595,6 +787,55 @@ export async function applySchemaMigrations() {
       received_at DATETIME NULL,
       synced_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_google_email_received (received_at)
+    )`,
+    `CREATE TABLE IF NOT EXISTS email_message_read_receipts (
+      gmail_message_id VARCHAR(190) NOT NULL,
+      user_id INT UNSIGNED NOT NULL,
+      read_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (gmail_message_id, user_id),
+      CONSTRAINT fk_email_read_message FOREIGN KEY (gmail_message_id) REFERENCES google_email_messages(gmail_message_id) ON DELETE CASCADE,
+      CONSTRAINT fk_email_read_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS requisition_routing_lines (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      requisition_id INT UNSIGNED NOT NULL,
+      requisition_item_id INT UNSIGNED NOT NULL,
+      item_id INT UNSIGNED NULL,
+      destination ENUM('Procurement','Stock Keeper') NOT NULL,
+      quantity INT UNSIGNED NOT NULL,
+      available_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+      issued_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+      returned_quantity INT UNSIGNED NOT NULL DEFAULT 0,
+      status ENUM('Pending','Issued','Returned') NOT NULL DEFAULT 'Pending',
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_routing_line_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_routing_line_item_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE CASCADE,
+      CONSTRAINT fk_routing_line_catalog_item FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+      INDEX idx_routing_line_requisition (requisition_id, destination, status)
+    )`,
+    `CREATE TABLE IF NOT EXISTS requisition_routing_returns (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      requisition_id INT UNSIGNED NOT NULL,
+      store_request_id INT UNSIGNED NOT NULL,
+      requisition_item_id INT UNSIGNED NOT NULL,
+      item_id INT UNSIGNED NULL,
+      available_quantity INT UNSIGNED NOT NULL,
+      unavailable_quantity INT UNSIGNED NOT NULL,
+      reason TEXT NULL,
+      reported_by INT UNSIGNED NULL,
+      status ENUM('Awaiting Supervisor Decision','Forwarded to Procurement') NOT NULL DEFAULT 'Awaiting Supervisor Decision',
+      forwarded_by INT UNSIGNED NULL,
+      forwarded_at DATETIME NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT fk_routing_return_requisition FOREIGN KEY (requisition_id) REFERENCES requisitions(id) ON DELETE CASCADE,
+      CONSTRAINT fk_routing_return_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE CASCADE,
+      CONSTRAINT fk_routing_return_item_line FOREIGN KEY (requisition_item_id) REFERENCES requisition_items(id) ON DELETE CASCADE,
+      CONSTRAINT fk_routing_return_catalog_item FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE SET NULL,
+      CONSTRAINT fk_routing_return_reporter FOREIGN KEY (reported_by) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_routing_return_forwarder FOREIGN KEY (forwarded_by) REFERENCES users(id) ON DELETE SET NULL,
+      INDEX idx_routing_return_requisition (requisition_id, status)
     )`,
     `CREATE TABLE IF NOT EXISTS requisition_email_threads (
       id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -806,6 +1047,33 @@ export async function applySchemaMigrations() {
   ];
   for (const ddl of tables) await pool.query(ddl);
   await seedDepartmentHierarchy();
+
+  if (!(await migrationApplied('stock-location-backfill'))) {
+    // Classify existing unassigned catalogue items once, using their own
+    // name/category. This never creates a duplicate item and never overwrites a
+    // deliberate department/location set by an administrator or Stock Keeper.
+    const [[it]] = await pool.query("SELECT id FROM departments WHERE name = 'IT' LIMIT 1");
+    const [[finance]] = await pool.query("SELECT id FROM departments WHERE name = 'Finance' LIMIT 1");
+    const [[adminDept]] = await pool.query("SELECT id FROM departments WHERE name = 'Administration' LIMIT 1");
+    const [[facilities]] = await pool.query("SELECT id FROM departments WHERE name = 'Facilities' LIMIT 1");
+    const classify = async (departmentId, patterns, location) => {
+      if (!departmentId) return;
+      const clauses = patterns.map(() => '(LOWER(i.name) LIKE ? OR LOWER(i.category) LIKE ?)').join(' OR ');
+      const params = patterns.flatMap((pattern) => [`%${pattern}%`, `%${pattern}%`]);
+      await pool.query(
+        `UPDATE items i SET i.department_id = ?,
+            i.storage_location = COALESCE(NULLIF(i.storage_location, ''), ?)
+          WHERE i.department_id IS NULL AND (${clauses})`,
+        [departmentId, location, ...params]
+      );
+    };
+    await classify(it?.id, ['computer', 'laptop', 'keyboard', 'printer', 'monitor', 'network', 'router', 'server', 'projector'], 'IT store');
+    await classify(finance?.id, ['finance', 'account', 'invoice', 'receipt book', 'calculator'], 'Finance store');
+    await classify(adminDept?.id, ['office', 'stationery', 'paper', 'pen', 'file', 'folder', 'binder', 'desk'], 'Administration store');
+    await classify(facilities?.id, ['clean', 'maintenance', 'tool', 'generator', 'electric', 'plumb', 'cable'], 'Facilities store');
+    await pool.query("UPDATE items SET storage_location = 'General storage' WHERE storage_location IS NULL OR storage_location = ''");
+    await pool.query("INSERT INTO schema_migrations (name) VALUES ('stock-location-backfill')");
+  }
 }
 
 export default pool;

@@ -372,9 +372,7 @@ export default function StockKeeperBinCards({
       </> : error ? <ErrorState message={error} onRetry={() => portalApi.getBinCard(selectedId).then(setCard).catch((exception) => setError(exception.message))} /> :
       <EmptyState title="Bin Card unavailable" description="The item may have been removed or is no longer available." /> :
       <>
-        <PageHeader eyebrow="Inventory ledger" title="Bin Card"
-          description="Review item balances and append stock-in, authorized stock-out, or traceable adjustment transactions."
-          actions={actions} />
+        <div className="mb-4 flex justify-end">{actions}</div>
         <ReportToolbar
           report={ITEMS_REPORT}
           dateFilter={listDateFilter}

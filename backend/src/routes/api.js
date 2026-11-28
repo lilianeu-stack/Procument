@@ -5,6 +5,10 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/db.js';
 import { allowRoles, authenticate } from '../middleware/auth.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import {
+  UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, countUnreadEmails,
+  markNotificationRead, markNotificationsRead
+} from '../lib/notification-reads.js';
 import { withPortalIdentity } from '../utils/roles.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import { RECEIVED_STATUS_GROUPS } from '../utils/requisition-status.js';
@@ -71,8 +75,12 @@ const SIDEBAR_PAGES = {
   messages: 'Messages',
   departmentMessages: 'Department Messages',
   notifications: 'Notifications',
-  stockNotifications: 'Notification',
   displayBeforeDelivery: 'Display before delivery',
+  stockRequests: 'Requests from Supervisors',
+  stockOverview: 'Stock Overview',
+  stockIn: 'Stock In',
+  stockOut: 'Stock Out',
+  inventoryReports: 'Inventory Reports',
   binCard: 'Bin Card'
 };
 
@@ -94,10 +102,37 @@ function sidebarPagesForRole(role) {
     return [SIDEBAR_PAGES.requesterRequests, SIDEBAR_PAGES.messages, SIDEBAR_PAGES.notifications];
   }
   if (role === 'storekeeper') {
-    return [SIDEBAR_PAGES.stockNotifications, SIDEBAR_PAGES.displayBeforeDelivery, SIDEBAR_PAGES.binCard];
+    return [
+      SIDEBAR_PAGES.stockRequests, SIDEBAR_PAGES.stockOverview, SIDEBAR_PAGES.stockIn,
+      SIDEBAR_PAGES.stockOut, SIDEBAR_PAGES.inventoryReports,
+      SIDEBAR_PAGES.notifications, SIDEBAR_PAGES.displayBeforeDelivery, SIDEBAR_PAGES.binCard
+    ];
   }
   return [];
 }
+
+// A page only clears notifications that actually belong to that module. Private
+// message notifications are never cleared by a plain module/page load.
+const MODULE_NOTIFICATION_CONDITIONS = {
+  [SIDEBAR_PAGES.receivedRequests]: `(n.link LIKE '#/admin/Requests%' OR n.link LIKE '#/admin/Requests%20Received%')`,
+  [SIDEBAR_PAGES.rfqs]: `n.link LIKE '#/admin/RFQs%'`,
+  [SIDEBAR_PAGES.emailInbox]: `(n.link LIKE '#/admin/Email%20Inbox%' OR n.link LIKE '#/admin/Email Inbox%')`,
+  [SIDEBAR_PAGES.purchaseOrders]: `(n.link LIKE '/purchase-orders/%' OR n.link LIKE '#/admin/Purchase%20orders%' OR n.link LIKE '#/admin/Purchase orders%')`,
+  [SIDEBAR_PAGES.supervisorApprovals]: `n.link LIKE '#/supervisor/Approvals%'`,
+  [SIDEBAR_PAGES.supervisorRequests]: `(n.link LIKE '#/supervisor/Procurement%20Requests%' OR n.link LIKE '#/supervisor/Procurement Requests%')`,
+  [SIDEBAR_PAGES.requesterRequests]: `(n.link LIKE '#/requester/My%20Procurement%20Requests%'
+    OR n.link LIKE '#/requester/My Procurement Requests%'
+    OR (n.link LIKE '#/requester/Messages%request=%' AND n.link NOT LIKE '%message=%'))`,
+  [SIDEBAR_PAGES.stockRequests]: `(n.link LIKE '#/stockkeeper/Requests%20from%20Supervisors%'
+    OR n.link LIKE '#/stockkeeper/Requests%20to%20Issue%')`,
+  [SIDEBAR_PAGES.stockOverview]: `n.link LIKE '#/stockkeeper/Stock%20Overview%'`,
+  [SIDEBAR_PAGES.stockIn]: `n.link LIKE '#/stockkeeper/Stock%20In%'`,
+  [SIDEBAR_PAGES.stockOut]: `n.link LIKE '#/stockkeeper/Stock%20Out%'`,
+  [SIDEBAR_PAGES.displayBeforeDelivery]: `n.link LIKE '#/stockkeeper/Display%20before%20delivery%'`,
+  [SIDEBAR_PAGES.inventoryReports]: `n.link LIKE '#/stockkeeper/Inventory%20Reports%'`,
+  [SIDEBAR_PAGES.binCard]: `n.link LIKE '#/stockkeeper/Bin%20Card%'`,
+  [SIDEBAR_PAGES.notifications]: `(n.category <> 'message' AND n.link NOT LIKE '%message=%')`
+};
 
 router.post('/auth/login', async (req, res, next) => {
   try {
@@ -174,13 +209,13 @@ router.get('/sidebar-counts', async (req, res, next) => {
            AND n.link NOT LIKE '#/supervisor/Department%20Messages%'
            AND n.link NOT LIKE '#/supervisor/Department Messages%'
            AND n.link NOT LIKE '#/stockkeeper/Display%20before%20delivery%'
+           AND n.link NOT LIKE '%message=%'
          THEN 1 ELSE 0 END), 0) AS general,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Requests%' THEN 1 ELSE 0 END), 0) AS receivedRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/RFQs%' THEN 1 ELSE 0 END), 0) AS rfqs,
-         COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Email%20Inbox%'
-           OR n.link LIKE '#/admin/Email Inbox%' THEN 1 ELSE 0 END), 0) AS emailInbox,
          COALESCE(SUM(CASE WHEN n.link LIKE '/purchase-orders/%'
-           OR n.link LIKE '#/admin/Purchase%20orders%' THEN 1 ELSE 0 END), 0) AS purchaseOrders,
+           OR n.link LIKE '#/admin/Purchase%20orders%'
+           OR n.link LIKE '#/admin/Purchase orders%' THEN 1 ELSE 0 END), 0) AS purchaseOrders,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/supervisor/Approvals%' THEN 1 ELSE 0 END), 0) AS approvals,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/supervisor/Procurement%20Requests%'
            OR n.link LIKE '#/supervisor/Procurement Requests%' THEN 1 ELSE 0 END), 0) AS supervisorRequests,
@@ -188,14 +223,19 @@ router.get('/sidebar-counts', async (req, res, next) => {
            OR n.link LIKE '#/requester/My Procurement Requests%' THEN 1 ELSE 0 END), 0) AS requesterRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/Messages%request=%' THEN 1 ELSE 0 END), 0) AS requesterRequestMessages,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Display%20before%20delivery%' THEN 1 ELSE 0 END), 0) AS displayBeforeDelivery,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Requests%20from%20Supervisors%'
+           OR n.link LIKE '#/stockkeeper/Requests%20to%20Issue%' THEN 1 ELSE 0 END), 0) AS stockRequests,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Stock%20Overview%' THEN 1 ELSE 0 END), 0) AS stockOverview,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Stock%20In%' THEN 1 ELSE 0 END), 0) AS stockIn,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Stock%20Out%' THEN 1 ELSE 0 END), 0) AS stockOut,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Inventory%20Reports%' THEN 1 ELSE 0 END), 0) AS inventoryReports,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Bin%20Card%' THEN 1 ELSE 0 END), 0) AS binCard
        FROM notifications n
-       WHERE n.is_read = FALSE AND (n.user_id = ? OR n.user_id IS NULL)`,
-      [userId]
+       WHERE ${UNREAD_NOTIFICATION_SQL} AND ${VALID_NOTIFICATION_SQL}
+        AND (n.user_id = ? OR n.user_id IS NULL)`,
+      [userId, userId]
     );
-    const [[emailRow]] = await pool.execute(
-      'SELECT COUNT(*) AS total FROM google_email_messages WHERE unread = TRUE'
-    );
+    const unreadEmails = await countUnreadEmails(pool, userId);
 
     const unreadMessages = Number(messageRow?.total) || 0;
     const generalNotifications = Number(notificationRow?.general) || 0;
@@ -203,21 +243,54 @@ router.get('/sidebar-counts', async (req, res, next) => {
       [SIDEBAR_PAGES.messages]: unreadMessages,
       [SIDEBAR_PAGES.departmentMessages]: unreadMessages,
       [SIDEBAR_PAGES.notifications]: generalNotifications,
-      [SIDEBAR_PAGES.stockNotifications]: generalNotifications,
       [SIDEBAR_PAGES.receivedRequests]: Number(notificationRow?.receivedRequests) || 0,
       [SIDEBAR_PAGES.rfqs]: Number(notificationRow?.rfqs) || 0,
-      [SIDEBAR_PAGES.emailInbox]: Number(emailRow?.total) || 0,
+      [SIDEBAR_PAGES.emailInbox]: unreadEmails,
       [SIDEBAR_PAGES.purchaseOrders]: Number(notificationRow?.purchaseOrders) || 0,
       [SIDEBAR_PAGES.supervisorApprovals]: Number(notificationRow?.approvals) || 0,
       [SIDEBAR_PAGES.supervisorRequests]: Number(notificationRow?.supervisorRequests) || 0,
       [SIDEBAR_PAGES.requesterRequests]: (Number(notificationRow?.requesterRequests) || 0)
         + (Number(notificationRow?.requesterRequestMessages) || 0),
       [SIDEBAR_PAGES.displayBeforeDelivery]: Number(notificationRow?.displayBeforeDelivery) || 0,
+      [SIDEBAR_PAGES.stockRequests]: Number(notificationRow?.stockRequests) || 0,
+      [SIDEBAR_PAGES.stockOverview]: Number(notificationRow?.stockOverview) || 0,
+      [SIDEBAR_PAGES.stockIn]: Number(notificationRow?.stockIn) || 0,
+      [SIDEBAR_PAGES.stockOut]: Number(notificationRow?.stockOut) || 0,
+      [SIDEBAR_PAGES.inventoryReports]: Number(notificationRow?.inventoryReports) || 0,
       [SIDEBAR_PAGES.binCard]: Number(notificationRow?.binCard) || 0
     };
     const counts = {};
     for (const page of sidebarPagesForRole(req.user.role)) counts[page] = allCounts[page] || 0;
     return res.json({ counts });
+  } catch (error) { return next(error); }
+});
+
+// Called only after a module page has loaded its own data successfully. The
+// page name is validated against the caller's role, so a user cannot clear
+// another portal's module or a private-message badge by guessing a page name.
+router.patch('/notifications/read-module', async (req, res, next) => {
+  try {
+    const page = String(req.body?.page || '');
+    if (!sidebarPagesForRole(req.user.role).includes(page)) {
+      return res.status(403).json({ message: 'This module is not available in your portal.' });
+    }
+    const condition = MODULE_NOTIFICATION_CONDITIONS[page];
+    if (!condition) {
+      return res.status(403).json({ message: 'Private messages clear only when a message is opened.' });
+    }
+    const ids = await markNotificationsRead(pool, req.user.id, condition);
+    return res.json({ updated: ids.length, ids });
+  } catch (error) { return next(error); }
+});
+
+// Explicit "mark all" action on the Notifications pages. It deliberately keeps
+// message-category notifications unread: opening a notification list is not the
+// same as opening a private message.
+router.patch('/notifications/read-all', async (req, res, next) => {
+  try {
+    const condition = MODULE_NOTIFICATION_CONDITIONS[SIDEBAR_PAGES.notifications];
+    const ids = await markNotificationsRead(pool, req.user.id, condition);
+    return res.json({ updated: ids.length, ids });
   } catch (error) { return next(error); }
 });
 
@@ -595,7 +668,9 @@ function receivedListQuery() {
       r.requester_id AS requesterId, u.name AS requester, u.email AS requesterEmail, u.phone AS requesterPhone,
       r.supervisor_id AS supervisorId, su.name AS supervisorName,
       r.forwarded_by_supervisor AS forwardedBySupervisor, fwd.name AS forwardedByName,
-      fwd_d.name AS supervisorDepartment,
+      r.routing_destination AS routingDestination, r.routing_comments AS routingComments,
+      r.routed_by_supervisor AS routedBySupervisor, r.routed_at AS routedAt,
+      router.name AS routedByName, fwd_d.name AS supervisorDepartment,
       (SELECT COALESCE(SUM(ri.quantity * ri.estimated_unit_cost), 0)
          FROM requisition_items ri WHERE ri.requisition_id = r.id) AS total,
       (SELECT COUNT(*) FROM requisition_items ri WHERE ri.requisition_id = r.id) AS itemCount,
@@ -605,6 +680,7 @@ function receivedListQuery() {
     LEFT JOIN departments d ON d.id = r.department_id
     LEFT JOIN users su ON su.id = r.supervisor_id
     LEFT JOIN users fwd ON fwd.id = r.forwarded_by_supervisor
+    LEFT JOIN users router ON router.id = r.routed_by_supervisor
     LEFT JOIN departments fwd_d ON fwd_d.id = fwd.department_id
     WHERE r.forwarded_by_supervisor IS NOT NULL AND r.forwarded_at IS NOT NULL`;
 }
@@ -616,7 +692,8 @@ function mapReceivedRow(row) {
     total: Number(row.total) || 0,
     itemCount: Number(row.itemCount) || 0,
     attachmentCount: Number(row.attachmentCount) || 0,
-    forwardedBySupervisor: row.forwardedBySupervisor == null ? null : Number(row.forwardedBySupervisor)
+    forwardedBySupervisor: row.forwardedBySupervisor == null ? null : Number(row.forwardedBySupervisor),
+    routedBySupervisor: row.routedBySupervisor == null ? null : Number(row.routedBySupervisor)
   };
 }
 
@@ -737,10 +814,27 @@ router.get('/procurement/received-requests/:id', allowRoles(...procurementRoles)
     }
     await markReceivedByProcurement(connection, requisitionId, req.user.id);
     const [items] = await connection.execute(
-      `SELECT id, item_name AS itemName, description, remarks, quantity, unit,
-        estimated_unit_cost AS estimatedUnitCost,
-        (quantity * estimated_unit_cost) AS lineTotal
-       FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+      `SELECT ri.id, ri.item_name AS itemName, ri.description, ri.remarks,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM requisition_routing_lines routed
+          WHERE routed.requisition_id = ri.requisition_id
+        ) THEN COALESCE((
+          SELECT SUM(routed.quantity) FROM requisition_routing_lines routed
+          WHERE routed.requisition_id = ri.requisition_id
+            AND routed.requisition_item_id = ri.id
+            AND routed.destination = 'Procurement'
+        ), 0) ELSE ri.quantity END AS quantity,
+        ri.unit, ri.estimated_unit_cost AS estimatedUnitCost,
+        (CASE WHEN EXISTS (
+          SELECT 1 FROM requisition_routing_lines routed
+          WHERE routed.requisition_id = ri.requisition_id
+        ) THEN COALESCE((
+          SELECT SUM(routed.quantity) FROM requisition_routing_lines routed
+          WHERE routed.requisition_id = ri.requisition_id
+            AND routed.requisition_item_id = ri.id
+            AND routed.destination = 'Procurement'
+        ), 0) ELSE ri.quantity END * ri.estimated_unit_cost) AS lineTotal
+       FROM requisition_items ri WHERE ri.requisition_id = ? ORDER BY ri.id`,
       [requisitionId]
     );
     const [attachments] = await connection.execute(

@@ -1,13 +1,17 @@
-import { Bell, ClipboardList, LayoutDashboard, PackageCheck, PackageSearch, UserRound } from 'lucide-react';
+import { Bell, ClipboardCheck, FileBarChart, LayoutDashboard, PackageCheck, PackageSearch, PackagePlus, UserRound } from 'lucide-react';
 import PortalSidebarFrame from './PortalSidebarFrame.jsx';
 import { STOCKKEEPER_PAGES } from '../../utils/access.js';
 
 const icons = {
   Dashboard: LayoutDashboard,
-  'List of Requesters': ClipboardList,
-  Notification: Bell,
+  'Requests from Supervisors': ClipboardCheck,
+  'Stock Overview': PackageSearch,
+  'Stock In': PackagePlus,
+  'Stock Out': PackageCheck,
   'Display before delivery': PackageCheck,
   'Bin Card': PackageSearch,
+  'Inventory Reports': FileBarChart,
+  Notifications: Bell,
   Profile: UserRound
 };
 const groups = [

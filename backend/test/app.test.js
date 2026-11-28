@@ -31,6 +31,7 @@ const createdSupplierIds = [];
 const createdPricingRequestIds = [];
 const createdPricingResponseIds = [];
 const createdGmailMessageIds = [];
+const createdNotificationIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
@@ -108,6 +109,17 @@ async function createUser(name, email, role, departmentId, active = true) {
   return { id: Number(result.insertId), name, email, role, departmentId, active };
 }
 
+async function insertNotification(userId, title, link, category = 'general') {
+  const [result] = await pool.execute(
+    `INSERT INTO notifications (user_id, title, body, link, category)
+     VALUES (?, ?, 'QA badge read-state test', ?, ?)`,
+    [userId, title, link, category]
+  );
+  const id = Number(result.insertId);
+  createdNotificationIds.push(id);
+  return id;
+}
+
 async function submitRequest(user, suffix, extra = {}) {
   const response = await request('/portal/requester/requisitions', {
     method: 'POST',
@@ -142,9 +154,10 @@ async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
   const reference = `QA-SR-${Date.now().toString().slice(-6)}-${String(suffix).slice(-4)}`;
   const [result] = await pool.execute(
     `INSERT INTO store_requests
-       (reference, requester_id, department_id, purpose, status, approved_at)
-     VALUES (?, ?, ?, 'QA stock issue', 'Approved', UTC_TIMESTAMP())`,
-    [reference, requester.id, requester.departmentId]
+       (reference, requester_id, department_id, purpose, status,
+        stockkeeper_decision, stockkeeper_decision_by, stockkeeper_decision_at, approved_at)
+     VALUES (?, ?, ?, 'QA stock issue', 'Approved', 'Accepted', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [reference, requester.id, requester.departmentId, users.stockkeeper.id]
   );
   const id = Number(result.insertId);
   createdStoreRequestIds.push(id);
@@ -255,6 +268,10 @@ after(async () => {
   }
   if (createdUserIds.length) {
     await pool.execute(`DELETE FROM notifications WHERE user_id IN (${createdUserIds.map(() => '?').join(',')})`, createdUserIds);
+  }
+  if (createdNotificationIds.length) {
+    const placeholders = createdNotificationIds.map(() => '?').join(',');
+    await pool.execute(`DELETE FROM notifications WHERE id IN (${placeholders})`, createdNotificationIds);
   }
   if (createdRequisitionIds.length) {
     const placeholders = createdRequisitionIds.map(() => '?').join(',');
@@ -4444,4 +4461,183 @@ test('RFQ register statistics, filters, details, draft lifecycle and supplier li
   assert.equal(statsAfter.data.stats.total, statsBefore.data.stats.total + 2);
   assert.equal(statsAfter.data.stats.receivedQuotations, statsBefore.data.stats.receivedQuotations + 1);
   assert.equal(statsAfter.data.stats.closed, statsBefore.data.stats.closed + 1);
+});
+
+test('a loaded Received Requests page clears only its own notifications, with per-user receipts for shared rows', async () => {
+  const page = 'Requests Received from Departments';
+  const countsFor = async (account) => (await request('/sidebar-counts', { user: account })).data.counts;
+  const beforeProcurement = await countsFor(users.procurement);
+  const beforeAdmin = await countsFor(admin);
+  const link = '#/admin/Requests%20Received%20from%20Departments?request=91001';
+
+  const first = await insertNotification(users.procurement.id, 'QA received request 1', link);
+  const second = await insertNotification(users.procurement.id, 'QA received request 2', link);
+  const shared = await insertNotification(null, 'QA shared received request', link);
+  const unrelated = await insertNotification(users.procurement.id, 'QA unrelated RFQ', '#/admin/RFQs?rfq=91001');
+
+  const afterInsert = await countsFor(users.procurement);
+  assert.equal(afterInsert[page] - (beforeProcurement[page] || 0), 3);
+  assert.equal(afterInsert.RFQs - (beforeProcurement.RFQs || 0), 1);
+  const adminAfterInsert = await countsFor(admin);
+  assert.equal(
+    adminAfterInsert[page] - (beforeAdmin[page] || 0), 1,
+    'a broadcast row must stay unread for the other Procurement recipient'
+  );
+
+  // A page name outside the caller's portal, and every private-message page,
+  // are rejected even when the request is made directly against the API.
+  for (const deniedPage of ['Approvals', 'Messages', 'Department Messages']) {
+    const denied = await request('/notifications/read-module', {
+      method: 'PATCH', user: users.procurement, body: { page: deniedPage }
+    });
+    assert.equal(denied.response.status, 403);
+  }
+
+  const marked = await request('/notifications/read-module', {
+    method: 'PATCH', user: users.procurement, body: { page }
+  });
+  assert.equal(marked.response.status, 200, marked.data.message);
+  assert.ok(marked.data.updated >= 3, 'all unread notices for this module must be marked read');
+
+  const afterMark = await countsFor(users.procurement);
+  assert.equal(afterMark[page] || 0, 0, 'the old badge must disappear immediately');
+  assert.equal(afterMark.RFQs, afterInsert.RFQs, 'an unrelated module must keep its badge');
+  const adminAfterMark = await countsFor(admin);
+  assert.equal(adminAfterMark[page], (beforeAdmin[page] || 0) + 1, 'the other recipient keeps their badge');
+
+  const [notificationRows] = await pool.execute(
+    `SELECT id, is_read AS isRead FROM notifications WHERE id IN (?, ?, ?)`,
+    [first, second, shared]
+  );
+  const readState = new Map(notificationRows.map((row) => [Number(row.id), Boolean(row.isRead)]));
+  assert.equal(readState.get(first), true, 'user-addressed rows keep the legacy boolean contract');
+  assert.equal(readState.get(second), true);
+  assert.equal(readState.get(shared), false, 'a broadcast row must never be globally cleared');
+  const [receipts] = await pool.execute(
+    'SELECT user_id AS userId FROM notification_read_receipts WHERE notification_id = ?',
+    [shared]
+  );
+  assert.deepEqual(receipts.map((row) => row.userId), [users.procurement.id]);
+
+  const repeated = await request('/notifications/read-module', {
+    method: 'PATCH', user: users.procurement, body: { page }
+  });
+  assert.equal(repeated.response.status, 200);
+  assert.equal(repeated.data.updated, 0, 'returning to the page must not revive or double-clear a badge');
+  assert.equal((await countsFor(users.procurement))[page] || 0, 0);
+
+  const fresh = await insertNotification(users.procurement.id, 'QA later received request', link);
+  assert.equal((await countsFor(users.procurement))[page], 1);
+  const opened = await request(`/notifications/${fresh}/read`, {
+    method: 'PATCH', user: users.procurement
+  });
+  assert.equal(opened.response.status, 200, opened.data.message);
+  assert.equal((await countsFor(users.procurement))[page] || 0, 0);
+});
+
+test('module reads work in Supervisor, Requester and Stock Keeper portals and never clear private messages', async () => {
+  const cases = [
+    { user: users.supervisorB, page: 'Approvals', link: '#/supervisor/Approvals?request=92001' },
+    { user: users.requesterB, page: 'My Procurement Requests', link: '#/requester/My%20Procurement%20Requests?request=92002' },
+    { user: users.stockkeeper, page: 'Bin Card', link: '#/stockkeeper/Bin%20Card?item=92003' }
+  ];
+  const countsFor = async (account) => (await request('/sidebar-counts', { user: account })).data.counts;
+
+  for (const { user, page, link } of cases) {
+    const before = await countsFor(user);
+    const id = await insertNotification(user.id, `QA ${page} badge`, link);
+    assert.equal((await countsFor(user))[page], (before[page] || 0) + 1);
+    const marked = await request('/notifications/read-module', {
+      method: 'PATCH', user, body: { page }
+    });
+    assert.equal(marked.response.status, 200, marked.data.message);
+    assert.equal((await countsFor(user))[page] || 0, 0, `${page} badge should clear every unread notice for that module`);
+    const [[row]] = await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [id]);
+    assert.equal(Boolean(row.isRead), true);
+  }
+
+  const requester = users.requesterB;
+  const crossPortal = await request('/notifications/read-module', {
+    method: 'PATCH', user: requester, body: { page: 'Approvals' }
+  });
+  assert.equal(crossPortal.response.status, 403);
+
+  const general = await insertNotification(requester.id, 'QA general notice', '#/requester/Notifications?badge=1');
+  const [sent] = await pool.execute(
+    `INSERT INTO messages (department_id, sender_id, recipient_id, body, is_announcement)
+     VALUES (?, ?, ?, 'QA private badge notice', FALSE)`,
+    [departments.b.id, users.supervisorB.id, requester.id]
+  );
+  const messageId = Number(sent.insertId);
+  await pool.execute('INSERT INTO message_recipients (message_id, user_id) VALUES (?, ?)', [messageId, requester.id]);
+  const messageNotice = await insertNotification(
+    requester.id, 'QA message notice',
+    `#/requester/Messages?userId=${users.supervisorB.id}&request=92004&message=${messageId}`,
+    'message'
+  );
+
+  const beforeReadAll = await countsFor(requester);
+  const readAll = await request('/notifications/read-all', { method: 'PATCH', user: requester });
+  assert.equal(readAll.response.status, 200, readAll.data.message);
+  const afterReadAll = await countsFor(requester);
+  assert.equal(afterReadAll.Notifications || 0, 0, 'mark all clears the whole Notifications badge');
+  assert.equal(afterReadAll.Messages, beforeReadAll.Messages, 'mark all must not clear a private message badge');
+  const [[generalRow]] = await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [general]);
+  const [[messageRow]] = await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [messageNotice]);
+  assert.equal(Boolean(generalRow.isRead), true);
+  assert.equal(Boolean(messageRow.isRead), false, 'the paired message notice waits for the message itself');
+
+  const openedMessage = await request(`/portal/messages/${messageId}/read`, {
+    method: 'PATCH', user: requester
+  });
+  assert.equal(openedMessage.response.status, 200, openedMessage.data.message);
+  const [[messageRowAfter]] = await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [messageNotice]);
+  assert.equal(Boolean(messageRowAfter.isRead), true);
+  assert.equal((await countsFor(requester)).Messages, beforeReadAll.Messages - 1);
+});
+
+test('synced email badges are per authorized reader until that email is opened', async () => {
+  const gmailMessageId = `qa-badge-email-${Date.now()}`;
+  const insertEmail = async () => pool.execute(
+    `INSERT INTO google_email_messages
+       (gmail_message_id, thread_id, sender, recipient, subject, snippet, body_text, labels, unread)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+    [gmailMessageId, `thread-${gmailMessageId}`, 'qa@example.test', 'procurement@example.test',
+      'QA unread email', 'QA unread email', 'QA unread email body', JSON.stringify(['UNREAD'])]
+  );
+  const countsFor = async (account) => (await request('/sidebar-counts', { user: account })).data.counts;
+  const beforeAdmin = await countsFor(admin);
+  const beforeProcurement = await countsFor(users.procurement);
+  try {
+    await insertEmail();
+    assert.equal((await countsFor(admin))['Email Inbox'], (beforeAdmin['Email Inbox'] || 0) + 1);
+    assert.equal((await countsFor(users.procurement))['Email Inbox'], (beforeProcurement['Email Inbox'] || 0) + 1);
+
+    const marked = await request(`/email/inbox/messages/${encodeURIComponent(gmailMessageId)}/read`, {
+      method: 'PATCH', user: admin
+    });
+    assert.equal(marked.response.status, 200, marked.data.message);
+    assert.equal((await countsFor(admin))['Email Inbox'], beforeAdmin['Email Inbox'] || 0);
+    assert.equal(
+      (await countsFor(users.procurement))['Email Inbox'], (beforeProcurement['Email Inbox'] || 0) + 1,
+      'opening an email as one manager must not clear another manager\'s badge'
+    );
+
+    const [receipts] = await pool.execute(
+      'SELECT user_id AS userId FROM email_message_read_receipts WHERE gmail_message_id = ?',
+      [gmailMessageId]
+    );
+    assert.deepEqual(receipts.map((row) => row.userId), [admin.id]);
+    const adminList = await request('/email/inbox/messages', { user: admin });
+    const otherList = await request('/email/inbox/messages', { user: users.procurement });
+    assert.equal(
+      Boolean(adminList.data.messages.find((row) => row.id === gmailMessageId)?.isRead), true
+    );
+    assert.equal(
+      Boolean(otherList.data.messages.find((row) => row.id === gmailMessageId)?.isRead), false
+    );
+  } finally {
+    await pool.execute('DELETE FROM email_message_read_receipts WHERE gmail_message_id = ?', [gmailMessageId]);
+    await pool.execute('DELETE FROM google_email_messages WHERE gmail_message_id = ?', [gmailMessageId]);
+  }
 });

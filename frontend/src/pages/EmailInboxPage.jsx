@@ -84,7 +84,14 @@ export default function EmailInboxPage({ actions, query = {} }) {
     setSelected({ ...message, loading: true });
     try {
       const result = await actions.getInboxMessage(message.id);
-      setSelected(result.message);
+      // The shared mailbox unread flag is never changed. This only records a
+      // receipt for the signed-in reader and refreshes their sidebar badge.
+      await actions.markEmailRead(message.id);
+      const opened = { ...result.message, isRead: true };
+      setSelected(opened);
+      setMessages((current) => current.map((item) => (
+        item.id === message.id ? { ...item, isRead: true } : item
+      )));
     } catch (exception) {
       setError(exception.message || 'The email could not be opened.');
       setSelected(null);
@@ -188,8 +195,8 @@ export default function EmailInboxPage({ actions, query = {} }) {
               {messages.map((message) => <button key={message.id} type="button" onClick={() => openMessage(message)}
                 className={`w-full px-4 py-3 text-left hover:bg-slate-50 ${selected?.id === message.id ? 'bg-brand-light/50' : ''}`}>
                 <span className="flex items-center justify-between gap-2">
-                  <span className={`truncate text-xs ${message.unread ? 'font-extrabold text-black' : 'font-semibold text-black'}`}>{message.sender || '(unknown sender)'}</span>
-                  {message.unread ? <Mail size={13} className="shrink-0 text-black" /> : <MailOpen size={13} className="shrink-0 text-black" />}
+                  <span className={`truncate text-xs ${message.isRead ? 'font-semibold text-black' : 'font-extrabold text-black'}`}>{message.sender || '(unknown sender)'}</span>
+                  {message.isRead ? <MailOpen size={13} className="shrink-0 text-black" /> : <Mail size={13} className="shrink-0 text-black" />}
                 </span>
                 <span className="mt-1 block truncate text-xs font-bold">{message.subject}</span>
                 {message.requisitionReference && <span className="mt-1 inline-block rounded bg-brand-light px-2 py-0.5 text-[10px] font-bold text-black">

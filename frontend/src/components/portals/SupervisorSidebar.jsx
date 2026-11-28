@@ -1,5 +1,5 @@
 import {
-  Bell, Boxes, Building2, ClipboardList, LayoutDashboard,
+  Bell, Boxes, Building2, ClipboardCheck, ClipboardList, LayoutDashboard,
   MessageSquare, UserRound, UsersRound
 } from 'lucide-react';
 import PortalSidebarFrame from './PortalSidebarFrame.jsx';
@@ -9,7 +9,8 @@ const groups = [
   { section: 'SUPERVISOR WORKSPACE', links: [
     { name: SUPERVISOR_PAGES[0], icon: LayoutDashboard },
     { name: SUPERVISOR_PAGES[2], icon: Building2 },
-    { name: SUPERVISOR_PAGES[3], icon: UsersRound }
+    { name: SUPERVISOR_PAGES[3], icon: UsersRound },
+    { name: SUPERVISOR_PAGES[5], icon: ClipboardCheck }
   ] },
   { section: 'PROCUREMENT', links: [
     { name: SUPERVISOR_PAGES[4], icon: ClipboardList },

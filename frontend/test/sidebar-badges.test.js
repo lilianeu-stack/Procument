@@ -11,6 +11,7 @@ const portalFrame = read('../src/components/portals/PortalSidebarFrame.jsx');
 const portalLayout = read('../src/components/portals/PortalLayout.jsx');
 const badge = read('../src/components/ui/SidebarBadge.jsx');
 const client = read('../src/services/sidebarCounts.js');
+const emailInbox = read('../src/pages/EmailInboxPage.jsx');
 
 test('badge labels hide zero, show real counts, and cap at 99+', () => {
   assert.equal(badgeLabel(0), '');
@@ -80,7 +81,8 @@ test('loading a conversation never marks messages read; each message opens expli
 test('one grouped count request feeds all badges and refreshes without a page reload', () => {
   assert.match(client, /api\('\/sidebar-counts'\)/);
   assert.match(app, /fetchSidebarCounts/);
-  assert.match(app, /setSidebarCounts\(await fetchSidebarCounts\(\)\)/);
+  assert.match(app, /setSidebarCounts\(counts\)/);
+  assert.match(app, /countSequenceRef\.current/);
   assert.match(app, /setInterval\(\(\) => \{ void refreshSidebarCounts\(\); \}, 30000\)/);
   assert.match(app, /window\.addEventListener\('focus'/);
   assert.match(app, /document\.addEventListener\('visibilitychange'/);
@@ -89,6 +91,28 @@ test('one grouped count request feeds all badges and refreshes without a page re
   assert.match(app, /getThread: async[\s\S]*await refreshSidebarCounts\(\)/);
   assert.match(app, /markMessageRead: async[\s\S]*await refreshSidebarCounts\(\)/);
   assert.match(app, /markAllNotificationsRead: async[\s\S]*await refreshSidebarCounts\(\)/);
+  assert.match(app, /requestMarkAllNotificationsRead/);
+});
+
+test('opening a loaded module clears only that module\'s notifications and refreshes badges', () => {
+  assert.match(client, /api\('\/notifications\/read-module'/);
+  assert.match(client, /shouldMarkModuleOnOpen/);
+  assert.match(client, /RECEIVED_REQUESTS_PAGE, 'RFQs', 'Email Inbox', PURCHASE_ORDERS_PAGE/);
+  const moduleReadPages = client.match(/const MODULE_READ_PAGES = new Set\(\[([\s\S]*?)\]\);/)[1];
+  assert.doesNotMatch(moduleReadPages, /'Messages'|'Department Messages'/);
+  assert.match(app, /loadToken === loadSequenceRef\.current/);
+  assert.match(app, /markedPageRef\.current/);
+  assert.match(app, /shouldMarkModuleOnOpen\(activePage\)/);
+  assert.match(app, /await markModuleNotificationsRead\(activePage\)/);
+  assert.match(app, /canAccessPage\(user\.role, activePage\)/);
+});
+
+test('private-message notifications wait for the actual message; emails use per-reader receipts', () => {
+  assert.match(app, /isMessageNotice = notification\.category === 'message' \|\| link\.includes\('message='\)/);
+  assert.match(app, /if \(!isMessageNotice\) \{/);
+  assert.match(app, /markEmailRead: async[\s\S]*\/email\/inbox\/messages\/.*\/read[\s\S]*await refreshSidebarCounts\(\)/);
+  assert.match(emailInbox, /await actions\.markEmailRead\(message\.id\)/);
+  assert.match(emailInbox, /message\.isRead \? <MailOpen/);
 });
 
 test('public supplier surfaces have no authenticated sidebar badge state', () => {

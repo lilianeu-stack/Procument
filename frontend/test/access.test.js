@@ -138,16 +138,29 @@ test('public committee decision links remain outside the staff portals', () => {
   assert.equal(tokenPathRoute.query.token, token);
 });
 
-test('Stock Keepers have a dedicated portal with its six pages', () => {
+test('Stock Keepers have a dedicated inventory workspace with all nine pages', () => {
   assert.equal(portalForRole('storekeeper'), 'stockkeeper');
   assert.equal(defaultPageForPortal('stockkeeper'), 'Dashboard');
-  assert.deepEqual(STOCKKEEPER_PAGES, ['Dashboard', 'List of Requesters', 'Notification', 'Display before delivery', 'Bin Card', 'Profile']);
+  assert.deepEqual(STOCKKEEPER_PAGES, [
+    'Dashboard', 'Requests from Supervisors', 'Stock Overview', 'Stock In',
+    'Stock Out', 'Display before delivery', 'Bin Card', 'Inventory Reports', 'Notifications', PROFILE_PAGE
+  ]);
   for (const page of STOCKKEEPER_PAGES) {
     assert.equal(canAccessPage('storekeeper', page), true, `Stock Keeper should see ${page}`);
   }
   for (const page of ['Overview', 'Users', 'Approvals', 'Stock movements', 'Requesters', SETTINGS_PAGE]) {
     assert.equal(canAccessPage('storekeeper', page), false, `Stock Keeper must not access ${page}`);
   }
+});
+
+test('old Stock Keeper links open the redesigned pages without duplicate sidebar entries', () => {
+  assert.equal(canonicalPage('Requests to Issue'), 'Requests from Supervisors');
+  assert.equal(canonicalPage('List of Requesters'), 'Requests from Supervisors');
+  assert.equal(canonicalPage('Notification'), 'Notifications');
+  for (const oldPage of ['Requests to Issue', 'List of Requesters', 'Notification']) {
+    assert.equal(canAccessPage('storekeeper', oldPage), true, `${oldPage} should still open`);
+  }
+  assert.equal(STOCKKEEPER_PAGES.filter((page) => page === PROFILE_PAGE).length, 1);
 });
 
 test('supervisor incoming requests label resolves to the existing review queue', () => {

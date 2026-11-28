@@ -9,7 +9,7 @@ import { api } from '../../services/api.js';
 import { dateTimeLabel } from '../../utils/format.js';
 import { roleLabel } from '../../utils/access.js';
 import {
-  KeyValue, PageHeader, PortalBadge, primaryButtonClass, secondaryButtonClass
+  KeyValue, PortalBadge, primaryButtonClass, secondaryButtonClass
 } from './PortalUi.jsx';
 
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -248,12 +248,6 @@ export default function PortalProfile({ user, summary, portal, onUpdated }) {
   const role = profile?.roleLabel || roleLabel(profile?.role);
 
   return <>
-    <PageHeader
-      eyebrow="Account"
-      title="My profile"
-      description="Manage your personal details, profile photo and account security. Protected role and access settings remain with an Administrator."
-    />
-
     <div className="space-y-5">
       <Notice message={notice} />
 

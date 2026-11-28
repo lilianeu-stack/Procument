@@ -64,6 +64,11 @@ export const PAGE_REPORTS = {
     fields: [{ key: 'movement', label: 'Movement date' }, { key: 'created', label: 'Date recorded' }],
     defaultField: 'movement'
   },
+  'Inventory Reports': {
+    exportKey: 'stockkeeperStockMovement', title: 'Stock Movement',
+    fields: [{ key: 'movement', label: 'Transaction date' }, { key: 'created', label: 'Date recorded' }],
+    defaultField: 'movement'
+  },
   Suppliers: {
     exportKey: 'suppliers', title: 'Suppliers',
     fields: [{ key: 'created', label: 'Date added' }, { key: 'updated', label: 'Last updated' }],

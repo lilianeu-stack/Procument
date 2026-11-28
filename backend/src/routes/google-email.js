@@ -3,6 +3,7 @@ import { Router } from 'express';
 import pool from '../config/db.js';
 import { allowRoles } from '../middleware/auth.js';
 import { writeAudit } from '../lib/events.js';
+import { markEmailRead } from '../lib/notification-reads.js';
 import { emailConfigStatus, normalizeEmail, validEmail } from '../utils/email-config.js';
 import { buildRequestedItemsEmail } from '../utils/email-reply.js';
 import { sendEmail } from '../services/email.js';
@@ -124,9 +125,9 @@ router.post('/email/google/disconnect', allowRoles(...managers), async (_req, re
   }
 });
 
-router.get('/email/inbox/messages', allowRoles(...managers), async (_req, res, next) => {
+router.get('/email/inbox/messages', allowRoles(...managers), async (req, res, next) => {
   try {
-    const messages = await listInboxMessages();
+    const messages = await listInboxMessages(req.user.id);
     return res.json({ messages });
   } catch (error) {
     return next(error);
@@ -135,9 +136,22 @@ router.get('/email/inbox/messages', allowRoles(...managers), async (_req, res, n
 
 router.get('/email/inbox/messages/:id', allowRoles(...managers), async (req, res, next) => {
   try {
-    const message = await getInboxMessage(req.params.id);
+    const message = await getInboxMessage(req.params.id, req.user.id);
     if (!message) return res.status(404).json({ message: 'Email not found. Sync the inbox and try again.' });
     return res.json({ message });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Opening a synced email records this reader's receipt only. The shared Gmail
+// unread flag is never changed, so another authorized user keeps their badge.
+router.patch('/email/inbox/messages/:id/read', allowRoles(...managers), async (req, res, next) => {
+  try {
+    const message = await getInboxMessage(req.params.id, req.user.id);
+    if (!message) return res.status(404).json({ message: 'Email not found. Sync the inbox and try again.' });
+    const ids = await markEmailRead(pool, req.user.id, req.params.id);
+    return res.json({ message: 'Email marked as read.', updated: ids.length });
   } catch (error) {
     return next(error);
   }

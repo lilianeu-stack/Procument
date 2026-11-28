@@ -2,13 +2,22 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import { UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, markNotificationsRead } from '../lib/notification-reads.js';
 import { allowRoles } from '../middleware/auth.js';
 import { businessDate, isIsoDate, toUtcDateTime } from '../utils/dates.js';
+import { REQUISITION_STATUS, statusLabel } from '../utils/requisition-status.js';
+import { fetchExportRows } from '../services/exports.js';
+import { loadStockkeeperScope, stockkeeperScopeClause } from '../services/stockkeeper-scope.js';
 
 const router = Router();
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 const REQUESTER_PAGE_SIZES = new Set([10, 25, 50, 100]);
+const INVENTORY_REPORT_KEYS = new Set([
+  'stockkeeperStockIn', 'stockkeeperStockOut', 'stockkeeperCurrentBalance',
+  'stockkeeperDepartmentStock', 'stockkeeperStockMovement', 'stockkeeperLowStock',
+  'stockkeeperDamagedGoods', 'stockkeeperSupplierDeliveries'
+]);
 const ALLOWED_MIME_TYPES = new Set([
   'application/pdf', 'text/plain', 'text/csv', 'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -52,6 +61,39 @@ function pagination(query, defaultSort, sortFields = {}) {
 
 function httpError(status, message) {
   return Object.assign(new Error(message), { status });
+}
+
+// The register keeps the existing decision fields but derives one clear,
+// mutually exclusive status for the eight states shown in the Stock Keeper UI.
+function routedStatus(row) {
+  const decided = row.stockkeeperDecision || 'Pending';
+  const issued = Number(row.issuedQuantity) || 0;
+  const remaining = Number(row.remainingQuantity) || 0;
+  if (decided === 'Rejected') return 'Rejected';
+  if (row.requisitionStatus === REQUISITION_STATUS.RETURNED_TO_SUPERVISOR) return 'Returned to Supervisor';
+  if (row.requisitionStatus === REQUISITION_STATUS.COMPLETED) return 'Completed';
+  if ((row.requestStatus === 'Issued' || remaining === 0) && issued > 0) return 'Issued';
+  if (issued > 0 && remaining > 0) return 'Partially Issued';
+  if (decided === 'Accepted') return 'Accepted';
+  if (decided === 'Pending') return row.isNew ? 'New Request' : 'Pending Stock Keeper Review';
+  return decided;
+}
+
+function withRoutedStatus(rows) {
+  return (rows || []).map((row) => ({
+    ...row,
+    isNew: Boolean(row.isNew),
+    status: routedStatus(row)
+  }));
+}
+
+// Every routed action is checked against the same department/assignment scope
+// used by the register. Legacy direct store requests (no requisition_id) stay
+// issueable inside the Stock Keeper's own inventory scope.
+async function requireActionScope(connection, userId) {
+  const scope = await loadStockkeeperScope(connection, userId);
+  if (!scope) return null;
+  return stockkeeperScopeClause(scope, userId);
 }
 
 function parseTransactionInput(body) {
@@ -105,6 +147,45 @@ async function notifyStorekeepers(connection, title, body, link, category) {
   }
 }
 
+async function notifyUsers(connection, userIds, title, body, link, category) {
+  for (const userId of new Set(userIds.map(Number))) {
+    if (Number.isInteger(userId) && userId > 0) {
+      await createNotification(connection, userId, title, body, link, category);
+    }
+  }
+}
+
+async function notifySupervisor(connection, request, title, body, link, category) {
+  const [users] = await connection.execute(
+    `SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND active = TRUE
+      UNION
+      SELECT id FROM users WHERE role = 'supervisor' AND active = TRUE AND department_id = ?`,
+    [request.supervisorId || 0, request.departmentId || 0]
+  );
+  await notifyUsers(connection, users.map((user) => user.id), title, body, link, category);
+}
+
+async function notifyProcurement(connection, purchaseOrderId, createdBy, title, body, link, category) {
+  const [users] = await connection.execute(
+    `SELECT id FROM users WHERE role IN ('procurement', 'admin') AND active = TRUE`
+  );
+  await notifyUsers(connection, [createdBy, ...users.map((user) => user.id)], title, body, link, category);
+}
+
+function transactionReference(prefix) {
+  return `${prefix}-${new Date().getUTCFullYear()}-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString('hex').toUpperCase()}`;
+}
+
+function parseDateWindow(query) {
+  const from = text(query.from, 10);
+  const to = text(query.to, 10);
+  if ((from && !isIsoDate(from)) || (to && !isIsoDate(to))) {
+    throw httpError(400, 'Dates must use YYYY-MM-DD.');
+  }
+  if (from && to && to < from) throw httpError(400, 'End date must be on or after start date.');
+  return { from, to };
+}
+
 async function existingIdempotent(connection, key, expected) {
   const [rows] = await connection.execute(
     `SELECT id, item_id AS itemId, movement_type AS movementType, direction,
@@ -138,17 +219,18 @@ async function attachFiles(connection, movementId, files) {
 async function recordMovement(connection, {
   itemId, userId, type, direction, quantity, referenceNo, source, description,
   requesterId = null, receivedBy = null, departmentId = null, storeRequestId = null,
-  idempotencyKey, balance, movementAt
+  idempotencyKey, balance, movementAt, purchaseOrderId = null, goodsReceiptId = null
 }) {
   const [result] = await connection.execute(
     `INSERT INTO inventory_movements
        (item_id, user_id, movement_type, direction, quantity, reference_no, source,
         description, requester_id, received_by, department_id, store_request_id, idempotency_key,
-        balance_after, movement_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        purchase_order_id, goods_receipt_id, balance_after, movement_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       itemId, userId, type, direction, quantity, referenceNo, source, description || null,
-      requesterId, receivedBy, departmentId, storeRequestId, idempotencyKey, balance, movementAt
+      requesterId, receivedBy, departmentId, storeRequestId, idempotencyKey,
+      purchaseOrderId, goodsReceiptId, balance, movementAt
     ]
   );
   return result.insertId;
@@ -259,6 +341,21 @@ router.get('/deliveries', async (req, res, next) => {
         total: Number(totals?.total) || 0
       }
     });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Full filtered inventory report rows for the in-portal register. Downloads use
+// the same export definitions through /exports/:key/:format.
+router.get('/inventory-report', async (req, res, next) => {
+  const key = String(req.query.type || 'stockkeeperStockMovement');
+  if (!INVENTORY_REPORT_KEYS.has(key)) {
+    return res.status(400).json({ message: 'Choose a supported inventory report.' });
+  }
+  try {
+    const report = await fetchExportRows(key, req.query, req.user);
+    return res.json(report);
   } catch (error) {
     return next(error);
   }
@@ -439,6 +536,9 @@ router.post('/deliveries/:id/reject', async (req, res, next) => {
 
 router.get('/summary', async (req, res, next) => {
   try {
+    const scope = await loadStockkeeperScope(pool, req.user.id);
+    if (!scope) return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    const { clause: scopeClause, params: scopeParams } = stockkeeperScopeClause(scope, req.user.id);
     const [[stats]] = await pool.execute(
       `SELECT
         (SELECT COUNT(*) FROM items) AS totalStockItems,
@@ -447,10 +547,22 @@ router.get('/summary', async (req, res, next) => {
         (SELECT COALESCE(SUM(quantity), 0) FROM items) AS availableStockBalance,
         (SELECT COUNT(*) FROM items WHERE quantity <= reorder_level) AS lowStockItems,
         (SELECT COUNT(*) FROM items WHERE quantity = 0) AS zeroStockItems,
-        (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = FALSE) AS unreadNotifications,
-        (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = FALSE
-          AND category IN ('low_stock','zero_stock','stock_request')) AS attentionNotifications`,
-      [req.user.id, req.user.id]
+        (SELECT COUNT(*) FROM notifications n
+          WHERE ${UNREAD_NOTIFICATION_SQL} AND ${VALID_NOTIFICATION_SQL}
+            AND n.user_id = ?) AS unreadNotifications,
+        (SELECT COUNT(*) FROM notifications n
+          WHERE ${UNREAD_NOTIFICATION_SQL} AND ${VALID_NOTIFICATION_SQL}
+            AND n.user_id = ?
+            AND n.category IN ('low_stock','zero_stock','stock_request')) AS attentionNotifications,
+        (SELECT COUNT(*) FROM store_requests sr
+           LEFT JOIN departments d ON d.id = sr.department_id
+          WHERE sr.requisition_id IS NOT NULL
+            AND sr.stockkeeper_decision = 'Pending' AND ${scopeClause}) AS pendingRequests,
+        (SELECT COUNT(*) FROM purchase_orders
+          WHERE status IN ('Approved', 'Partially received')) AS expectedDeliveries,
+        (SELECT COUNT(*) FROM purchase_orders
+          WHERE status = 'Partially received') AS partiallyReceivedDeliveries`,
+      [req.user.id, req.user.id, req.user.id, req.user.id, ...scopeParams]
     );
     const [recentActivities] = await pool.execute(
       `SELECT m.id, m.movement_type AS type, m.direction, m.quantity,
@@ -474,6 +586,39 @@ router.get('/summary', async (req, res, next) => {
       `SELECT id, name, sku, quantity AS balance, reorder_level AS minimumStock, unit
        FROM items WHERE quantity <= reorder_level ORDER BY quantity ASC, name LIMIT 8`
     );
+    const [requestsAwaitingAction] = await pool.execute(
+      `SELECT sr.id, sr.reference, sr.stockkeeper_decision AS decision,
+          COALESCE(sr.routed_at, sr.created_at) AS routedAt,
+          r.reference AS requisitionReference, u.name AS requester,
+          d.name AS department, su.name AS supervisorName,
+          GROUP_CONCAT(CONCAT(COALESCE(i.name, sri.requested_item_name), ' × ', sri.quantity,
+            ' ', COALESCE(i.unit, sri.requested_unit, 'unit')) ORDER BY sri.id SEPARATOR ', ') AS items
+       FROM store_requests sr
+       JOIN requisitions r ON r.id = sr.requisition_id
+       JOIN users u ON u.id = sr.requester_id
+       LEFT JOIN departments d ON d.id = sr.department_id
+       LEFT JOIN users su ON su.id = sr.routed_by_supervisor
+       JOIN store_request_items sri ON sri.store_request_id = sr.id
+       LEFT JOIN items i ON i.id = sri.item_id
+       WHERE r.routing_destination IN ('Stock Keeper','Split')
+         AND r.status <> 'Cancelled'
+         AND sr.stockkeeper_decision IN ('Pending','Accepted')
+         AND ${scopeClause}
+       GROUP BY sr.id
+       ORDER BY FIELD(sr.stockkeeper_decision, 'Pending', 'Accepted'), sr.id LIMIT 8`,
+      scopeParams
+    );
+    const [expectedDeliveriesList] = await pool.execute(
+      `SELECT p.id, p.reference, p.delivery_date AS expectedDate, p.status,
+          s.name AS supplier, u.name AS procurementOfficer,
+          GROUP_CONCAT(DISTINCT poi.item_name ORDER BY poi.item_name SEPARATOR ', ') AS items
+       FROM purchase_orders p
+       JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN users u ON u.id = p.created_by
+       LEFT JOIN purchase_order_items poi ON poi.purchase_order_id = p.id
+       WHERE p.status IN ('Approved', 'Partially received')
+       GROUP BY p.id ORDER BY p.delivery_date IS NULL, p.delivery_date, p.id LIMIT 8`
+    );
     const [[department]] = req.user.departmentId ? await pool.execute(
       `SELECT d.id, d.name, d.description,
           (SELECT COUNT(*) FROM users u WHERE u.department_id = d.id) AS userCount,
@@ -493,7 +638,9 @@ router.get('/summary', async (req, res, next) => {
       recentStockIn: recentActivities.filter((movement) => movement.direction === 'In').slice(0, 5),
       recentStockOut: recentActivities.filter((movement) => movement.direction === 'Out').slice(0, 5),
       recentBinCards,
-      lowStockItems
+      lowStockItems,
+      requestsAwaitingAction,
+      expectedDeliveries: expectedDeliveriesList
     });
   } catch (error) {
     return next(error);
@@ -506,13 +653,83 @@ router.get('/items', async (req, res, next) => {
     const [items] = await pool.execute(
       `SELECT i.id, i.name, i.sku, i.category, i.unit, i.quantity AS balance,
           i.reorder_level AS minimumStock, i.updated_at AS updatedAt,
-          d.name AS department
+          i.storage_location AS storageLocation, d.id AS departmentId, d.name AS department
        FROM items i LEFT JOIN departments d ON d.id = i.department_id
        WHERE (? = '' OR i.name LIKE ? OR i.sku LIKE ? OR i.category LIKE ? OR d.name LIKE ?)
        ORDER BY i.name LIMIT 500`,
       [search, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`]
     );
     return res.json({ items });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/stock-overview', async (req, res, next) => {
+  const search = text(req.query.search, 100);
+  const departmentId = req.query.departmentId ? parseId(req.query.departmentId) : null;
+  if (req.query.departmentId && !departmentId && String(req.query.departmentId) !== 'unassigned') {
+    return res.status(400).json({ message: 'Invalid Department filter.' });
+  }
+  try {
+    const filters = ["(? = '' OR i.name LIKE ? OR i.sku LIKE ? OR i.category LIKE ? OR i.storage_location LIKE ? OR d.name LIKE ?)"];
+    const params = [search, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+    if (departmentId) { filters.push('i.department_id = ?'); params.push(departmentId); }
+    if (String(req.query.departmentId) === 'unassigned') filters.push('i.department_id IS NULL');
+    const [items] = await pool.execute(
+      `SELECT i.id, i.sku AS itemCode, i.name AS itemName, i.category,
+          i.department_id AS departmentId, COALESCE(d.name, 'Unassigned') AS department,
+          COALESCE(NULLIF(i.storage_location, ''), 'General storage') AS storageLocation,
+          i.unit AS unitOfMeasure, i.reorder_level AS minimumStock, i.updated_at AS updatedAt,
+          i.quantity AS currentBalance,
+          COALESCE(stockIn.total, 0) AS totalStockIn, COALESCE(stockOut.total, 0) AS totalStockOut,
+          i.quantity - COALESCE(stockIn.total, 0) + COALESCE(stockOut.total, 0) AS openingBalance
+       FROM items i
+       LEFT JOIN departments d ON d.id = i.department_id
+       LEFT JOIN (SELECT item_id, SUM(quantity) AS total FROM inventory_movements WHERE direction = 'In' GROUP BY item_id) stockIn ON stockIn.item_id = i.id
+       LEFT JOIN (SELECT item_id, SUM(quantity) AS total FROM inventory_movements WHERE direction = 'Out' GROUP BY item_id) stockOut ON stockOut.item_id = i.id
+       WHERE ${filters.join(' AND ')}
+       ORDER BY COALESCE(d.name, 'Unassigned'), i.storage_location, i.name`,
+      params
+    );
+    const [departments] = await pool.execute(
+      `SELECT d.id, d.name, COUNT(i.id) AS itemCount
+       FROM departments d JOIN items i ON i.department_id = d.id
+       GROUP BY d.id ORDER BY d.name`
+    );
+    return res.json({
+      items: items.map((item) => ({
+        ...item,
+        status: Number(item.currentBalance) === 0 ? 'Out of Stock'
+          : Number(item.currentBalance) <= Number(item.minimumStock) ? 'Low Stock' : 'Available'
+      })),
+      departments
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.patch('/items/:id/location', async (req, res, next) => {
+  const itemId = parseId(req.params.id);
+  const departmentId = req.body.departmentId === null || req.body.departmentId === ''
+    ? null : parseId(req.body.departmentId);
+  const storageLocation = text(req.body.storageLocation, 150) || 'General storage';
+  if (!itemId) return res.status(400).json({ message: 'Invalid inventory item.' });
+  if (req.body.departmentId && departmentId === null) {
+    return res.status(400).json({ message: 'Choose a valid department.' });
+  }
+  try {
+    if (departmentId) {
+      const [[department]] = await pool.execute('SELECT id FROM departments WHERE id = ?', [departmentId]);
+      if (!department) return res.status(404).json({ message: 'Department not found.' });
+    }
+    await pool.execute(
+      'UPDATE items SET department_id = ?, storage_location = ? WHERE id = ?',
+      [departmentId, storageLocation, itemId]
+    );
+    await writeAudit(pool, req.user.id, 'stock_location_updated', 'item', itemId, { departmentId, storageLocation });
+    return res.json({ message: 'Department and storage location updated.' });
   } catch (error) {
     return next(error);
   }
@@ -661,27 +878,806 @@ router.post('/transactions/stock-in', async (req, res, next) => {
   }
 });
 
-router.get('/issue-requests', async (_req, res, next) => {
+async function loadExpectedDelivery(connection, purchaseOrderId) {
+  const [orders] = await connection.execute(
+    `SELECT p.id, p.reference, p.delivery_date AS expectedDate, p.status,
+        p.supplier_contact AS supplierContact, p.supplier_address AS supplierAddress,
+        p.type, p.approved_at AS approvedAt, p.created_at AS createdAt,
+        s.id AS supplierId, s.name AS supplier,
+        officer.name AS procurementOfficer, officer.id AS procurementOfficerId,
+        r.id AS requisitionId, r.reference AS requisitionReference
+     FROM purchase_orders p
+     JOIN suppliers s ON s.id = p.supplier_id
+     LEFT JOIN users officer ON officer.id = p.created_by
+     LEFT JOIN rfqs f ON f.id = p.rfq_id
+     LEFT JOIN requisitions r ON r.id = f.requisition_id
+     WHERE p.id = ? AND p.status IN ('Approved', 'Partially received') LIMIT 1`,
+    [purchaseOrderId]
+  );
+  const order = orders[0];
+  if (!order) return null;
+  const [lines] = await connection.execute(
+    `SELECT poi.id AS purchaseOrderItemId, poi.item_name AS itemName, poi.description,
+        poi.quantity AS expectedQuantity, poi.unit
+     FROM purchase_order_items poi WHERE poi.purchase_order_id = ? ORDER BY poi.id`,
+    [purchaseOrderId]
+  );
+  const items = [];
+  for (const line of lines) {
+    const [[catalog]] = await connection.execute(
+      'SELECT id, name, sku, unit, department_id AS departmentId, storage_location AS storageLocation FROM items WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      [line.itemName]
+    );
+    let received = 0;
+    let damaged = 0;
+    if (catalog) {
+      const [[totals]] = await connection.execute(
+        `SELECT COALESCE(SUM(gri.quantity), 0) AS received,
+            COALESCE(SUM(gri.damaged_quantity), 0) AS damaged
+         FROM goods_receipt_items gri
+         JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
+         WHERE gr.purchase_order_id = ? AND gri.item_id = ?`,
+        [purchaseOrderId, catalog.id]
+      );
+      received = Number(totals.received) || 0;
+      damaged = Number(totals.damaged) || 0;
+    }
+    items.push({
+      ...line,
+      itemId: catalog?.id || null,
+      itemCode: catalog?.sku || null,
+      unit: line.unit || catalog?.unit || 'unit',
+      departmentId: catalog?.departmentId || null,
+      storageLocation: catalog?.storageLocation || null,
+      receivedQuantity: received,
+      damagedQuantity: damaged,
+      // Damaged units were physically delivered, so they also reduce the
+      // quantity still expected from the supplier.
+      outstandingQuantity: Math.max(0, Number(line.expectedQuantity) - received - damaged)
+    });
+  }
+  const [documents] = order.requisitionId ? await connection.execute(
+    `SELECT id, file_name AS fileName, mime_type AS mimeType, file_size AS fileSize, created_at AS createdAt
+     FROM requisition_attachments WHERE requisition_id = ? ORDER BY id`,
+    [order.requisitionId]
+  ) : [[]];
+  return {
+    ...order,
+    supplierContact: order.supplierContact || null,
+    supplierAddress: order.supplierAddress || null,
+    deliveryInformation: [order.type, order.supplierContact, order.supplierAddress]
+      .filter(Boolean).join(' · ') || 'Delivery details recorded on the purchase order.',
+    items,
+    documents
+  };
+}
+
+router.get('/expected-deliveries', async (req, res, next) => {
   try {
+    const [orders] = await pool.execute(
+      `SELECT p.id, p.reference, p.delivery_date AS expectedDate, p.status,
+          s.name AS supplier, officer.name AS procurementOfficer,
+          (SELECT COUNT(*) FROM purchase_order_items poi WHERE poi.purchase_order_id = p.id) AS lineCount
+       FROM purchase_orders p
+       JOIN suppliers s ON s.id = p.supplier_id
+       LEFT JOIN users officer ON officer.id = p.created_by
+       WHERE p.status IN ('Approved', 'Partially received')
+       ORDER BY p.delivery_date IS NULL, p.delivery_date, p.id`
+    );
+    const deliveries = [];
+    for (const order of orders) {
+      deliveries.push(await loadExpectedDelivery(pool, order.id));
+    }
+    return res.json({ deliveries });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/expected-deliveries/:id', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid purchase order.' });
+  try {
+    const delivery = await loadExpectedDelivery(pool, id);
+    if (!delivery) return res.status(404).json({ message: 'Authorized expected delivery not found.' });
+    return res.json({ delivery });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+async function saveGoodsReceipt(req, res, next, id, allItems) {
+  const idempotencyKey = text(req.body.idempotencyKey, 80);
+  const date = businessDate(req.body.date || new Date().toISOString().slice(0, 10), 'Receiving date');
+  const comments = text(req.body.comments, 2000);
+  if (idempotencyKey.length < 16) return res.status(400).json({ message: 'A receiving idempotency key is required.' });
+  const submitted = Array.isArray(req.body.lines) ? req.body.lines : [];
+  if (!submitted.length) return res.status(400).json({ message: 'Confirm at least one delivered item.' });
+  const selected = new Map();
+  for (const line of submitted) {
+    const itemId = parseId(line.itemId);
+    const delivered = Number(line.deliveredQuantity);
+    const accepted = Number(line.acceptedQuantity);
+    const rejected = Number(line.rejectedQuantity ?? line.damagedQuantity ?? 0);
+    if (!itemId) return res.status(400).json({ message: 'Choose a valid catalog item for each line.' });
+    if (!Number.isInteger(delivered) || delivered < 0
+        || !Number.isInteger(accepted) || accepted < 0
+        || !Number.isInteger(rejected) || rejected < 0) {
+      return res.status(400).json({ message: 'Delivered, accepted and rejected quantities must be whole numbers.' });
+    }
+    if (delivered !== accepted + rejected) {
+      return res.status(400).json({ message: 'Delivered quantity must equal accepted plus rejected/damaged quantity.' });
+    }
+    if (!accepted && !rejected) return res.status(400).json({ message: 'Enter the quantity physically delivered for each line.' });
+    if (selected.has(itemId)) return res.status(400).json({ message: 'An item was included more than once.' });
+    selected.set(itemId, {
+      itemId, delivered, accepted, rejected,
+      condition: text(line.condition, 40) || (rejected ? 'Damaged/rejected' : 'Good'),
+      comments: text(line.comments, 1000),
+      departmentId: line.departmentId ? parseId(line.departmentId) : null,
+      storageLocation: text(line.storageLocation, 150) || null
+    });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [[duplicate]] = await connection.execute(
+      'SELECT id, reference FROM goods_receipts WHERE idempotency_key = ? LIMIT 1', [idempotencyKey]
+    );
+    if (duplicate) {
+      await connection.rollback();
+      return res.json({ duplicate: true, id: Number(duplicate.id), reference: duplicate.reference, message: 'This delivery was already recorded.' });
+    }
+    const delivery = await loadExpectedDelivery(connection, id);
+    if (!delivery) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'This purchase order is not authorized for receipt.' });
+    }
+    const records = [];
+    for (const line of delivery.items) {
+      if (!selected.has(Number(line.itemId))) continue;
+      const choice = selected.get(Number(line.itemId));
+      if (!line.itemId) {
+        await connection.rollback();
+        return res.status(409).json({ message: `Add "${line.itemName}" to the inventory catalogue before receiving it.` });
+      }
+      if (choice.accepted > line.outstandingQuantity) {
+        await connection.rollback();
+        return res.status(409).json({ message: `${line.itemName} exceeds the outstanding ordered quantity (${line.outstandingQuantity}).` });
+      }
+      records.push({ ...line, ...choice });
+    }
+    if (records.length !== selected.size) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'One or more items are not on this purchase order.' });
+    }
+    if (allItems) {
+      const missing = delivery.items.filter((line) => line.outstandingQuantity > 0 && !selected.has(Number(line.itemId)));
+      if (missing.length) {
+        await connection.rollback();
+        return res.status(409).json({ message: `Receive all requires every outstanding line: ${missing.map((line) => line.itemName).join(', ')}.` });
+      }
+      for (const record of records) {
+        if (record.accepted !== record.outstandingQuantity || record.rejected !== 0) {
+          await connection.rollback();
+          return res.status(409).json({ message: 'Receive All Items requires full accepted quantities with no damaged/rejected units. Use Receive Individual Items for discrepancies.' });
+        }
+      }
+    }
+    const catalogItems = new Map();
+    for (const record of records) {
+      const [[item]] = await connection.execute(
+        `SELECT id, name, unit, quantity, reorder_level AS minimumStock,
+            department_id AS departmentId, storage_location AS storageLocation
+         FROM items WHERE id = ? ORDER BY id FOR UPDATE`,
+        [record.itemId]
+      );
+      if (!item) {
+        await connection.rollback();
+        return res.status(404).json({ message: 'Inventory item not found.' });
+      }
+      catalogItems.set(Number(item.id), item);
+    }
+    const reference = transactionReference('GRN');
+    const [receiptResult] = await connection.execute(
+      `INSERT INTO goods_receipts
+         (reference, purchase_order_id, source, received_by, expected_at, comments, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [reference, id, delivery.supplier, req.user.id,
+        delivery.expectedDate ? toUtcDateTime(delivery.expectedDate) : null, comments, idempotencyKey]
+    );
+    const receiptId = Number(receiptResult.insertId);
+    let acceptedTotal = 0;
+    let rejectedTotal = 0;
+    const movements = [];
+    for (const [index, record] of records.entries()) {
+      const item = catalogItems.get(Number(record.itemId));
+      const departmentId = record.departmentId || item.departmentId || null;
+      const storageLocation = record.storageLocation || item.storageLocation || 'General storage';
+      await connection.execute(
+        `UPDATE items SET quantity = quantity + ?, department_id = ?, storage_location = ? WHERE id = ?`,
+        [record.accepted, departmentId, storageLocation, record.itemId]
+      );
+      await connection.execute(
+        `INSERT INTO goods_receipt_items
+           (goods_receipt_id, item_id, quantity, delivered_quantity, damaged_quantity,
+            \`condition\`, comments, department_id, storage_location)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [receiptId, record.itemId, record.accepted, record.delivered, record.rejected,
+          record.condition, record.comments || null, departmentId, storageLocation]
+      );
+      const [[updated]] = await connection.execute('SELECT quantity FROM items WHERE id = ?', [record.itemId]);
+      const balance = Number(updated.quantity);
+      const movementId = await recordMovement(connection, {
+        itemId: record.itemId, userId: req.user.id, type: 'Receipt', direction: 'In',
+        quantity: record.accepted, referenceNo: `${reference}-${index + 1}`,
+        source: delivery.reference,
+        description: [comments, record.comments, record.rejected ? `${record.rejected} damaged/rejected` : ''].filter(Boolean).join(' · '),
+        departmentId, idempotencyKey: `${idempotencyKey}-${index + 1}`, balance,
+        movementAt: toUtcDateTime(date), purchaseOrderId: id, goodsReceiptId: receiptId
+      });
+      movements.push({ id: movementId, itemId: record.itemId, itemName: item.name, quantity: record.accepted, balance });
+      acceptedTotal += record.accepted;
+      rejectedTotal += record.rejected;
+      if (balance <= Number(item.minimumStock || 0)) {
+        if (balance <= 0) {
+          await notifyStorekeepers(connection, 'Item is out of stock', `${item.name} has reached zero balance.`,
+            `#/stockkeeper/Bin%20Card?item=${item.id}`, 'zero_stock');
+        } else {
+          await notifyStorekeepers(connection, 'Low stock alert', `${item.name} has ${balance} remaining.`,
+            `#/stockkeeper/Bin%20Card?item=${item.id}`, 'low_stock');
+        }
+      }
+    }
+    const refreshed = await loadExpectedDelivery(connection, id);
+    const outstanding = refreshed.items.reduce((sum, line) => sum + line.outstandingQuantity, 0);
+    const poStatus = outstanding === 0 ? 'Received' : 'Partially received';
+    await connection.execute('UPDATE purchase_orders SET status = ? WHERE id = ?', [poStatus, id]);
+    await writeAudit(connection, req.user.id, 'goods_received', 'goods_receipt', receiptId, {
+      reference, purchaseOrder: delivery.reference, acceptedTotal, rejectedTotal,
+      poStatus, lines: records.map((record) => ({
+        itemId: record.itemId, accepted: record.accepted, rejected: record.rejected
+      }))
+    }, { newStatus: poStatus });
+    const receiptNote = rejectedTotal ? ` · ${rejectedTotal} unit(s) damaged/rejected` : '';
+    await notifyProcurement(connection, id, delivery.procurementOfficerId,
+      rejectedTotal ? 'Delivery discrepancy recorded' : (outstanding ? 'Partial delivery received' : 'Goods received'),
+      `${delivery.reference}: ${reference} recorded ${acceptedTotal} accepted unit(s)${receiptNote}. ${outstanding} unit(s) still outstanding. ${comments || ''}`.trim(),
+      `/purchase-orders/${id}`, 'goods_receipt');
+    await notifyStorekeepers(connection, 'Stock received',
+      `${acceptedTotal} unit(s) received against ${delivery.reference} · ${reference}.`,
+      `#/stockkeeper/Stock%20In?purchaseOrder=${id}`, 'stock_in');
+    await connection.commit();
+    return res.status(201).json({
+      id: receiptId, reference, acceptedTotal, rejectedTotal, outstanding,
+      purchaseOrderStatus: poStatus, movements,
+      message: outstanding ? 'Partial delivery recorded; outstanding quantities remain visible.'
+        : 'All ordered goods received and recorded.'
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'This receiving transaction was already submitted.' });
+    }
+    return next(error);
+  } finally {
+    connection.release();
+  }
+}
+
+router.post('/expected-deliveries/:id/receive-all', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid purchase order.' });
+  try {
+    return await saveGoodsReceipt(req, res, next, id, true);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post('/expected-deliveries/:id/receive-items', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid purchase order.' });
+  try {
+    return await saveGoodsReceipt(req, res, next, id, false);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.get('/issue-requests', async (req, res, next) => {
+  try {
+    const scope = await loadStockkeeperScope(pool, req.user.id);
+    if (!scope) return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    const { clause: scopeClause, params: scopeParams } = stockkeeperScopeClause(scope, req.user.id);
     const [requests] = await pool.execute(
       `SELECT sr.id AS requestId, sr.reference, sr.purpose,
+          COALESCE(sr.routed_at, sr.approved_at, sr.created_at) AS routedAt,
+          sr.status AS requestStatus, sr.stockkeeper_decision AS stockkeeperDecision,
+          sr.stockkeeper_decision_at AS decisionAt, sr.stockkeeper_comments AS stockkeeperComments,
+          sr.rejection_reason AS rejectionReason, sr.issued_at AS issuedAt,
+          sr.stockkeeper_viewed_at AS viewedAt,
+          CASE WHEN sr.stockkeeper_decision = 'Pending' AND sr.stockkeeper_viewed_at IS NULL
+            THEN TRUE ELSE FALSE END AS isNew,
+          decider.name AS stockkeeperName,
+          sr.requisition_id AS requisitionId, r.reference AS requisitionReference,
+          r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
+          r.routing_comments AS supervisorComments, r.status AS requisitionStatus, su.name AS supervisorName,
           sr.department_id AS departmentId, d.name AS department,
           u.id AS requesterId, u.name AS requester, u.email AS requesterEmail,
-          sri.item_id AS itemId, i.name AS itemName, i.sku, i.unit,
+          sri.id AS storeRequestItemId, sri.item_id AS itemId,
+          COALESCE(i.name, sri.requested_item_name) AS itemName,
+          COALESCE(i.sku, '') AS sku, COALESCE(i.unit, sri.requested_unit, 'unit') AS unit,
+          COALESCE(sri.accepted_quantity, sri.quantity) AS authorizedQuantity,
           sri.quantity AS requestedQuantity, sri.issued_quantity AS issuedQuantity,
-          (sri.quantity - sri.issued_quantity) AS remainingQuantity,
-          i.quantity AS availableBalance
+          (COALESCE(sri.accepted_quantity, sri.quantity) - sri.issued_quantity) AS remainingQuantity,
+          COALESCE(i.quantity, 0) AS availableBalance
        FROM store_requests sr
        JOIN users u ON u.id = sr.requester_id
        LEFT JOIN departments d ON d.id = sr.department_id
+       JOIN requisitions r ON r.id = sr.requisition_id
+       LEFT JOIN users su ON su.id = sr.routed_by_supervisor
+       LEFT JOIN users decider ON decider.id = sr.stockkeeper_decision_by
        JOIN store_request_items sri ON sri.store_request_id = sr.id
-       JOIN items i ON i.id = sri.item_id
-       WHERE sr.status = 'Approved' AND sri.issued_quantity < sri.quantity
-       ORDER BY COALESCE(sr.approved_at, sr.created_at), sr.id, sri.id`
+       LEFT JOIN items i ON i.id = sri.item_id
+       WHERE sr.requisition_id IS NOT NULL
+          AND r.routing_destination IN ('Stock Keeper','Split')
+          AND r.status <> 'Cancelled'
+          AND (COALESCE(sri.accepted_quantity, sri.quantity) - sri.issued_quantity) > 0
+          AND ${scopeClause}
+       ORDER BY COALESCE(sr.routed_at, sr.approved_at, sr.created_at), sr.id, sri.id`,
+      scopeParams
     );
-    return res.json({ requests });
+    return res.json({ requests: withRoutedStatus(requests) });
   } catch (error) {
     return next(error);
+  }
+});
+
+// Complete list of Supervisor-routed requests, including decided and fully
+// issued records, so the workspace preserves the original request history.
+router.get('/routed-requests', async (req, res, next) => {
+  try {
+    const scope = await loadStockkeeperScope(pool, req.user.id);
+    if (!scope) return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    const { clause: scopeClause, params: scopeParams } = stockkeeperScopeClause(scope, req.user.id);
+    const [requests] = await pool.execute(
+      `SELECT sr.id AS requestId, sr.reference, sr.purpose,
+          sr.status AS requestStatus, sr.stockkeeper_decision AS stockkeeperDecision,
+          sr.stockkeeper_decision_at AS decisionAt, sr.stockkeeper_comments AS stockkeeperComments,
+          sr.rejection_reason AS rejectionReason, sr.issued_at AS issuedAt,
+          sr.stockkeeper_viewed_at AS viewedAt,
+          CASE WHEN sr.stockkeeper_decision = 'Pending' AND sr.stockkeeper_viewed_at IS NULL
+            THEN TRUE ELSE FALSE END AS isNew,
+          decider.name AS stockkeeperName,
+          COALESCE(sr.routed_at, sr.approved_at, sr.created_at) AS routedAt,
+          sr.requisition_id AS requisitionId, r.reference AS requisitionReference,
+          r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
+          r.routing_comments AS supervisorComments, r.status AS requisitionStatus,
+          r.routing_destination AS routingDestination,
+          su.name AS supervisorName, d.name AS department,
+          u.id AS requesterId, u.name AS requester, u.email AS requesterEmail,
+          sri.id AS storeRequestItemId, sri.item_id AS itemId,
+          COALESCE(i.name, sri.requested_item_name) AS itemName,
+          COALESCE(i.sku, '') AS sku, COALESCE(i.unit, sri.requested_unit, 'unit') AS unit,
+          COALESCE(i.quantity, 0) AS availableBalance,
+          sri.quantity AS requestedQuantity,
+          COALESCE(sri.accepted_quantity, sri.quantity) AS authorizedQuantity,
+          sri.issued_quantity AS issuedQuantity,
+          (COALESCE(sri.accepted_quantity, sri.quantity) - sri.issued_quantity) AS remainingQuantity
+       FROM store_requests sr
+       JOIN users u ON u.id = sr.requester_id
+       LEFT JOIN departments d ON d.id = sr.department_id
+       JOIN requisitions r ON r.id = sr.requisition_id
+       LEFT JOIN users su ON su.id = sr.routed_by_supervisor
+       LEFT JOIN users decider ON decider.id = sr.stockkeeper_decision_by
+       JOIN store_request_items sri ON sri.store_request_id = sr.id
+       LEFT JOIN items i ON i.id = sri.item_id
+       WHERE sr.requisition_id IS NOT NULL
+          AND r.routing_destination IN ('Stock Keeper','Split')
+          AND r.status <> 'Cancelled'
+          AND ${scopeClause}
+       ORDER BY COALESCE(sr.routed_at, sr.approved_at, sr.created_at) DESC, sr.id DESC, sri.id`,
+      scopeParams
+    );
+    return res.json({ requests: withRoutedStatus(requests) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Records the Stock Keeper's stock-availability decision. Acceptance only
+// authorizes preparation: no inventory movement is created here.
+router.post('/requests/:id/decision', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  const decision = String(req.body.decision || '');
+  const comments = text(req.body.comments, 2000);
+  const reason = text(req.body.reason, 2000);
+  if (!id) return res.status(400).json({ message: 'Invalid request identifier.' });
+  if (!['Accepted', 'Rejected'].includes(decision)) {
+    return res.status(400).json({ message: 'Choose Accept Request or Reject Request.' });
+  }
+  if (decision === 'Rejected' && !reason) {
+    return res.status(400).json({ message: 'A rejection reason is required.' });
+  }
+  const selections = new Map();
+  if (Array.isArray(req.body.lines)) {
+    for (const line of req.body.lines) {
+      const lineId = parseId(line.storeRequestItemId);
+      const quantity = Number(line.quantity);
+      if (!lineId || !Number.isInteger(quantity) || quantity < 0) {
+        return res.status(400).json({ message: 'Each confirmed item needs a valid non-negative whole-number quantity.' });
+      }
+      if (selections.has(lineId)) {
+        return res.status(400).json({ message: 'An item was included more than once in the decision.' });
+      }
+      selections.set(lineId, quantity);
+    }
+  }
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const scope = await requireActionScope(connection, req.user.id);
+    if (!scope) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    }
+    const [rows] = await connection.execute(
+      `SELECT sr.id, sr.reference, sr.requisition_id AS requisitionId,
+          sr.department_id AS departmentId, sr.status,
+          sr.stockkeeper_decision AS previousDecision,
+          r.reference AS requisitionReference, r.status AS requisitionStatus,
+          r.supervisor_id AS supervisorId, u.id AS requesterId, u.name AS requesterName
+       FROM store_requests sr
+       JOIN requisitions r ON r.id = sr.requisition_id
+       JOIN users u ON u.id = sr.requester_id
+       LEFT JOIN departments d ON d.id = sr.department_id
+       WHERE sr.id = ? AND r.routing_destination IN ('Stock Keeper','Split')
+         AND r.status <> 'Cancelled' AND ${scope.clause} FOR UPDATE`,
+      [id, ...scope.params]
+    );
+    const request = rows[0];
+    if (!request) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Routed request not found in your inventory scope.' });
+    }
+    if (request.previousDecision !== 'Pending') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'This request already has a Stock Keeper decision.' });
+    }
+    const [lines] = await connection.execute(
+      `SELECT sri.id, sri.item_id AS itemId, sri.quantity AS requestedQuantity,
+          sri.issued_quantity AS issuedQuantity,
+          COALESCE(i.name, sri.requested_item_name, 'Requested item') AS itemName,
+          COALESCE(i.unit, sri.requested_unit, 'unit') AS unit,
+          COALESCE(i.quantity, 0) AS availableBalance
+       FROM store_request_items sri LEFT JOIN items i ON i.id = sri.item_id
+       WHERE sri.store_request_id = ? FOR UPDATE`,
+      [id]
+    );
+    if (!lines.length) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'This request has no items to decide.' });
+    }
+    if (decision === 'Accepted') {
+      if (!lines.some((line) => Number(line.requestedQuantity) - Number(line.issuedQuantity) > 0)) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'This request has no outstanding quantity to accept.' });
+      }
+      for (const line of lines) {
+        const requested = Number(line.requestedQuantity) - Number(line.issuedQuantity);
+        const selected = selections.has(line.id) ? selections.get(line.id) : Math.min(requested, Number(line.availableBalance));
+        if (selected > requested) {
+          await connection.rollback();
+          return res.status(409).json({ message: `${line.itemName} cannot exceed the outstanding requested quantity (${requested}).` });
+        }
+        if (selected > Number(line.availableBalance)) {
+          await connection.rollback();
+          return res.status(409).json({ message: `${line.itemName} cannot exceed available stock (${line.availableBalance}).` });
+        }
+        await connection.execute('UPDATE store_request_items SET accepted_quantity = ? WHERE id = ?', [selected, line.id]);
+      }
+    }
+    await connection.execute(
+      `UPDATE store_requests
+          SET stockkeeper_decision = ?, stockkeeper_decision_by = ?, stockkeeper_decision_at = UTC_TIMESTAMP(),
+              stockkeeper_comments = ?, rejection_reason = ?, status = ?
+        WHERE id = ?`,
+      [decision, req.user.id, comments || null, decision === 'Rejected' ? reason : null,
+        decision === 'Accepted' ? 'Approved' : 'Rejected', id]
+    );
+    const affected = lines.filter((line) => Number(line.requestedQuantity) - Number(line.issuedQuantity) > 0)
+      .map((line) => {
+        const accepted = decision === 'Accepted'
+          ? (selections.has(line.id) ? selections.get(line.id) : Math.min(Number(line.requestedQuantity) - Number(line.issuedQuantity), Number(line.availableBalance)))
+          : 0;
+        return `${line.itemName}: ${accepted} ${line.unit} accepted of ${Number(line.requestedQuantity) - Number(line.issuedQuantity)} requested`;
+      }).join('; ');
+    const nextStatus = decision === 'Rejected' ? REQUISITION_STATUS.RETURNED_TO_SUPERVISOR : request.requisitionStatus;
+    if (decision === 'Rejected') {
+      await connection.execute('UPDATE requisitions SET status = ? WHERE id = ?', [nextStatus, request.requisitionId]);
+    }
+    await connection.execute(
+      `INSERT INTO requisition_activity (requisition_id, user_id, action, details, previous_status, new_status)
+       VALUES (?, ?, ?, JSON_OBJECT('storeRequestId', ?, 'decision', ?, 'comments', ?, 'reason', ?, 'affected', ?, 'decidedBy', ?), ?, ?)`,
+      [request.requisitionId, req.user.id, decision === 'Accepted' ? 'stock_request_accepted' : 'stock_request_rejected',
+        id, decision, comments, decision === 'Rejected' ? reason : null, affected, req.user.name,
+        request.requisitionStatus, nextStatus]
+    );
+    await writeAudit(connection, req.user.id, decision === 'Accepted' ? 'stock_request_accepted' : 'stock_request_rejected',
+      'store_request', id, { decision, comments, reason: decision === 'Rejected' ? reason : null, affected });
+    const title = decision === 'Accepted' ? 'Stock request accepted' : 'Stock request rejected';
+    const body = `${req.user.name} ${decision.toLowerCase()} ${request.requisitionReference}. ${affected}. ${decision === 'Rejected' ? `Reason: ${reason}.` : ''} ${comments ? `Comments: ${comments}` : ''}`.trim();
+    const link = `#/supervisor/Approvals?request=${request.requisitionId}`;
+    await notifySupervisor(connection, request, title, body, link, 'stock_request_decision');
+    await notifyUsers(connection, [request.requesterId], title, body,
+      `#/requester/My%20Procurement%20Requests?request=${request.requisitionId}`, 'stock_request_decision');
+    await notifyUsers(connection, [req.user.id], title, body, `#/stockkeeper/Requests%20from%20Supervisors?request=${id}`, 'stock_request_decision');
+    await connection.commit();
+    return res.json({
+      id,
+      decision,
+      decisionAt: new Date().toISOString(),
+      comments,
+      reason: decision === 'Rejected' ? reason : null,
+      affected,
+      message: decision === 'Accepted'
+        ? 'Request accepted. Stock will decrease only when a physical Stock Out is recorded.'
+        : 'Request rejected and returned to the Supervisor.'
+    });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+router.get('/routed-requests/:id', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid request identifier.' });
+  try {
+    const scope = await requireActionScope(pool, req.user.id);
+    if (!scope) return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    const [rows] = await pool.execute(
+      `SELECT sr.id, sr.reference AS storeReference, sr.purpose, sr.status,
+           sr.status AS requestStatus, sr.issued_at AS issuedAt,
+           sr.stockkeeper_viewed_at AS viewedAt,
+           CASE WHEN sr.stockkeeper_decision = 'Pending' AND sr.stockkeeper_viewed_at IS NULL
+             THEN TRUE ELSE FALSE END AS isNew,
+           sr.requisition_id AS requisitionId, sr.routed_at AS routedAt,
+           r.reference AS requisitionReference, r.title, r.justification, r.priority,
+           r.status AS requisitionStatus, r.required_by AS requiredBy,
+           r.submitted_at AS submittedAt, r.forwarded_at AS forwardedAt,
+           r.routing_comments AS supervisorComments, r.routing_destination AS routingDestination,
+           sr.stockkeeper_decision AS stockkeeperDecision,
+           sr.stockkeeper_decision_at AS decisionAt,
+           sr.stockkeeper_comments AS stockkeeperComments,
+           sr.rejection_reason AS rejectionReason,
+           u.id AS requesterId, u.name AS requester, d.name AS department,
+           su.name AS supervisorName, decider.name AS stockkeeperName
+        FROM store_requests sr
+        JOIN requisitions r ON r.id = sr.requisition_id
+        JOIN users u ON u.id = sr.requester_id
+        LEFT JOIN departments d ON d.id = sr.department_id
+        LEFT JOIN users su ON su.id = sr.routed_by_supervisor
+        LEFT JOIN users decider ON decider.id = sr.stockkeeper_decision_by
+        WHERE sr.id = ? AND r.routing_destination IN ('Stock Keeper','Split')
+          AND r.status <> 'Cancelled' AND ${scope.clause} LIMIT 1`,
+      [id, ...scope.params]
+    );
+    const request = rows[0];
+    if (!request) return res.status(404).json({ message: 'Routed request not found in your inventory scope.' });
+    if (request.stockkeeperDecision === 'Pending' && !request.viewedAt) {
+      await pool.execute(
+        `UPDATE store_requests SET stockkeeper_viewed_at = UTC_TIMESTAMP()
+          WHERE id = ? AND stockkeeper_viewed_at IS NULL`,
+        [id]
+      );
+      request.viewedAt = new Date().toISOString();
+      request.isNew = false;
+    }
+    const [items] = await pool.execute(
+      `SELECT sri.id, sri.item_id AS itemId,
+           COALESCE(i.name, sri.requested_item_name, 'Requested item') AS itemName,
+           COALESCE(i.sku, '') AS sku, COALESCE(i.unit, sri.requested_unit, 'unit') AS unit,
+           COALESCE(sri.accepted_quantity, sri.quantity) AS acceptedQuantity,
+           COALESCE(sri.accepted_quantity, sri.quantity) AS authorizedQuantity,
+           sri.quantity AS requestedQuantity, sri.issued_quantity AS issuedQuantity,
+           (COALESCE(sri.accepted_quantity, sri.quantity) - sri.issued_quantity) AS outstandingQuantity,
+           COALESCE(i.quantity, 0) AS availableBalance
+        FROM store_request_items sri LEFT JOIN items i ON i.id = sri.item_id
+        WHERE sri.store_request_id = ? ORDER BY sri.id`,
+      [id]
+    );
+    const [routing] = await pool.execute(
+      `SELECT rl.destination, rl.quantity, rl.available_quantity AS availableQuantity,
+           rl.issued_quantity AS issuedQuantity, rl.returned_quantity AS returnedQuantity,
+           rl.status, ri.item_name AS itemName, ri.unit
+        FROM requisition_routing_lines rl
+        JOIN requisition_items ri ON ri.id = rl.requisition_item_id
+        WHERE rl.requisition_id = ? ORDER BY ri.id, rl.id`,
+      [request.requisitionId]
+    );
+    const [returns] = await pool.execute(
+      `SELECT rr.id, rr.available_quantity AS availableQuantity,
+           rr.unavailable_quantity AS unavailableQuantity, rr.reason, rr.status,
+           rr.created_at AS createdAt, ri.item_name AS itemName
+        FROM requisition_routing_returns rr
+        JOIN requisition_items ri ON ri.id = rr.requisition_item_id
+        WHERE rr.store_request_id = ? ORDER BY rr.created_at DESC, rr.id DESC`,
+      [id]
+    );
+    const [attachments] = await pool.execute(
+      `SELECT id, file_name AS fileName, mime_type AS mimeType, file_size AS fileSize, created_at AS createdAt
+        FROM requisition_attachments WHERE requisition_id = ? ORDER BY id`,
+      [request.requisitionId]
+    );
+    return res.json({
+      request: {
+        ...request,
+        requisitionReference: request.requisitionReference || request.reference,
+        requisitionStatusLabel: statusLabel(request.requisitionStatus),
+        ...withRoutedStatus([{
+          ...request,
+          remainingQuantity: items.reduce((sum, line) => sum + Math.max(0, Number(line.outstandingQuantity) || 0), 0),
+          issuedQuantity: items.reduce((sum, line) => sum + Number(line.issuedQuantity || 0), 0)
+        }])[0]
+      },
+      items,
+      routing,
+      returns,
+      attachments
+    });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Records a physical-count shortfall without changing stock. The unissued
+// quantity is returned to the Supervisor; already-issued quantities and their
+// stock transactions remain part of the permanent history.
+router.post('/routed-requests/:id/return-shortage', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  const storeRequestItemId = parseId(req.body.storeRequestItemId);
+  const availableQuantity = Number(req.body.availableQuantity);
+  const unavailableQuantity = Number(req.body.unavailableQuantity);
+  const reason = text(req.body.reason, 2000);
+  if (!id || !storeRequestItemId) {
+    return res.status(400).json({ message: 'Choose a request line to report.' });
+  }
+  if (!Number.isInteger(availableQuantity) || availableQuantity < 0
+      || !Number.isInteger(unavailableQuantity) || unavailableQuantity < 1) {
+    return res.status(400).json({ message: 'Enter the available quantity and a positive unavailable quantity as whole numbers.' });
+  }
+  if (!reason) return res.status(400).json({ message: 'Describe the physical stock discrepancy.' });
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const scope = await requireActionScope(connection, req.user.id);
+    if (!scope) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    }
+    const [requests] = await connection.execute(
+      `SELECT sr.id, sr.reference, sr.requisition_id AS requisitionId,
+           sr.department_id AS departmentId, sr.status,
+           r.reference AS requisitionReference, r.supervisor_id AS supervisorId,
+           u.name AS requesterName
+        FROM store_requests sr
+        JOIN requisitions r ON r.id = sr.requisition_id
+        JOIN users u ON u.id = sr.requester_id
+        LEFT JOIN departments d ON d.id = sr.department_id
+        WHERE sr.id = ? AND r.routing_destination IN ('Stock Keeper','Split')
+          AND r.status <> 'Cancelled' AND sr.status = 'Approved'
+          AND sr.stockkeeper_decision = 'Accepted' AND ${scope.clause} FOR UPDATE`,
+      [id, ...scope.params]
+    );
+    const request = requests[0];
+    if (!request) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Only an open routed request in your inventory scope can report a shortage.' });
+    }
+    const [lines] = await connection.execute(
+      `SELECT sri.id, sri.item_id AS itemId, sri.requisition_item_id AS requisitionItemId,
+           sri.quantity AS requestedQuantity,
+           COALESCE(sri.accepted_quantity, sri.quantity) AS acceptedQuantity,
+           sri.issued_quantity AS issuedQuantity,
+           COALESCE(i.name, sri.requested_item_name, 'Requested item') AS itemName
+        FROM store_request_items sri
+        LEFT JOIN items i ON i.id = sri.item_id
+        WHERE sri.id = ? AND sri.store_request_id = ? FOR UPDATE`,
+      [storeRequestItemId, id]
+    );
+    const line = lines[0];
+    if (!line || !line.requisitionItemId) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'The selected line is not part of this routed request.' });
+    }
+    const outstanding = Number(line.acceptedQuantity ?? line.requestedQuantity) - Number(line.issuedQuantity);
+    if (availableQuantity + unavailableQuantity !== outstanding) {
+      await connection.rollback();
+      return res.status(409).json({ message: `The available and unavailable quantities must account for all ${outstanding} outstanding unit(s).` });
+    }
+    const [returnResult] = await connection.execute(
+      `INSERT INTO requisition_routing_returns
+         (requisition_id, store_request_id, requisition_item_id, item_id,
+          available_quantity, unavailable_quantity, reason, reported_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [request.requisitionId, id, line.requisitionItemId, line.itemId,
+        availableQuantity, unavailableQuantity, reason, req.user.id]
+    );
+    const returnId = Number(returnResult.insertId);
+    const newQuantity = Number(line.issuedQuantity) + availableQuantity;
+    await connection.execute(
+      'UPDATE store_request_items SET quantity = ?, accepted_quantity = ? WHERE id = ?',
+      [newQuantity, newQuantity, storeRequestItemId]
+    );
+    const [[remaining]] = await connection.execute(
+      `SELECT COUNT(*) AS total FROM store_request_items
+        WHERE store_request_id = ? AND issued_quantity < COALESCE(accepted_quantity, quantity)`,
+      [id]
+    );
+    if (Number(remaining.total) === 0) {
+      await connection.execute(
+        "UPDATE store_requests SET status = 'Issued', issued_at = UTC_TIMESTAMP() WHERE id = ?",
+        [id]
+      );
+    }
+    const [routingLines] = await connection.execute(
+      `SELECT id, quantity, issued_quantity AS issuedQuantity, returned_quantity AS returnedQuantity, status
+        FROM requisition_routing_lines
+        WHERE requisition_id = ? AND requisition_item_id = ? AND destination = 'Stock Keeper' AND status <> 'Returned'
+        ORDER BY id`,
+      [request.requisitionId, line.requisitionItemId]
+    );
+    if (routingLines[0]) {
+      const updatedReturned = Number(routingLines[0].returnedQuantity) + unavailableQuantity;
+      const nextStatus = updatedReturned >= Number(routingLines[0].quantity) ? 'Returned' : routingLines[0].status;
+      await connection.execute(
+        'UPDATE requisition_routing_lines SET returned_quantity = ?, status = ? WHERE id = ?',
+        [updatedReturned, nextStatus, routingLines[0].id]
+      );
+    }
+    await connection.execute(
+      'UPDATE requisitions SET status = ? WHERE id = ?',
+      [REQUISITION_STATUS.RETURNED_TO_SUPERVISOR, request.requisitionId]
+    );
+    await connection.execute(
+      `INSERT INTO requisition_activity (requisition_id, user_id, action, details, previous_status, new_status)
+       VALUES (?, ?, 'stock_shortage_returned', JSON_OBJECT('returnId', ?, 'itemId', ?, 'availableQuantity', ?, 'unavailableQuantity', ?, 'reason', ?), ?, ?)`,
+      [request.requisitionId, req.user.id, returnId, line.itemId, availableQuantity, unavailableQuantity,
+        reason, REQUISITION_STATUS.AWAITING_STOCK_ISSUE, REQUISITION_STATUS.RETURNED_TO_SUPERVISOR]
+    );
+    await writeAudit(connection, req.user.id, 'stock_shortage_returned', 'requisition', request.requisitionId, {
+      returnId, storeRequestId: id, unavailableQuantity, availableQuantity, reason
+    });
+    const [supervisors] = await connection.execute(
+      `SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND active = TRUE
+       UNION
+       SELECT id FROM users WHERE role = 'supervisor' AND active = TRUE AND department_id = ?
+       ORDER BY id LIMIT 1`,
+      [request.supervisorId || 0, request.departmentId || 0]
+    );
+    for (const supervisor of supervisors) {
+      await createNotification(connection, supervisor.id, 'Stock shortage returned for routing',
+        `${req.user.name} reported ${unavailableQuantity} ${line.itemName} unavailable for ${request.requisitionReference}. Review and route the shortfall.`,
+        `#/supervisor/Approvals?request=${request.requisitionId}&return=${returnId}`, 'stock_return');
+    }
+    await createNotification(connection, request.requesterId, 'Stock shortage reported',
+      `${unavailableQuantity} ${line.itemName} for ${request.requisitionReference} was unavailable in physical stock. Your Supervisor will review the shortfall.`,
+      `#/requester/My%20Procurement%20Requests?request=${request.requisitionId}`, 'stock_return');
+    await connection.commit();
+    return res.status(201).json({
+      id: returnId,
+      message: 'Shortage recorded and returned to the Supervisor. No stock was reduced.'
+    });
+  } catch (error) {
+    await connection.rollback();
+    return next(error);
+  } finally {
+    connection.release();
   }
 });
 
@@ -698,6 +1694,11 @@ router.post('/transactions/stock-out', async (req, res, next) => {
   const receivedBy = text(req.body.receivedBy, 150) || null;
   try {
     await connection.beginTransaction();
+    const scope = await requireActionScope(connection, req.user.id);
+    if (!scope) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    }
     const duplicate = await existingIdempotent(connection, input.idempotencyKey, {
       itemId: input.itemId, movementType: 'Issue', direction: 'Out',
       quantity: input.quantity, storeRequestId
@@ -707,16 +1708,25 @@ router.post('/transactions/stock-out', async (req, res, next) => {
       return res.json({ id: Number(duplicate.id), referenceNo: duplicate.referenceNo, balance: Number(duplicate.balance), duplicate: true });
     }
     const [[request]] = await connection.execute(
-      `SELECT id, reference, requester_id AS requesterId, department_id AS departmentId, purpose
-       FROM store_requests WHERE id = ? AND status = 'Approved' FOR UPDATE`,
-      [storeRequestId]
+      `SELECT sr.id, sr.reference, sr.requester_id AS requesterId, sr.department_id AS departmentId,
+           sr.requisition_id AS requisitionId, sr.purpose, r.status AS requisitionStatus,
+           r.supervisor_id AS supervisorId
+       FROM store_requests sr
+       LEFT JOIN requisitions r ON r.id = sr.requisition_id
+       LEFT JOIN departments d ON d.id = sr.department_id
+       WHERE sr.id = ? AND sr.status = 'Approved'
+         AND sr.stockkeeper_decision = 'Accepted'
+         AND (sr.requisition_id IS NULL OR (r.routing_destination IN ('Stock Keeper','Split') AND r.status <> 'Cancelled'))
+         AND ${scope.clause} FOR UPDATE`,
+      [storeRequestId, ...scope.params]
     );
     if (!request) {
       await connection.rollback();
       return res.status(409).json({ message: 'Only an approved stock request can be issued.' });
     }
     const [[line]] = await connection.execute(
-      `SELECT sri.quantity AS requestedQuantity, sri.issued_quantity AS issuedQuantity,
+      `SELECT COALESCE(sri.accepted_quantity, sri.quantity) AS authorizedQuantity,
+          sri.quantity AS requestedQuantity, sri.issued_quantity AS issuedQuantity,
           i.id, i.name, i.quantity AS availableBalance, i.reorder_level AS minimumStock
        FROM store_request_items sri JOIN items i ON i.id = sri.item_id
        WHERE sri.store_request_id = ? AND sri.item_id = ? FOR UPDATE`,
@@ -726,10 +1736,10 @@ router.post('/transactions/stock-out', async (req, res, next) => {
       await connection.rollback();
       return res.status(404).json({ message: 'The selected item is not part of this approved request.' });
     }
-    const remaining = Number(line.requestedQuantity) - Number(line.issuedQuantity);
+    const remaining = Number(line.authorizedQuantity) - Number(line.issuedQuantity);
     if (input.quantity > remaining) {
       await connection.rollback();
-      return res.status(409).json({ message: `Issue quantity exceeds the approved quantity still outstanding (${remaining}).` });
+      return res.status(409).json({ message: `Issue quantity exceeds the authorized quantity still outstanding (${remaining}).` });
     }
     if (input.quantity > Number(line.availableBalance)) {
       await connection.rollback();
@@ -741,6 +1751,16 @@ router.post('/transactions/stock-out', async (req, res, next) => {
       'UPDATE store_request_items SET issued_quantity = issued_quantity + ? WHERE store_request_id = ? AND item_id = ?',
       [input.quantity, storeRequestId, input.itemId]
     );
+    if (request.requisitionId) {
+      await connection.execute(
+        `UPDATE requisition_routing_lines
+            SET issued_quantity = issued_quantity + ?, status = 'Issued'
+          WHERE requisition_id = ? AND item_id = ? AND destination = 'Stock Keeper'
+            AND status <> 'Returned'
+          ORDER BY id LIMIT 1`,
+        [input.quantity, request.requisitionId, input.itemId]
+      );
+    }
     const movementId = await recordMovement(connection, {
       itemId: line.id, userId: req.user.id, type: 'Issue', direction: 'Out',
       quantity: input.quantity, referenceNo: input.referenceNo, source: request.reference,
@@ -750,7 +1770,8 @@ router.post('/transactions/stock-out', async (req, res, next) => {
       movementAt: input.movementAt
     });
     const [[outstanding]] = await connection.execute(
-      'SELECT COUNT(*) AS total FROM store_request_items WHERE store_request_id = ? AND issued_quantity < quantity',
+      `SELECT COUNT(*) AS total FROM store_request_items
+        WHERE store_request_id = ? AND issued_quantity < COALESCE(accepted_quantity, quantity)`,
       [storeRequestId]
     );
     const completed = Number(outstanding.total) === 0;
@@ -759,6 +1780,33 @@ router.post('/transactions/stock-out', async (req, res, next) => {
         "UPDATE store_requests SET status = 'Issued', issued_at = UTC_TIMESTAMP() WHERE id = ?",
         [storeRequestId]
       );
+    }
+    if (request.requisitionId) {
+      const [[pendingPurchase]] = await connection.execute(
+        `SELECT COUNT(*) AS total FROM requisition_routing_lines
+          WHERE requisition_id = ? AND destination = 'Procurement'
+            AND quantity > issued_quantity + returned_quantity`,
+        [request.requisitionId]
+      );
+      let requisitionStatus = completed ? REQUISITION_STATUS.COMPLETED : REQUISITION_STATUS.PARTIALLY_ISSUED;
+      if (completed && Number(pendingPurchase?.total) > 0) requisitionStatus = REQUISITION_STATUS.FORWARDED;
+      await connection.execute(
+        'UPDATE requisitions SET status = ? WHERE id = ?',
+        [requisitionStatus, request.requisitionId]
+      );
+      await connection.execute(
+        `INSERT INTO requisition_activity (requisition_id, user_id, action, details, previous_status, new_status)
+         VALUES (?, ?, 'stock_issued', JSON_OBJECT('storeRequestId', ?, 'itemId', ?, 'quantity', ?, 'receivedBy', ?, 'completed', ?), ?, ?)`,
+        [request.requisitionId, req.user.id, storeRequestId, input.itemId, input.quantity,
+          receivedBy, completed ? 1 : 0, request.requisitionStatus || REQUISITION_STATUS.AWAITING_STOCK_ISSUE, requisitionStatus]
+      );
+      await createNotification(connection, request.requesterId, 'Stock issued for your request',
+        `${input.quantity} ${line.name} was physically issued for ${request.reference}. ${statusLabel(requisitionStatus)}.`,
+        `#/requester/My%20Procurement%20Requests?request=${request.requisitionId}`, 'stock_issue');
+      await notifySupervisor(connection, request,
+        completed ? 'Stock fully issued' : 'Stock partially issued',
+        `${input.quantity} ${line.name} was issued for ${request.reference}. ${completed ? 'All accepted quantities are now issued.' : 'Some accepted quantities remain outstanding.'}`,
+        `#/supervisor/Approvals?request=${request.requisitionId}`, 'stock_issue');
     }
     await writeAudit(connection, req.user.id, 'stock_out', 'inventory_movement', movementId, {
       itemId: line.id, quantity: input.quantity, referenceNo: input.referenceNo,
@@ -787,6 +1835,201 @@ router.post('/transactions/stock-out', async (req, res, next) => {
     if (error?.code === 'ER_DUP_ENTRY') {
       if (error.message?.includes('idempotency')) return res.status(409).json({ message: 'This stock-out transaction was already submitted.' });
       return res.status(409).json({ message: 'That transaction reference is already in use.' });
+    }
+    return next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+// Physical issue of one or more lines from one accepted request. All item
+// updates and Bin Card movements commit together or roll back together.
+router.post('/requests/:id/issue', async (req, res, next) => {
+  const id = parseId(req.params.id);
+  const issueKey = text(req.body.idempotencyKey, 60);
+  const date = businessDate(req.body.date || new Date().toISOString().slice(0, 10), 'Issue date');
+  const receivedBy = text(req.body.receivedBy, 150);
+  const comments = text(req.body.comments, 2000);
+  if (!id) return res.status(400).json({ message: 'Invalid request identifier.' });
+  if (issueKey.length < 16) return res.status(400).json({ message: 'A transaction idempotency key is required.' });
+  if (!receivedBy) return res.status(400).json({ message: 'Record the person or department receiving the goods.' });
+  const lines = Array.isArray(req.body.lines) ? req.body.lines : [];
+  if (!lines.length) return res.status(400).json({ message: 'Select at least one item to issue.' });
+  const selections = new Map();
+  for (const line of lines) {
+    const lineId = parseId(line.storeRequestItemId);
+    const quantity = Number(line.quantity);
+    if (!lineId || !Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ message: 'Each issued item needs a positive whole-number quantity.' });
+    }
+    if (selections.has(lineId)) return res.status(400).json({ message: 'An item was included more than once.' });
+    selections.set(lineId, quantity);
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const scope = await requireActionScope(connection, req.user.id);
+    if (!scope) {
+      await connection.rollback();
+      return res.status(403).json({ message: 'Your Stock Keeper assignment is no longer active.' });
+    }
+    const [[previous]] = await connection.execute(
+      'SELECT id FROM inventory_movements WHERE idempotency_key = ? LIMIT 1', [`${issueKey}-1`]
+    );
+    if (previous) {
+      await connection.rollback();
+      return res.json({ duplicate: true, referenceNo: previous.reference_no, message: 'This stock-out was already recorded.' });
+    }
+    const [requests] = await connection.execute(
+      `SELECT sr.id, sr.reference, sr.requester_id AS requesterId, sr.department_id AS departmentId,
+          sr.requisition_id AS requisitionId, sr.purpose, sr.status AS requestStatus,
+          sr.stockkeeper_decision AS stockkeeperDecision, r.status AS requisitionStatus,
+          r.supervisor_id AS supervisorId
+       FROM store_requests sr
+       JOIN requisitions r ON r.id = sr.requisition_id
+       LEFT JOIN departments d ON d.id = sr.department_id
+       WHERE sr.id = ? AND r.routing_destination IN ('Stock Keeper','Split')
+         AND r.status <> 'Cancelled' AND ${scope.clause} FOR UPDATE`,
+      [id, ...scope.params]
+    );
+    const request = requests[0];
+    if (!request || request.stockkeeperDecision !== 'Accepted' || request.requestStatus !== 'Approved') {
+      await connection.rollback();
+      if (request?.stockkeeperDecision === 'Accepted' && request.requestStatus === 'Issued') {
+        return res.status(409).json({ message: 'This request is fully issued; the authorized outstanding quantity (0) is zero.' });
+      }
+      return res.status(409).json({ message: 'Only an accepted request can be issued.' });
+    }
+    const [stockLines] = await connection.execute(
+      `SELECT sri.id AS storeRequestItemId, sri.item_id AS itemId,
+          COALESCE(sri.accepted_quantity, sri.quantity) AS authorizedQuantity,
+          sri.issued_quantity AS issuedQuantity, sri.quantity AS requestedQuantity,
+          i.name AS itemName, i.unit, i.quantity AS availableBalance,
+          i.reorder_level AS minimumStock, i.department_id AS itemDepartmentId
+       FROM store_request_items sri JOIN items i ON i.id = sri.item_id
+       WHERE sri.store_request_id = ? ORDER BY i.id FOR UPDATE`,
+      [id]
+    );
+    const records = [];
+    for (const line of stockLines) {
+      if (!selections.has(Number(line.storeRequestItemId))) continue;
+      const quantity = selections.get(Number(line.storeRequestItemId));
+      const outstanding = Number(line.authorizedQuantity) - Number(line.issuedQuantity);
+      if (quantity > outstanding) {
+        await connection.rollback();
+        return res.status(409).json({ message: `${line.itemName} exceeds the authorized outstanding quantity (${outstanding}).` });
+      }
+      if (quantity > Number(line.availableBalance)) {
+        await connection.rollback();
+        return res.status(409).json({ message: `Insufficient stock for ${line.itemName}. Available: ${line.availableBalance}.` });
+      }
+      records.push({ line, quantity, balance: Number(line.availableBalance) - quantity });
+    }
+    if (records.length !== selections.size) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'One or more selected items do not belong to this request.' });
+    }
+    if (!records.length) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Select at least one item with an outstanding accepted quantity.' });
+    }
+    const referenceNo = transactionReference('SO');
+    const movementAt = toUtcDateTime(date);
+    let total = 0;
+    for (const [index, record] of records.entries()) {
+      const { line, quantity, balance } = record;
+      total += quantity;
+      await connection.execute('UPDATE items SET quantity = ? WHERE id = ?', [balance, line.itemId]);
+      await connection.execute(
+        'UPDATE store_request_items SET issued_quantity = issued_quantity + ? WHERE id = ?',
+        [quantity, line.storeRequestItemId]
+      );
+      if (request.requisitionId) {
+        await connection.execute(
+          `UPDATE requisition_routing_lines
+              SET issued_quantity = issued_quantity + ?, status = 'Issued'
+            WHERE requisition_id = ? AND item_id = ? AND destination = 'Stock Keeper' AND status <> 'Returned'
+            ORDER BY id LIMIT 1`,
+          [quantity, request.requisitionId, line.itemId]
+        );
+      }
+      await recordMovement(connection, {
+        itemId: line.itemId, userId: req.user.id, type: 'Issue', direction: 'Out',
+        quantity, referenceNo: `${referenceNo}-${index + 1}`, source: request.reference,
+        description: comments || request.purpose, requesterId: request.requesterId,
+        receivedBy, departmentId: request.departmentId || line.itemDepartmentId,
+        storeRequestId: id, idempotencyKey: `${issueKey}-${index + 1}`, balance, movementAt
+      });
+      if (balance === 0 || balance <= Number(line.minimumStock || 0)) {
+        await notifyStorekeepers(connection,
+          balance === 0 ? 'Item is out of stock' : 'Low stock alert',
+          `${line.itemName} has ${balance} remaining after ${referenceNo}.`,
+          `#/stockkeeper/Bin%20Card?item=${line.itemId}`, balance === 0 ? 'zero_stock' : 'low_stock');
+      }
+    }
+    const [[outstanding]] = await connection.execute(
+      `SELECT COUNT(*) AS total FROM store_request_items
+       WHERE store_request_id = ? AND issued_quantity < COALESCE(accepted_quantity, quantity)`,
+      [id]
+    );
+    const completed = Number(outstanding.total) === 0;
+    if (completed) {
+      await connection.execute("UPDATE store_requests SET status = 'Issued', issued_at = UTC_TIMESTAMP() WHERE id = ?", [id]);
+    }
+    let requisitionStatus = null;
+    if (request.requisitionId) {
+      const [[pendingPurchase]] = await connection.execute(
+        `SELECT COUNT(*) AS total FROM requisition_routing_lines
+          WHERE requisition_id = ? AND destination = 'Procurement'
+            AND quantity > issued_quantity + returned_quantity`,
+        [request.requisitionId]
+      );
+      requisitionStatus = completed
+        ? (Number(pendingPurchase?.total) > 0 ? REQUISITION_STATUS.FORWARDED : REQUISITION_STATUS.COMPLETED)
+        : REQUISITION_STATUS.PARTIALLY_ISSUED;
+      await connection.execute('UPDATE requisitions SET status = ? WHERE id = ?', [requisitionStatus, request.requisitionId]);
+      await connection.execute(
+        `INSERT INTO requisition_activity (requisition_id, user_id, action, details, previous_status, new_status)
+         VALUES (?, ?, 'stock_issued', JSON_OBJECT('storeRequestId', ?, 'referenceNo', ?, 'lines', ?, 'total', ?, 'completed', ?, 'receivedBy', ?), ?, ?)`,
+        [request.requisitionId, req.user.id, id, referenceNo, JSON.stringify(records.map((record) => ({
+          itemId: record.line.itemId, itemName: record.line.itemName, quantity: record.quantity
+        }))), total, completed ? 1 : 0, receivedBy, request.requisitionStatus, requisitionStatus]
+      );
+      const summary = records.map((record) => `${record.quantity} ${record.line.itemName}`).join(', ');
+      await notifyUsers(connection, [request.requesterId], 'Stock issued for your request',
+        `${summary} was issued for ${request.reference}. ${statusLabel(requisitionStatus)}.`,
+        `#/requester/My%20Procurement%20Requests?request=${request.requisitionId}`, 'stock_issue');
+      await notifySupervisor(connection, request,
+        completed ? 'Stock fully issued' : 'Stock partially issued',
+        `${summary} was physically issued for ${request.reference}.`,
+        `#/supervisor/Approvals?request=${request.requisitionId}`, 'stock_issue');
+    }
+    await writeAudit(connection, req.user.id, 'stock_out', 'store_request', id, {
+      referenceNo, lines: records.map((record) => ({
+        itemId: record.line.itemId, quantity: record.quantity, balance: record.balance
+      })), total, requestCompleted: completed, receivedBy, comments
+    });
+    await connection.commit();
+    return res.status(201).json({
+      referenceNo,
+      total,
+      requestStatus: completed ? 'Issued' : 'Approved',
+      requisitionStatus,
+      lines: records.map((record, index) => ({
+        storeRequestItemId: Number(record.line.storeRequestItemId),
+        itemId: Number(record.line.itemId),
+        itemName: record.line.itemName,
+        quantity: record.quantity,
+        balance: record.balance,
+        referenceNo: `${referenceNo}-${index + 1}`
+      })),
+      message: completed ? 'Stock issued and request fulfilled.' : 'Partial stock issue recorded.'
+    });
+  } catch (error) {
+    await connection.rollback();
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'That stock-out reference or transaction key is already in use.' });
     }
     return next(error);
   } finally {
@@ -1094,11 +2337,13 @@ router.get('/requesters/:id/history', async (req, res, next) => {
 
 router.patch('/notifications/read-all', async (req, res, next) => {
   try {
-    const [result] = await pool.execute(
-      'UPDATE notifications SET is_read = TRUE WHERE (user_id = ? OR user_id IS NULL) AND is_read = FALSE',
-      [req.user.id]
+    // Kept for older clients. Private message notifications stay unread so a
+    // message can only be cleared from the message itself.
+    const ids = await markNotificationsRead(
+      pool, req.user.id,
+      `(n.category <> 'message' AND n.link NOT LIKE '%message=%')`
     );
-    return res.json({ updated: result.affectedRows });
+    return res.json({ updated: ids.length });
   } catch (error) {
     return next(error);
   }

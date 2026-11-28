@@ -161,7 +161,7 @@ export default function SupervisorApprovals({ portalApi, query = {}, navigate, i
     <PageHeader
       eyebrow="Your Department review queue"
       title="Incoming requests"
-      description="Review and decide on requests submitted by Requesters in your Department. Approval does not send a request to Procurement — use Forward to Procurement after approving."
+      description="Review requests, verify live stock, then route each approved request to the Procurement Office or the Stock Keeper. Approval alone never sends a request to either destination."
       actions={<div className="flex flex-wrap items-center gap-2">
         <select
           value={reportFilter.status}

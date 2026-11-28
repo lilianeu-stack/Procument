@@ -2,12 +2,14 @@ import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import pool from '../config/db.js';
 import { createNotification, writeAudit } from '../lib/events.js';
+import { UNREAD_NOTIFICATION_SQL, VALID_NOTIFICATION_SQL, markNotificationsRead } from '../lib/notification-reads.js';
 import { allowRoles } from '../middleware/auth.js';
 import { dateFilterClause, parseDateFilter } from '../utils/dates.js';
 import {
   PROCUREMENT_READY_STATUSES, REQUISITION_STATUS, statusLabel
 } from '../utils/requisition-status.js';
 import { getSettings } from '../services/settings.js';
+import { eligibleStockkeepers } from '../services/stockkeeper-scope.js';
 
 const router = Router();
 
@@ -210,7 +212,9 @@ function requisitionQuery(where = '') {
       r.required_by AS requiredBy, r.priority, r.status, r.status AS statusLabel,
       r.submitted_at AS submittedAt, r.created_at AS createdAt, r.forwarded_at AS forwardedAt,
       r.forwarded_by_supervisor AS forwardedBySupervisor, fwd.name AS forwardedByName,
-      fwd_d.name AS supervisorDepartment,
+      r.routing_destination AS routingDestination, r.routing_comments AS routingComments,
+      r.routed_by_supervisor AS routedBySupervisor, r.routed_at AS routedAt,
+      router.name AS routedByName, fwd_d.name AS supervisorDepartment,
       r.department_id AS departmentId, d.name AS department,
       r.requester_id AS requesterId, u.name AS requester, u.email AS requesterEmail,
       u.phone AS requesterPhone,
@@ -227,6 +231,7 @@ function requisitionQuery(where = '') {
     LEFT JOIN departments d ON d.id = r.department_id
     LEFT JOIN users su ON su.id = r.supervisor_id
     LEFT JOIN users fwd ON fwd.id = r.forwarded_by_supervisor
+    LEFT JOIN users router ON router.id = r.routed_by_supervisor
     LEFT JOIN departments fwd_d ON fwd_d.id = fwd.department_id
     LEFT JOIN requisition_items ri ON ri.requisition_id = r.id
     LEFT JOIN requisition_attachments ra ON ra.requisition_id = r.id
@@ -244,7 +249,8 @@ function mapRequisition(row) {
     departmentId: row.departmentId ?? null,
     requesterId: Number(row.requesterId),
     supervisorId: row.supervisorId ?? null,
-    forwardedBySupervisor: row.forwardedBySupervisor == null ? null : Number(row.forwardedBySupervisor)
+    forwardedBySupervisor: row.forwardedBySupervisor == null ? null : Number(row.forwardedBySupervisor),
+    routedBySupervisor: row.routedBySupervisor == null ? null : Number(row.routedBySupervisor)
   };
 }
 
@@ -293,6 +299,189 @@ async function loadRequisitionParts(connection, id) {
   };
 }
 
+function stockKey(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// The Stock Keeper's decision is kept on the store request, not on the
+// requisition, so the Supervisor can see the decision without it overwriting
+// the original approval/routing history.
+async function loadStockkeeperDecision(connection, requisitionId) {
+  const [rows] = await connection.execute(
+    `SELECT sr.id, sr.reference AS storeReference, sr.status,
+        sr.stockkeeper_decision AS decision, sr.stockkeeper_decision_at AS decisionAt,
+        sr.stockkeeper_comments AS comments, sr.rejection_reason AS reason,
+        sr.issued_at AS issuedAt, decider.name AS decidedBy,
+        GROUP_CONCAT(CONCAT(COALESCE(i.name, sri.requested_item_name), ': ',
+          COALESCE(sri.accepted_quantity, sri.quantity), ' ',
+          COALESCE(i.unit, sri.requested_unit, 'unit'), ' of ', sri.quantity, ' requested')
+          ORDER BY sri.id SEPARATOR '; ') AS affectedItems
+     FROM store_requests sr
+     LEFT JOIN users decider ON decider.id = sr.stockkeeper_decision_by
+     LEFT JOIN store_request_items sri ON sri.store_request_id = sr.id
+     LEFT JOIN items i ON i.id = sri.item_id
+    WHERE sr.requisition_id = ?
+    GROUP BY sr.id
+    ORDER BY sr.id DESC`,
+    [requisitionId]
+  );
+  return rows.map((row) => ({
+    ...row,
+    id: Number(row.id),
+    affectedItems: row.affectedItems || ''
+  }));
+}
+
+// Stock availability is always resolved from the live items table. A requested
+// line is matched by catalog SKU first, then by exact/partial item name; an
+// unmatched line is treated as unavailable rather than silently assumed stocked.
+async function stockVerification(connection, requisitionId, departmentId) {
+  const [requested] = await connection.execute(
+    `SELECT id, item_name AS itemName, quantity, unit
+       FROM requisition_items WHERE requisition_id = ? ORDER BY id`,
+    [requisitionId]
+  );
+  const [catalog] = await connection.execute(
+    `SELECT id, sku, name, quantity, unit FROM items
+      WHERE department_id = ? OR department_id IS NULL ORDER BY id`,
+    [departmentId]
+  );
+  return requested.map((line) => {
+    const key = stockKey(line.itemName);
+    const exact = catalog.find((item) => stockKey(item.sku) === key || stockKey(item.name) === key);
+    const partial = key.length >= 4
+      ? catalog.find((item) => stockKey(item.name).includes(key) || key.includes(stockKey(item.name)))
+      : null;
+    const match = exact || partial || null;
+    const availableQuantity = match ? Number(match.quantity) : 0;
+    const requestedQuantity = Number(line.quantity);
+    return {
+      requisitionItemId: Number(line.id),
+      itemName: line.itemName,
+      requestedQuantity,
+      availableQuantity,
+      unit: match?.unit || line.unit || 'unit',
+      itemId: match ? Number(match.id) : null,
+      sku: match?.sku || null,
+      matched: Boolean(match),
+      status: availableQuantity >= requestedQuantity
+        ? 'Available' : availableQuantity > 0 ? 'Insufficient' : 'Unavailable'
+    };
+  });
+}
+
+async function loadRoutingState(connection, requisitionId) {
+  const [lines] = await connection.execute(
+    `SELECT rl.id, rl.requisition_item_id AS requisitionItemId, rl.item_id AS itemId,
+       rl.destination, rl.quantity, rl.available_quantity AS availableQuantity,
+       rl.issued_quantity AS issuedQuantity, rl.returned_quantity AS returnedQuantity,
+       rl.status, ri.item_name AS itemName, ri.unit, i.name AS stockItemName, i.sku
+      FROM requisition_routing_lines rl
+      JOIN requisition_items ri ON ri.id = rl.requisition_item_id
+      LEFT JOIN items i ON i.id = rl.item_id
+      WHERE rl.requisition_id = ? ORDER BY ri.id, rl.id`,
+    [requisitionId]
+  );
+  const [returns] = await connection.execute(
+    `SELECT rr.id, rr.requisition_item_id AS requisitionItemId, rr.item_id AS itemId,
+       rr.available_quantity AS availableQuantity, rr.unavailable_quantity AS unavailableQuantity,
+       rr.reason, rr.status, rr.reported_by AS reportedBy, reporter.name AS reportedByName,
+       rr.created_at AS createdAt, rr.forwarded_at AS forwardedAt,
+       ri.item_name AS itemName, i.name AS stockItemName
+      FROM requisition_routing_returns rr
+      JOIN requisition_items ri ON ri.id = rr.requisition_item_id
+      LEFT JOIN items i ON i.id = rr.item_id
+      LEFT JOIN users reporter ON reporter.id = rr.reported_by
+      WHERE rr.requisition_id = ? ORDER BY rr.created_at DESC, rr.id DESC`,
+    [requisitionId]
+  );
+  return {
+    lines: lines.map((line) => ({
+      ...line,
+      id: Number(line.id),
+      requisitionItemId: Number(line.requisitionItemId),
+      itemId: line.itemId == null ? null : Number(line.itemId),
+      quantity: Number(line.quantity),
+      availableQuantity: Number(line.availableQuantity),
+      issuedQuantity: Number(line.issuedQuantity),
+      returnedQuantity: Number(line.returnedQuantity)
+    })),
+    returns: returns.map((entry) => ({
+      ...entry,
+      id: Number(entry.id),
+      requisitionItemId: Number(entry.requisitionItemId),
+      itemId: entry.itemId == null ? null : Number(entry.itemId),
+      availableQuantity: Number(entry.availableQuantity),
+      unavailableQuantity: Number(entry.unavailableQuantity)
+    }))
+  };
+}
+
+async function notifyStockkeepersForRouting(connection, requisition, department, supervisorName, storeRequest, comments, split = false) {
+  // Only Stock Keepers whose department/inventory scope covers this request
+  // receive it. There is deliberately no fallback to every active Stock Keeper:
+  // an unassigned route must fail loudly instead of exposing another Department's
+  // request.
+  const recipients = await eligibleStockkeepers(connection, department.id);
+  if (!recipients.length) {
+    throw httpError(409, `No active Stock Keeper is assigned to ${department.name || 'this Department'}. The request was not routed.`);
+  }
+  const link = `#/stockkeeper/Requests%20from%20Supervisors?request=${storeRequest.id}`;
+  const routingNote = split
+    ? 'Available stock was routed for review and the remaining quantity was forwarded to Procurement.'
+    : 'All requested lines were routed for stock review.';
+  const instruction = comments ? ` Supervisor instructions: ${comments}` : '';
+  for (const user of recipients) {
+    await connection.execute(
+      `INSERT IGNORE INTO store_request_assignments (store_request_id, user_id) VALUES (?, ?)`,
+      [storeRequest.id, user.id]
+    );
+    await createNotification(connection, user.id, 'Supervisor request awaiting decision',
+      `${requisition.reference} from ${department.name || 'your Department'} (${requisition.requesterName}) was routed to the Stock Keeper by ${supervisorName}. ${routingNote} Review and accept or reject it.${instruction}`,
+      link, 'stock_routing');
+  }
+  return recipients;
+}
+
+async function notifySupervisorOfReturn(connection, requisition, returnId, stockkeeperName, itemName, quantity) {
+  const [users] = await connection.execute(
+    `SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND active = TRUE
+      UNION
+      SELECT id FROM users WHERE role = 'supervisor' AND active = TRUE AND department_id = ?
+      ORDER BY id LIMIT 1`,
+    [requisition.supervisorId || 0, requisition.departmentId || 0]
+  );
+  for (const user of users) {
+    await createNotification(connection, user.id, 'Stock shortage returned for routing',
+      `${stockkeeperName} reported ${quantity} ${itemName} unavailable for ${requisition.reference}. Review and route the shortfall to Procurement.`,
+      `#/supervisor/Approvals?request=${requisition.id}&return=${returnId}`, 'stock_return');
+  }
+}
+
+async function createRoutedStoreRequest(connection, requisition, department, supervisorId, allocations) {
+  const reference = `SR-${new Date().getFullYear()}-${String(requisition.id).padStart(6, '0')}`;
+  const [result] = await connection.execute(
+    `INSERT INTO store_requests
+       (reference, requester_id, department_id, requisition_id, purpose, status,
+        stockkeeper_decision, reviewed_by, routed_by_supervisor, routed_at, approved_at, required_by)
+     VALUES (?, ?, ?, ?, ?, 'Approved', 'Pending', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), ?)`,
+    [reference, requisition.requesterId, department.id, requisition.id,
+      requisition.title || requisition.justification?.slice(0, 500) || 'Supervisor-routed stock issue',
+      supervisorId, supervisorId, requisition.requiredBy || null]
+  );
+  const storeRequestId = Number(result.insertId);
+  for (const allocation of allocations) {
+    await connection.execute(
+      `INSERT INTO store_request_items
+         (store_request_id, item_id, requisition_item_id, requested_item_name, requested_unit, quantity)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [storeRequestId, allocation.itemId || null, allocation.requisitionItemId,
+        allocation.itemName || 'Requested item', allocation.unit || 'unit', allocation.quantity]
+    );
+  }
+  return { id: storeRequestId, reference };
+}
+
 async function saveAttachments(connection, table, ownerColumn, ownerId, uploaderId, attachments) {
   for (const attachment of attachments) {
     if (table === 'requisition_attachments') {
@@ -335,6 +524,7 @@ async function submitRequisition(connection, requisition, req, response = '', at
     `UPDATE requisitions
        SET status = ?, submitted_at = NOW(), supervisor_id = ?, supervisor_decision = NULL,
          supervisor_decision_at = NULL, forwarded_at = NULL, forwarded_by_supervisor = NULL,
+         routing_destination = NULL, routing_comments = NULL, routed_by_supervisor = NULL, routed_at = NULL,
          information_response = CASE WHEN ? = '' THEN information_response ELSE ? END
      WHERE id = ?`,
     [REQUISITION_STATUS.PENDING, supervisor.id, response, response, requisition.id]
@@ -382,9 +572,10 @@ async function summaryStats(connection, scope, departmentId) {
 
 async function unreadNotifications(userId) {
   const [rows] = await pool.execute(
-    `SELECT COUNT(*) AS total FROM notifications
-      WHERE is_read = FALSE AND (user_id = ? OR user_id IS NULL)`,
-    [userId]
+    `SELECT COUNT(*) AS total FROM notifications n
+      WHERE ${UNREAD_NOTIFICATION_SQL} AND ${VALID_NOTIFICATION_SQL}
+        AND (n.user_id = ? OR n.user_id IS NULL)`,
+    [userId, userId]
   );
   return Number(rows[0]?.total) || 0;
 }
@@ -569,7 +760,13 @@ function getRequisitionDetail(role) {
       if (!department) return;
       return await transaction(async (connection) => {
         const requisition = await loadRequisition(connection, id, { ...req, user: { ...req.user, role } });
-        return { body: { requisition: { ...requisition, ...await loadRequisitionParts(connection, id) } } };
+        const parts = await loadRequisitionParts(connection, id);
+        if (role === 'supervisor' && requisition.departmentId) {
+          parts.routingStock = await stockVerification(connection, id, requisition.departmentId);
+          parts.routing = await loadRoutingState(connection, id);
+          parts.stockkeeperDecision = await loadStockkeeperDecision(connection, id);
+        }
+        return { body: { requisition: { ...requisition, ...parts } } };
       }, res, next);
     } catch (error) { return next(error); }
   };
@@ -898,6 +1095,301 @@ router.post('/supervisor/requisitions/:id/forward', allowRoles('supervisor'), as
   } catch (error) { return next(error); }
 });
 
+// Supervisor routing decision. This is the explicit hand-off point: a request
+// goes either to Procurement, to the Stock Keeper, or (for a controlled split)
+// to both. Existing approval and legacy forwarding endpoints remain supported.
+router.post('/supervisor/requisitions/:id/route', allowRoles('supervisor'), async (req, res, next) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ message: 'Invalid request identifier.' });
+  const destination = String(req.body.destination || '');
+  if (!['Procurement', 'Stock Keeper', 'Split'].includes(destination)) {
+    return res.status(400).json({ message: 'Choose Procurement, Stock Keeper, or a controlled split.' });
+  }
+  const comments = text(req.body.comments, 2000);
+  const selectedLines = Array.isArray(req.body.stockLines) ? req.body.stockLines : [];
+  const selections = new Map();
+  for (const line of selectedLines) {
+    const requisitionItemId = parseId(line.requisitionItemId);
+    const itemId = parseId(line.itemId);
+    const quantity = Number(line.quantity);
+    if (!requisitionItemId || !Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ message: 'Each stock selection needs a valid request line and quantity.' });
+    }
+    if (selections.has(requisitionItemId)) {
+      return res.status(400).json({ message: 'A request line can be selected only once.' });
+    }
+    selections.set(requisitionItemId, { itemId, quantity });
+  }
+  try {
+    const department = await assignedDepartment(req, res);
+    if (!department) return;
+    return await transaction(async (connection) => {
+      const [rows] = await connection.execute(
+        `SELECT r.id, r.reference, r.requester_id AS requesterId, r.department_id AS departmentId,
+           r.title, r.justification, r.required_by AS requiredBy, r.status,
+           r.supervisor_id AS supervisorId, r.supervisor_decision AS supervisorDecision,
+           r.forwarded_by_supervisor AS forwardedBySupervisor, r.forwarded_at AS forwardedAt,
+           r.routed_at AS routedAt, u.name AS requesterName
+          FROM requisitions r JOIN users u ON u.id = r.requester_id
+          WHERE r.id = ? AND r.department_id = ? FOR UPDATE`,
+        [id, department.id]
+      );
+      const requisition = rows[0];
+      if (!requisition) throw httpError(404, 'Request not found in your Department.');
+      if (requisition.routedAt || requisition.forwardedBySupervisor != null || requisition.forwardedAt != null) {
+        throw httpError(409, 'This request has already been routed.');
+      }
+      if (requisition.status !== REQUISITION_STATUS.APPROVED || requisition.supervisorDecision !== 'Approved') {
+        throw httpError(409, 'Only an approved request can be routed. Record your approval decision first.');
+      }
+      const [supervisors] = await connection.execute(
+        `SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND active = TRUE AND department_id = ? LIMIT 1`,
+        [req.user.id, department.id]
+      );
+      if (!supervisors.length) throw httpError(403, 'Your Supervisor assignment is no longer active.');
+
+      const verification = await stockVerification(connection, id, department.id);
+      const allocations = [];
+      for (const line of verification) {
+        const selection = selections.get(line.requisitionItemId) || null;
+        let stockQuantity = 0;
+        if (destination === 'Stock Keeper') {
+          // A free-text or insufficient line is still routing data, not an
+          // error. The Stock Keeper reviews it and returns any physical
+          // shortage; the Supervisor's original quantity stays intact.
+          stockQuantity = line.requestedQuantity;
+        } else if (destination === 'Split') {
+          if (selection) {
+            if (!selection.itemId) {
+              throw httpError(400, `Select a catalog item for the partial issue of ${line.itemName}.`);
+            }
+            if (line.itemId && selection.itemId !== line.itemId) {
+              throw httpError(409, `The selected item for ${line.itemName} does not match the verified stock item.`);
+            }
+            stockQuantity = selection.quantity;
+            if (stockQuantity > line.requestedQuantity) {
+              throw httpError(409, `The issue quantity for ${line.itemName} exceeds the requested quantity.`);
+            }
+            if (stockQuantity > line.availableQuantity) {
+              throw httpError(409, `Only ${line.availableQuantity} ${line.unit} of ${line.itemName} are available.`);
+            }
+          } else {
+            stockQuantity = line.matched ? Math.min(line.requestedQuantity, line.availableQuantity) : 0;
+          }
+        }
+
+        let stockItem = null;
+        if (stockQuantity > 0 && line.itemId) {
+          const itemId = selection?.itemId || line.itemId;
+          const [items] = await connection.execute(
+            'SELECT id, name, quantity FROM items WHERE id = ? LIMIT 1', [itemId]
+          );
+          stockItem = items[0] || null;
+          if (!stockItem) throw httpError(409, `The selected stock item for ${line.itemName} no longer exists.`);
+          if (Number(stockItem.quantity) < stockQuantity) {
+            throw httpError(409, `Only ${stockItem.quantity} ${line.unit} of ${stockItem.name} are currently available.`);
+          }
+        }
+        if (stockQuantity > 0) {
+          allocations.push({
+            requisitionItemId: line.requisitionItemId,
+            itemId: line.itemId ? Number(stockItem?.id || line.itemId) : null,
+            destination: 'Stock Keeper',
+            quantity: stockQuantity,
+            availableQuantity: line.itemId ? Number(stockItem?.quantity ?? line.availableQuantity) : 0,
+            itemName: line.itemName,
+            unit: line.unit
+          });
+        }
+        const purchaseQuantity = destination === 'Procurement'
+          ? line.requestedQuantity
+          : destination === 'Split' ? line.requestedQuantity - stockQuantity : 0;
+        if (purchaseQuantity > 0) {
+          allocations.push({
+            requisitionItemId: line.requisitionItemId,
+            itemId: destination === 'Procurement' ? line.itemId : null,
+            destination: 'Procurement',
+            quantity: purchaseQuantity,
+            availableQuantity: line.availableQuantity,
+            itemName: line.itemName,
+            unit: line.unit
+          });
+        }
+      }
+
+      if (!allocations.length) throw httpError(400, 'There are no quantities to route.');
+      for (const allocation of allocations) {
+        await connection.execute(
+          `INSERT INTO requisition_routing_lines
+             (requisition_id, requisition_item_id, item_id, destination, quantity, available_quantity)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [id, allocation.requisitionItemId, allocation.itemId, allocation.destination,
+            allocation.quantity, allocation.availableQuantity]
+        );
+      }
+
+      const stockAllocations = allocations.filter((allocation) => allocation.destination === 'Stock Keeper');
+      const purchaseAllocations = allocations.filter((allocation) => allocation.destination === 'Procurement');
+      const storeRequest = stockAllocations.length
+        ? await createRoutedStoreRequest(connection, requisition, department, req.user.id, stockAllocations)
+        : null;
+      const purchaseRequired = purchaseAllocations.length > 0;
+      const nextStatus = destination === 'Stock Keeper'
+        ? REQUISITION_STATUS.AWAITING_STOCK_ISSUE : REQUISITION_STATUS.FORWARDED;
+      await connection.execute(
+        `UPDATE requisitions
+            SET status = ?, routing_destination = ?, routing_comments = ?, routed_by_supervisor = ?,
+              routed_at = UTC_TIMESTAMP(),
+              forwarded_by_supervisor = CASE WHEN ? THEN ? ELSE forwarded_by_supervisor END,
+              forwarded_at = CASE WHEN ? THEN UTC_TIMESTAMP() ELSE forwarded_at END
+          WHERE id = ?`,
+        [nextStatus, destination, comments || null, req.user.id,
+          purchaseRequired ? 1 : 0, purchaseRequired ? req.user.id : null,
+          purchaseRequired ? 1 : 0, id]
+      );
+      await recordActivity(connection, id, req.user.id,
+        destination === 'Split' ? 'partially_routed' : destination === 'Stock Keeper'
+          ? 'routed_to_stock_keeper' : 'forwarded_to_procurement',
+        {
+          destination,
+          comments: comments || null,
+          supervisorId: req.user.id,
+          supervisorName: req.user.name,
+          allocations,
+          storeRequestId: storeRequest?.id || null,
+          storeRequestReference: storeRequest?.reference || null
+        },
+        { previousStatus: requisition.status, newStatus: nextStatus });
+
+      const requesterLink = `#/requester/My%20Procurement%20Requests?request=${id}`;
+      if (destination === 'Stock Keeper') {
+        await createNotification(connection, requisition.requesterId, 'Request sent to Stock Keeper',
+          `${requisition.reference} was routed to the Stock Keeper by ${req.user.name} for stock issue.`, requesterLink);
+        await notifyStockkeepersForRouting(connection, requisition, department,
+          req.user.name, storeRequest, comments, false);
+      } else {
+        const shortfall = destination === 'Split'
+          ? ` Available stock was routed to the Stock Keeper and ${purchaseAllocations.reduce((sum, line) => sum + line.quantity, 0)} unit(s) require purchasing.`
+          : '';
+        await createNotification(connection, requisition.requesterId, 'Request forwarded to Procurement',
+          `${requisition.reference} was routed to Procurement by ${req.user.name}.${shortfall}`, requesterLink);
+        await notifyRoles(connection, ['admin', 'procurement'], 'Department request forwarded to Procurement',
+          `${requisition.reference} from ${requisition.requesterName} was routed by ${req.user.name}.${shortfall}`,
+          `#/admin/Requests%20Received%20from%20Departments?request=${id}`);
+        if (storeRequest) {
+          await notifyStockkeepersForRouting(connection, requisition, department,
+            req.user.name, storeRequest, comments, true);
+        }
+      }
+      return {
+        body: {
+          id,
+          reference: requisition.reference,
+          status: nextStatus,
+          statusLabel: statusLabel(nextStatus),
+          destination,
+          storeRequestId: storeRequest?.id || null,
+          message: destination === 'Stock Keeper'
+            ? 'Request sent to the Stock Keeper.'
+            : destination === 'Split'
+              ? 'Available stock routed to the Stock Keeper and the shortfall forwarded to Procurement.'
+              : 'Request forwarded to Procurement.'
+        }
+      };
+    }, res, next);
+  } catch (error) { return next(error); }
+});
+
+// A Stock Keeper can return only the unissued shortage from a routed request.
+// The Supervisor then explicitly decides whether that quantity must be bought.
+router.post('/supervisor/requisitions/:id/route-return', allowRoles('supervisor'), async (req, res, next) => {
+  const id = parseId(req.params.id);
+  const returnId = parseId(req.body.returnId);
+  if (!id || !returnId) return res.status(400).json({ message: 'Invalid return identifier.' });
+  const comments = text(req.body.comments, 2000);
+  try {
+    const department = await assignedDepartment(req, res);
+    if (!department) return;
+    return await transaction(async (connection) => {
+      const [rows] = await connection.execute(
+        `SELECT r.id, r.reference, r.requester_id AS requesterId, r.department_id AS departmentId,
+           r.status, r.supervisor_id AS supervisorId, r.forwarded_by_supervisor AS forwardedBySupervisor,
+           r.title, u.name AS requesterName
+          FROM requisitions r JOIN users u ON u.id = r.requester_id
+          WHERE r.id = ? AND r.department_id = ? FOR UPDATE`,
+        [id, department.id]
+      );
+      const requisition = rows[0];
+      if (!requisition) throw httpError(404, 'Request not found in your Department.');
+      const [supervisors] = await connection.execute(
+        `SELECT id FROM users WHERE id = ? AND role = 'supervisor' AND active = TRUE AND department_id = ? LIMIT 1`,
+        [req.user.id, department.id]
+      );
+      if (!supervisors.length) throw httpError(403, 'Your Supervisor assignment is no longer active.');
+      const [returns] = await connection.execute(
+        `SELECT rr.*, rr.available_quantity AS availableQuantity,
+           rr.unavailable_quantity AS unavailableQuantity,
+           ri.item_name AS itemName
+           FROM requisition_routing_returns rr
+           JOIN requisition_items ri ON ri.id = rr.requisition_item_id
+          WHERE rr.id = ? AND rr.requisition_id = ? FOR UPDATE`,
+        [returnId, id]
+      );
+      const shortage = returns[0];
+      if (!shortage) throw httpError(404, 'Stock shortage return not found for this request.');
+      if (shortage.status !== 'Awaiting Supervisor Decision') {
+        throw httpError(409, 'This shortage has already been routed.');
+      }
+      const unavailable = Number(shortage.unavailableQuantity);
+      if (!Number.isInteger(unavailable) || unavailable < 1) {
+        throw httpError(409, 'This shortage has no quantity to route.');
+      }
+      await connection.execute(
+        `INSERT INTO requisition_routing_lines
+           (requisition_id, requisition_item_id, item_id, destination, quantity, available_quantity)
+         VALUES (?, ?, ?, 'Procurement', ?, 0)`,
+        [id, shortage.requisition_item_id, shortage.item_id, unavailable]
+      );
+      await connection.execute(
+        `UPDATE requisition_routing_returns
+            SET status = 'Forwarded to Procurement', forwarded_by = ?, forwarded_at = UTC_TIMESTAMP()
+          WHERE id = ?`,
+        [req.user.id, returnId]
+      );
+      await connection.execute(
+        `UPDATE requisitions
+            SET status = ?, routing_destination = CASE WHEN routing_destination = 'Stock Keeper' THEN 'Split' ELSE routing_destination END,
+              routing_comments = ?, forwarded_by_supervisor = COALESCE(forwarded_by_supervisor, ?),
+              forwarded_at = UTC_TIMESTAMP()
+          WHERE id = ?`,
+        [REQUISITION_STATUS.FORWARDED, comments || requisition.supervisorNotes || null, req.user.id, id]
+      );
+      await recordActivity(connection, id, req.user.id, 'shortage_forwarded_to_procurement', {
+        returnId,
+        destination: 'Procurement',
+        itemName: shortage.itemName,
+        quantity: unavailable,
+        comments: comments || null,
+        supervisorName: req.user.name
+      }, { previousStatus: requisition.status, newStatus: REQUISITION_STATUS.FORWARDED });
+      await createNotification(connection, requisition.requesterId, 'Shortage forwarded to Procurement',
+        `${unavailable} ${shortage.itemName} from ${requisition.reference} will be purchased after your Supervisor's review.`,
+        `#/requester/My%20Procurement%20Requests?request=${id}`);
+      await notifyRoles(connection, ['admin', 'procurement'], 'Stock shortage forwarded to Procurement',
+        `${requisition.reference}: ${unavailable} ${shortage.itemName} was returned by the Stock Keeper and routed by ${req.user.name}.`,
+        `#/admin/Requests%20Received%20from%20Departments?request=${id}`);
+      return {
+        body: {
+          id,
+          status: REQUISITION_STATUS.FORWARDED,
+          statusLabel: statusLabel(REQUISITION_STATUS.FORWARDED),
+          message: 'Shortage forwarded to Procurement.'
+        }
+      };
+    }, res, next);
+  } catch (error) { return next(error); }
+});
+
 router.get('/requisitions/:id/attachments/:attachmentId', allowRoles('requestor', 'supervisor', 'admin'), async (req, res, next) => {
   try {
     const requisitionId = parseId(req.params.id);
@@ -1093,11 +1585,12 @@ router.patch('/messages/:id/read', allowRoles('supervisor', 'requestor'), async 
       [messageId, req.user.id]
     );
     if (!result.affectedRows) return res.status(404).json({ message: 'Message not found.' });
-    await pool.execute(
-      `UPDATE notifications SET is_read = TRUE
-        WHERE user_id = ? AND is_read = FALSE AND category = 'message'
-          AND link LIKE CONCAT('%message=', ?)`,
-      [req.user.id, messageId]
+    // Clear only this reader's paired notification receipt. Broadcast rows are
+    // never globally marked read and unrelated recipients keep their badge.
+    await markNotificationsRead(
+      pool, req.user.id,
+      `n.category = 'message' AND n.link LIKE CONCAT('%message=', ?)`,
+      [messageId]
     );
     return res.json({ message: 'Message marked as read.' });
   } catch (error) { return next(error); }

@@ -195,6 +195,7 @@ export function datePresets() {
     { key: 'month', label: 'This month', from: `${year}-${String(month).padStart(2, '0')}-01`, to: today },
     { key: 'quarter', label: 'This quarter', from: `${year}-${String(quarterStartMonth).padStart(2, '0')}-01`, to: today },
     { key: 'year', label: 'This year', from: `${year}-01-01`, to: today },
+    { key: 'lastYear', label: 'Last year', from: `${year - 1}-01-01`, to: `${year - 1}-12-31` },
     { key: 'custom', label: 'Custom range', from: '', to: '' }
   ];
 }

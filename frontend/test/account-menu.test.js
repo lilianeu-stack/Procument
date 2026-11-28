@@ -20,6 +20,7 @@ const supplierPricing = read('../src/components/portals/SupplierPricingPage.jsx'
 const purchaseOrderApproval = read('../src/components/portals/PurchaseOrderApprovalPage.jsx');
 const userAvatar = read('../src/components/ui/UserAvatar.jsx');
 const portalMessages = read('../src/components/portals/PortalMessages.jsx');
+const portalProfile = read('../src/components/portals/PortalProfile.jsx');
 const app = read('../src/App.jsx');
 
 test('both authenticated shells reuse one account menu component', () => {
@@ -134,6 +135,14 @@ test('avatars only request a photo when the record actually has one', () => {
   assert.match(portalMessages, /photo=\{conversation\.photo\}/);
   assert.match(portalMessages, /photo=\{message\.senderPhoto\}/);
   assert.match(portalMessages, /photo=\{announcement\.senderPhoto\}/);
+});
+
+test('profile page removes its heading while preserving profile sections', () => {
+  assert.ok(!portalProfile.includes('eyebrow="Account"'));
+  assert.ok(!portalProfile.includes('title="My profile"'));
+  for (const section of ['Profile photo', 'Personal information', 'Account information', 'Security']) {
+    assert.ok(portalProfile.includes(`title="${section}"`), `profile section should remain: ${section}`);
+  }
 });
 
 test('logout clears the token before restoring the unauthenticated view', () => {

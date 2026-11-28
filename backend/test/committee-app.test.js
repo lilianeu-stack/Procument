@@ -114,9 +114,10 @@ async function createApprovedStoreRequest(itemId, requester, quantity, suffix) {
   const reference = `QASR-${Date.now().toString(36).toUpperCase()}`;
   const [result] = await pool.execute(
     `INSERT INTO store_requests
-       (reference, requester_id, department_id, purpose, status, approved_at)
-     VALUES (?, ?, ?, 'QA stock issue', 'Approved', UTC_TIMESTAMP())`,
-    [reference, requester.id, requester.departmentId]
+       (reference, requester_id, department_id, purpose, status,
+        stockkeeper_decision, stockkeeper_decision_by, stockkeeper_decision_at, approved_at)
+     VALUES (?, ?, ?, 'QA stock issue', 'Approved', 'Accepted', ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())`,
+    [reference, requester.id, requester.departmentId, users.stockkeeper.id]
   );
   const id = Number(result.insertId);
   createdStoreRequestIds.push(id);

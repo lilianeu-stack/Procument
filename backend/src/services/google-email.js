@@ -598,32 +598,38 @@ export async function syncGoogleInbox() {
   return { synced: parsed.length, commentsReceived };
 }
 
-export async function listInboxMessages() {
+export async function listInboxMessages(userId) {
   const [rows] = await pool.execute(
     `SELECT g.gmail_message_id AS id, g.sender, g.recipient, g.subject, g.snippet,
-       g.unread, g.received_at AS receivedAt,
+       g.unread, er.user_id IS NOT NULL AS isRead, g.received_at AS receivedAt,
        c.id AS commentId, c.requisition_id AS requisitionId,
        r.reference AS requisitionReference
      FROM google_email_messages g
+     LEFT JOIN email_message_read_receipts er
+       ON er.gmail_message_id = g.gmail_message_id AND er.user_id = ?
      LEFT JOIN requisition_email_comments c ON c.gmail_message_id = g.gmail_message_id
      LEFT JOIN requisitions r ON r.id = c.requisition_id
      ORDER BY g.received_at DESC, g.gmail_message_id DESC
-     LIMIT 100`
+     LIMIT 100`,
+    [userId]
   );
   return rows;
 }
 
-export async function getInboxMessage(id) {
+export async function getInboxMessage(id, userId) {
   const [[message]] = await pool.execute(
     `SELECT g.gmail_message_id AS id, g.thread_id AS threadId, g.sender, g.recipient,
-       g.subject, g.snippet, g.body_text AS body, g.unread, g.received_at AS receivedAt,
+       g.subject, g.snippet, g.body_text AS body, g.unread,
+       er.user_id IS NOT NULL AS isRead, g.received_at AS receivedAt,
        c.id AS commentId, c.requisition_id AS requisitionId,
        r.reference AS requisitionReference, c.comment
      FROM google_email_messages g
+     LEFT JOIN email_message_read_receipts er
+       ON er.gmail_message_id = g.gmail_message_id AND er.user_id = ?
      LEFT JOIN requisition_email_comments c ON c.gmail_message_id = g.gmail_message_id
      LEFT JOIN requisitions r ON r.id = c.requisition_id
      WHERE g.gmail_message_id = ? LIMIT 1`,
-    [id]
+    [userId, id]
   );
   return message || null;
 }

@@ -25,11 +25,15 @@ export const SUPPLIER_PRICING_PAGES = ['Quote'];
 export const PROFILE_PAGE = 'Profile';
 export const STOCKKEEPER_PAGES = [
   'Dashboard',
-  'List of Requesters',
-  'Notification',
+  'Requests from Supervisors',
+  'Stock Overview',
+  'Stock In',
+  'Stock Out',
   'Display before delivery',
   'Bin Card',
-  'Profile'
+  'Inventory Reports',
+  'Notifications',
+  PROFILE_PAGE
 ];
 
 export const SUPERVISOR_PAGES = [
@@ -104,6 +108,10 @@ const PAGE_ALIASES = {
   'Department Procurement Requests': 'Procurement Requests',
   [SUPERVISOR_INCOMING_PAGE]: 'Approvals',
   'Supervisor Incoming Requests': 'Approvals',
+  // Older Stock Keeper links keep working but open the redesigned pages.
+  'Requests to Issue': 'Requests from Supervisors',
+  'List of Requesters': 'Requests from Supervisors',
+  'Notification': 'Notifications',
   // Existing bookmarks/links continue to open the unified Profile page.
   'My Profile': PROFILE_PAGE
 };
