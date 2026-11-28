@@ -60,6 +60,7 @@ test('My Procurement Requests keeps its custom full-dataset print action', () =>
   assert.match(source, /printLabel="Print My purchase requisitions"/);
   assert.match(source, /renderPrintTable=\{false\}/);
   assert.match(source, /fetchAllMatchingRows/);
+  assert.doesNotMatch(source, /Showing only requests created by your account/);
 });
 
 test('signed-link pages are print-only and never call authenticated download APIs', () => {

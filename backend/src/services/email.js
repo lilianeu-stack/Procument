@@ -117,6 +117,31 @@ export function buildPurchaseOrderEmail({
   };
 }
 
+// Sent to the registered supplier after Procurement allows a GRN. The caller
+// attaches the generated PDF; the message never exposes internal addresses.
+export function buildGoodReceivedNoteEmail({
+  supplierName, recipientEmail, reference, purchaseOrderReference,
+  lines = [], message = ''
+}) {
+  const itemLines = (Array.isArray(lines) ? lines : []).map((line) =>
+    `${line.itemName || 'Received item'} — ${line.quantity} ${line.unit || 'unit'}${line.comment ? ` (${line.comment})` : ''}`
+  );
+  const body = [
+    `Dear ${supplierName || 'Supplier'},`,
+    `Please find good received note ${reference} for purchase order ${purchaseOrderReference} attached.`,
+    ...(itemLines.length ? ['Received items:', ...itemLines] : []),
+    message ? `Message from Procurement: ${message}` : '',
+    'The attached document is the authoritative record of the goods received. Please keep it for your records.'
+  ].filter(Boolean);
+  return {
+    to: recipientEmail,
+    subject: `Good received note ${reference} · Hope Haven`,
+    text: `${body.join('\n\n')}\n`,
+    html: wrapHtml(`Good received note ${reference}`, body, null,
+      'This good received note was sent only to the registered supplier contact for the purchase order.')
+  };
+}
+
 export function procurementWorkspaceLink() {
   return appUrl('/#/admin/Procurement%20Processing');
 }

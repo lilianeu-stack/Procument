@@ -7,7 +7,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import sharp from 'sharp';
 import app from '../src/app.js';
-import pool, { applySchemaMigrations } from '../src/config/db.js';
+import pool, { DEPARTMENT_HIERARCHY, applySchemaMigrations } from '../src/config/db.js';
 import { amountInWords } from '../src/utils/money.js';
 import { createRfqToken } from '../src/utils/rfq-link.js';
 
@@ -23,12 +23,14 @@ const createdDepartmentIds = [];
 const createdRequisitionIds = [];
 const createdItemIds = [];
 const createdMovementIds = [];
+const createdGoodsReceiptIds = [];
 const createdStoreRequestIds = [];
 const createdRfqIds = [];
 const createdPurchaseOrderIds = [];
 const createdSupplierIds = [];
 const createdPricingRequestIds = [];
 const createdPricingResponseIds = [];
+const createdGmailMessageIds = [];
 
 function tokenFor(user) {
   return jwt.sign({ id: user.id }, process.env.JWT_SECRET);
@@ -238,6 +240,14 @@ after(async () => {
     );
     await pool.execute(`DELETE FROM inventory_movements WHERE id IN (${placeholders})`, createdMovementIds);
   }
+  if (createdGoodsReceiptIds.length) {
+    const placeholders = createdGoodsReceiptIds.map(() => '?').join(',');
+    await pool.execute(
+      `DELETE FROM audit_logs WHERE entity_type = 'goods_receipt' AND entity_id IN (${placeholders})`,
+      createdGoodsReceiptIds.map(String)
+    );
+    await pool.execute(`DELETE FROM goods_receipts WHERE id IN (${placeholders})`, createdGoodsReceiptIds);
+  }
   if (createdStoreRequestIds.length) {
     const placeholders = createdStoreRequestIds.map(() => '?').join(',');
     await pool.execute(`DELETE FROM store_request_items WHERE store_request_id IN (${placeholders})`, createdStoreRequestIds);
@@ -281,6 +291,11 @@ after(async () => {
       createdPricingRequestIds.map(String)
     );
     await pool.execute(`DELETE FROM purchase_order_pricing_requests WHERE id IN (${placeholders})`, createdPricingRequestIds);
+  }
+  if (createdGmailMessageIds.length) {
+    const placeholders = createdGmailMessageIds.map(() => '?').join(',');
+    await pool.execute(`DELETE FROM requisition_email_comments WHERE gmail_message_id IN (${placeholders})`, createdGmailMessageIds);
+    await pool.execute(`DELETE FROM google_email_messages WHERE gmail_message_id IN (${placeholders})`, createdGmailMessageIds);
   }
   if (createdSupplierIds.length) {
     await pool.execute(`DELETE FROM suppliers WHERE id IN (${createdSupplierIds.map(() => '?').join(',')})`, createdSupplierIds);
@@ -1624,6 +1639,52 @@ test('sidebar badge counts are real, per-user, role scoped, and clear on read', 
   assert.equal(Boolean((await pool.execute('SELECT is_read AS isRead FROM notifications WHERE id = ?', [requestNotice.insertId]))[0][0]?.isRead), false);
 });
 
+test('Email Inbox sidebar count follows unread email messages and stays role scoped', async () => {
+  const stamp = Date.now();
+  const countsFor = async (user) => (await request('/sidebar-counts', { user })).data.counts;
+  const beforeAdmin = await countsFor(admin);
+  const beforeProcurement = await countsFor(users.procurement);
+
+  const ids = [
+    `qa.unread.email.${stamp}.1`,
+    `qa.unread.email.${stamp}.2`,
+    `qa.read.email.${stamp}.3`
+  ];
+  for (const [index, gmailMessageId] of ids.entries()) {
+    const unread = index < 2;
+    await pool.execute(
+      `INSERT INTO google_email_messages
+         (gmail_message_id, thread_id, sender, recipient, subject, snippet,
+          body_text, labels, unread, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        gmailMessageId, `qa-thread-${gmailMessageId}`, 'qa.sender@example.test', 'procurement@example.test',
+        `QA unread email badge ${stamp}-${index + 1}`, 'Unread badge fixture', 'Unread badge fixture body',
+        JSON.stringify(unread ? ['UNREAD', 'INBOX'] : ['INBOX']), unread ? 1 : 0
+      ]
+    );
+    createdGmailMessageIds.push(gmailMessageId);
+  }
+
+  const afterAdmin = await countsFor(admin);
+  const afterProcurement = await countsFor(users.procurement);
+  const afterRequester = await countsFor(users.requesterB);
+  const afterStockkeeper = await countsFor(users.stockkeeper);
+
+  assert.equal(
+    (afterAdmin['Email Inbox'] || 0) - (beforeAdmin['Email Inbox'] || 0),
+    2,
+    'only unread email rows should increase the Email Inbox count'
+  );
+  assert.equal(
+    (afterProcurement['Email Inbox'] || 0) - (beforeProcurement['Email Inbox'] || 0),
+    2,
+    'Procurement should receive the same Email Inbox count'
+  );
+  assert.equal(afterRequester['Email Inbox'], undefined, 'Requesters must not receive the Email Inbox count');
+  assert.equal(afterStockkeeper['Email Inbox'], undefined, 'Stock Keepers must not receive the Email Inbox count');
+});
+
 test('sidebar badges follow real send, stepwise read, reappear, refresh, and independent recipients', async () => {
   const supervisor = users.supervisorB;
   const requester = users.requesterB;
@@ -1914,6 +1975,80 @@ test('department deletion checks every dependency and reassigns historical recor
   const emptyDelete = await request(`/admin/departments/${empty.id}`, { method: 'DELETE', user: admin, body: {} });
   assert.equal(emptyDelete.response.status, 200, emptyDelete.data.message);
   assert.equal(emptyDelete.data.reassigned, null);
+});
+
+test('department list exposes the approved hierarchy with parent and child counts', async () => {
+  const listed = await request('/admin/departments', { user: admin });
+  assert.equal(listed.response.status, 200);
+  const byName = new Map(listed.data.departments.map((department) => [department.name, department]));
+
+  for (const [departmentName, subdepartments] of Object.entries(DEPARTMENT_HIERARCHY)) {
+    const department = byName.get(departmentName);
+    assert.ok(department, `${departmentName} must be available.`);
+    assert.equal(department.parentId, null);
+    assert.equal(department.parentName, null);
+    assert.equal(Number(department.childCount), subdepartments.length);
+
+    for (const subdepartmentName of subdepartments) {
+      const subdepartment = byName.get(subdepartmentName);
+      assert.ok(subdepartment, `${subdepartmentName} must be available.`);
+      assert.equal(Number(subdepartment.parentId), Number(department.id));
+      assert.equal(subdepartment.parentName, departmentName);
+      assert.equal(Number(subdepartment.childCount), 0);
+    }
+  }
+});
+
+test('admin departments can be created and updated with a parent department', async () => {
+  const stamp = Date.now();
+  const parentName = `QA Hierarchy Parent ${stamp}`;
+  const childName = `QA Hierarchy Child ${stamp}`;
+
+  const parent = await request('/admin/departments', {
+    method: 'POST', user: admin, body: { name: parentName, description: 'QA parent' }
+  });
+  assert.equal(parent.response.status, 201, parent.data.message);
+  createdDepartmentIds.push(Number(parent.data.id));
+
+  const child = await request('/admin/departments', {
+    method: 'POST', user: admin, body: { name: childName, parentId: parent.data.id }
+  });
+  assert.equal(child.response.status, 201, child.data.message);
+  assert.equal(Number(child.data.parentId), Number(parent.data.id));
+  createdDepartmentIds.push(Number(child.data.id));
+
+  const nested = await request('/admin/departments', {
+    method: 'POST', user: admin,
+    body: { name: `QA Hierarchy Nested ${stamp}`, parentId: child.data.id }
+  });
+  assert.equal(nested.response.status, 400);
+
+  const listed = await request('/admin/departments', { user: admin });
+  const listedParent = listed.data.departments.find((department) => Number(department.id) === Number(parent.data.id));
+  const listedChild = listed.data.departments.find((department) => Number(department.id) === Number(child.data.id));
+  assert.equal(Number(listedParent.childCount), 1);
+  assert.equal(Number(listedChild.parentId), Number(parent.data.id));
+  assert.equal(listedChild.parentName, parentName);
+
+  const nestParent = await request(`/admin/departments/${parent.data.id}`, {
+    method: 'PATCH', user: admin, body: { parentId: child.data.id }
+  });
+  assert.equal(nestParent.response.status, 400);
+
+  const blocked = await request(`/admin/departments/${parent.data.id}`, {
+    method: 'DELETE', user: admin, body: {}
+  });
+  assert.equal(blocked.response.status, 400);
+  assert.match(blocked.data.message, /subdepartments/i);
+
+  const childDelete = await request(`/admin/departments/${child.data.id}`, {
+    method: 'DELETE', user: admin, body: {}
+  });
+  assert.equal(childDelete.response.status, 200, childDelete.data.message);
+  const parentDelete = await request(`/admin/departments/${parent.data.id}`, {
+    method: 'DELETE', user: admin, body: {}
+  });
+  assert.equal(parentDelete.response.status, 200, parentDelete.data.message);
 });
 
 function futureBusinessDate() {
@@ -3558,6 +3693,565 @@ test('sending a purchase order to its supplier attaches the official signed PO P
     assert.ok(pdf.includes(Buffer.from('/Subtype /Image')), 'the official PDF should embed the uploaded signatures');
     assert.ok(!raw.includes('/supplier-pricing/quote?token='));
     assert.ok(!raw.includes('/#/supplier/RFQ?token='));
+
+    // A successful send is also the handoff to the Storekeeper pre-delivery queue.
+    const [queuedLines] = await pool.execute(
+      `SELECT d.id, d.purchase_order_item_id AS purchaseOrderItemId, d.status, d.item_name AS itemName
+         FROM purchase_order_delivery_items d WHERE d.purchase_order_id = ? ORDER BY d.id`,
+      [purchaseOrder.id]
+    );
+    const [orderLines] = await pool.execute(
+      'SELECT id FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id',
+      [purchaseOrder.id]
+    );
+    assert.equal(queuedLines.length, orderLines.length);
+    assert.deepEqual(
+      queuedLines.map((line) => Number(line.purchaseOrderItemId)),
+      orderLines.map((line) => Number(line.id))
+    );
+    assert.ok(queuedLines.every((line) => line.status === 'Pending'));
+    const [keeperNotifications] = await pool.execute(
+      `SELECT id FROM notifications WHERE user_id = ?
+         AND link = '#/stockkeeper/Display%20before%20delivery'
+         AND title = 'Purchase order ready for delivery review'`,
+      [users.stockkeeper.id]
+    );
+    assert.ok(keeperNotifications.length >= 1, 'storekeepers should be notified about the delivery queue');
+  } finally {
+    if (relay) await relay.close();
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('a failed supplier email still queues the purchase order items for Storekeeper review', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  try {
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = '1';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.failed.send.${Date.now()}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = 'qa.failed.sender@hopehaven.test';
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+
+    const context = await createAwardedPurchaseOrder('POFAILQ');
+    const failed = await request(`/purchase-orders/${context.purchaseOrder.id}/send-to-supplier`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(failed.response.status, 502, failed.data.message);
+    assert.equal(failed.data.emailDelivery.accepted, 0);
+    assert.equal(failed.data.deliveryQueued, true);
+
+    const [queuedLines] = await pool.execute(
+      'SELECT id, status FROM purchase_order_delivery_items WHERE purchase_order_id = ?',
+      [context.purchaseOrder.id]
+    );
+    const [orderLines] = await pool.execute(
+      'SELECT id FROM purchase_order_items WHERE purchase_order_id = ?',
+      [context.purchaseOrder.id]
+    );
+    assert.equal(queuedLines.length, orderLines.length);
+    assert.ok(queuedLines.every((line) => line.status === 'Pending'), 'send click queues items even when email fails');
+  } finally {
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('Storekeeper accepts sent items into stock but rejected items never enter stock', async () => {
+  const stamp = Date.now();
+  const context = await createAwardedPurchaseOrder('PODLV');
+  const purchaseOrderId = context.purchaseOrder.id;
+  const secondItemName = `QA PO Delivery Item ${stamp}`;
+  await pool.execute(
+    `INSERT INTO purchase_order_items
+       (purchase_order_id, item_name, description, quantity, unit, unit_price, line_total)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [purchaseOrderId, secondItemName, 'Second pre-delivery line', 4, 'box', 15, 60]
+  );
+  const [lines] = await pool.execute(
+    `SELECT id, item_name AS itemName, description, quantity, unit,
+        unit_price AS unitPrice, line_total AS lineTotal
+       FROM purchase_order_items WHERE purchase_order_id = ? ORDER BY id`,
+    [purchaseOrderId]
+  );
+  assert.equal(lines.length, 2);
+
+  const deliveryIds = [];
+  for (const line of lines) {
+    const [queued] = await pool.execute(
+      `INSERT INTO purchase_order_delivery_items
+         (purchase_order_id, purchase_order_item_id, po_reference, supplier_name, supplier_email,
+          requisition_id, requisition_reference, department_id, department_name,
+          item_name, description, quantity, unit, unit_price, line_total, delivery_date, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+      [
+        purchaseOrderId, line.id, context.purchaseOrder.reference, context.supplier.name,
+        context.supplier.email, context.requisition.id, context.requisition.reference,
+        context.department.id, context.department.name, line.itemName, line.description,
+        line.quantity, line.unit, line.unitPrice, line.lineTotal, context.purchaseOrder.deliveryDate || null
+      ]
+    );
+    deliveryIds.push(Number(queued.insertId));
+  }
+
+  const list = await request('/portal/stockkeeper/deliveries?status=Pending&sort=item&direction=asc', {
+    user: users.stockkeeper
+  });
+  assert.equal(list.response.status, 200, list.data.message);
+  assert.ok(list.data.deliveries.some((row) => Number(row.id) === deliveryIds[0]));
+  assert.ok(list.data.counts.Pending >= 2);
+  assert.equal((await request('/portal/stockkeeper/deliveries', { user: users.procurement })).response.status, 403);
+  assert.equal((await request('/portal/stockkeeper/deliveries?status=Unknown', { user: users.stockkeeper })).response.status, 400);
+
+  const [rejectId, acceptId] = deliveryIds;
+  const rejected = await request(`/portal/stockkeeper/deliveries/${rejectId}/reject`, {
+    method: 'POST', user: users.stockkeeper, body: { reason: 'Quantity does not match the order' }
+  });
+  assert.equal(rejected.response.status, 200, rejected.data.message);
+  assert.equal(rejected.data.status, 'Rejected');
+  assert.match(rejected.data.message, /not added to stock/i);
+  const [rejectedRow] = await pool.execute(
+    'SELECT status, decision_reason AS reason FROM purchase_order_delivery_items WHERE id = ?',
+    [rejectId]
+  );
+  assert.equal(rejectedRow[0].status, 'Rejected');
+  assert.equal(rejectedRow[0].reason, 'Quantity does not match the order');
+  const [rejectedItemRows] = await pool.execute('SELECT COUNT(*) AS total FROM items WHERE name = ?', [lines[0].itemName]);
+  assert.equal(Number(rejectedItemRows[0].total), 0, 'rejected items must not be created in the catalogue');
+  const [rejectedMovementRows] = await pool.execute(
+    `SELECT COUNT(*) AS total FROM inventory_movements m
+       JOIN items i ON i.id = m.item_id WHERE i.name = ?`,
+    [lines[0].itemName]
+  );
+  assert.equal(Number(rejectedMovementRows[0].total), 0, 'rejected items must not create stock movements');
+  assert.equal((await request(`/portal/stockkeeper/deliveries/${rejectId}/accept`, {
+    method: 'POST', user: users.stockkeeper, body: {}
+  })).response.status, 409, 'a rejected line cannot later enter stock');
+
+  const missingReason = await request(`/portal/stockkeeper/deliveries/${acceptId}/reject`, {
+    method: 'POST', user: users.stockkeeper, body: {}
+  });
+  assert.equal(missingReason.response.status, 400);
+  const accepted = await request(`/portal/stockkeeper/deliveries/${acceptId}/accept`, {
+    method: 'POST', user: users.stockkeeper, body: { reason: 'Delivery verified' }
+  });
+  assert.equal(accepted.response.status, 201, accepted.data.message);
+  assert.equal(accepted.data.status, 'Accepted');
+  assert.equal(Number(accepted.data.balance), Number(lines[1].quantity));
+  assert.match(accepted.data.referenceNo, /^PO-DEL-/);
+  createdItemIds.push(Number(accepted.data.itemId));
+  createdMovementIds.push(Number(accepted.data.movementId));
+
+  const [acceptedRow] = await pool.execute(
+    `SELECT status, inventory_item_id AS inventoryItemId, inventory_movement_id AS inventoryMovementId
+       FROM purchase_order_delivery_items WHERE id = ?`,
+    [acceptId]
+  );
+  assert.equal(acceptedRow[0].status, 'Accepted');
+  assert.equal(Number(acceptedRow[0].inventoryItemId), Number(accepted.data.itemId));
+  assert.equal(Number(acceptedRow[0].inventoryMovementId), Number(accepted.data.movementId));
+  const [stockRows] = await pool.execute('SELECT quantity FROM items WHERE id = ?', [accepted.data.itemId]);
+  assert.equal(Number(stockRows[0].quantity), Number(lines[1].quantity));
+  const [movementRows] = await pool.execute(
+    'SELECT movement_type AS type, direction, reference_no AS referenceNo FROM inventory_movements WHERE id = ?',
+    [accepted.data.movementId]
+  );
+  assert.equal(movementRows[0].type, 'Receipt');
+  assert.equal(movementRows[0].direction, 'In');
+  assert.equal(movementRows[0].referenceNo, accepted.data.referenceNo);
+  const acceptedList = await request('/portal/stockkeeper/deliveries?status=Accepted', { user: users.stockkeeper });
+  assert.equal(acceptedList.response.status, 200);
+  assert.ok(acceptedList.data.deliveries.some((row) => Number(row.id) === acceptId));
+});
+
+test('sent suppliers create a Good Received Note from accepted lines without adding stock twice', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  try {
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = '1';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.grn.send.${Date.now()}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = 'qa.grn.sender@hopehaven.test';
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+
+    const stamp = Date.now();
+    const context = await createAwardedPurchaseOrder('POGRN');
+    const purchaseOrderId = context.purchaseOrder.id;
+    const secondItemName = `QA GRN Item ${stamp}`;
+    await pool.execute(
+      `INSERT INTO purchase_order_items
+         (purchase_order_id, item_name, description, quantity, unit, unit_price, line_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [purchaseOrderId, secondItemName, 'GRN fixture line', 6, 'box', 12, 72]
+    );
+    const sent = await request(`/purchase-orders/${purchaseOrderId}/send-to-supplier`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(sent.response.status, 502, sent.data.message);
+    assert.equal(sent.data.deliveryQueued, true);
+
+    const [queued] = await pool.execute(
+      `SELECT id, purchase_order_item_id AS purchaseOrderItemId, item_name AS itemName, quantity
+         FROM purchase_order_delivery_items WHERE purchase_order_id = ? ORDER BY id`,
+      [purchaseOrderId]
+    );
+    assert.equal(queued.length, 2);
+    const [rejectId, acceptId] = queued.map((row) => Number(row.id));
+    const rejected = await request(`/portal/stockkeeper/deliveries/${rejectId}/reject`, {
+      method: 'POST', user: users.stockkeeper, body: { reason: 'Damaged in transit' }
+    });
+    assert.equal(rejected.response.status, 200, rejected.data.message);
+    const accepted = await request(`/portal/stockkeeper/deliveries/${acceptId}/accept`, {
+      method: 'POST', user: users.stockkeeper, body: { reason: 'Delivery verified' }
+    });
+    assert.equal(accepted.response.status, 201, accepted.data.message);
+    createdItemIds.push(Number(accepted.data.itemId));
+    createdMovementIds.push(Number(accepted.data.movementId));
+    const acceptedItemId = Number(accepted.data.itemId);
+    const acceptedQuantity = Number(queued[1].quantity);
+
+    const sentSuppliers = await request('/goods-receipts/sent-suppliers', { user: users.procurement });
+    assert.equal(sentSuppliers.response.status, 200, sentSuppliers.data.message);
+    const supplier = sentSuppliers.data.sentSuppliers.find((entry) =>
+      entry.supplierName === context.supplier.name);
+    assert.ok(supplier, 'the sent supplier should appear in the GRN workspace');
+    assert.equal(supplier.supplierEmail.toLowerCase(), context.supplier.email.toLowerCase());
+    const order = supplier.purchaseOrders.find((entry) => entry.id === purchaseOrderId);
+    assert.ok(order, 'the sent purchase order should appear under its supplier');
+    assert.ok(order.departmentName);
+    const deliveryLines = order.lines.filter((line) =>
+      queued.some((queuedLine) => Number(queuedLine.purchaseOrderItemId) === line.purchaseOrderItemId));
+    assert.equal(deliveryLines.length, 2);
+    assert.equal(deliveryLines.find((line) =>
+      Number(line.purchaseOrderItemId) === Number(queued[0].purchaseOrderItemId)).deliveryStatus, 'Rejected');
+    const acceptedLine = deliveryLines.find((line) =>
+      Number(line.purchaseOrderItemId) === Number(queued[1].purchaseOrderItemId));
+    assert.equal(acceptedLine.deliveryStatus, 'Accepted');
+    assert.equal(Number(acceptedLine.itemId), acceptedItemId);
+    assert.equal(order.grnDecision, '', 'a sent order begins without an Allow/Deny decision');
+
+    const blocked = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement,
+      body: {
+        purchaseOrderId,
+        lines: [{ purchaseOrderItemId: Number(queued[1].purchaseOrderItemId), quantity: acceptedQuantity }]
+      }
+    });
+    assert.equal(blocked.response.status, 409, blocked.data.message);
+    assert.match(blocked.data.message, /Allow this supplier/i);
+
+    const invalidDecision = await request('/goods-receipts/supplier-decision', {
+      method: 'POST', user: users.procurement,
+      body: { purchaseOrderId, decision: 'Maybe' }
+    });
+    assert.equal(invalidDecision.response.status, 400, invalidDecision.data.message);
+
+    const allowed = await request('/goods-receipts/supplier-decision', {
+      method: 'POST', user: users.procurement, body: { purchaseOrderId, decision: 'Allowed' }
+    });
+    assert.equal(allowed.response.status, 200, allowed.data.message);
+    assert.equal(allowed.data.decision, 'Allowed');
+    const afterAllow = await request('/goods-receipts/sent-suppliers', { user: users.procurement });
+    const allowedOrder = afterAllow.data.sentSuppliers
+      .find((entry) => entry.supplierName === context.supplier.name)
+      ?.purchaseOrders.find((entry) => entry.id === purchaseOrderId);
+    assert.equal(allowedOrder?.grnDecision, 'Allowed');
+
+    const signature = await imageSignature();
+    const body = {
+      purchaseOrderId,
+      receivedByName: 'QA Receiver',
+      verifiedByName: 'QA Verifier',
+      receivedBySignature: signature,
+      verifiedBySignature: signature,
+      grnDate: new Date().toISOString().slice(0, 10),
+      lines: [{
+        purchaseOrderItemId: Number(queued[1].purchaseOrderItemId),
+        quantity: acceptedQuantity,
+        comment: 'Verified against delivery note'
+      }]
+    };
+    const missingSignature = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement,
+      body: { ...body, verifiedBySignature: null }
+    });
+    assert.equal(missingSignature.response.status, 400, missingSignature.data.message);
+    assert.match(missingSignature.data.message, /verified by signature/i);
+
+    const rejectedLine = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement,
+      body: { ...body, lines: [{ purchaseOrderItemId: Number(queued[0].purchaseOrderItemId), quantity: 1 }] }
+    });
+    assert.equal(rejectedLine.response.status, 409, rejectedLine.data.message);
+    assert.match(rejectedLine.data.message, /Rejected items cannot appear/i);
+
+    const [[stockBefore]] = await pool.execute('SELECT quantity FROM items WHERE id = ?', [acceptedItemId]);
+    const [[movementsBefore]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM inventory_movements WHERE item_id = ?', [acceptedItemId]
+    );
+    const grn = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement, body
+    });
+    assert.equal(grn.response.status, 201, grn.data.message);
+    assert.equal(grn.data.purchaseOrderId, purchaseOrderId);
+    assert.equal(grn.data.lines.length, 1);
+    assert.equal(grn.data.emailDelivery.ok, false, 'an unreachable SMTP provider is reported');
+    assert.match(grn.data.message, /email was not delivered/i);
+    createdGoodsReceiptIds.push(Number(grn.data.id));
+
+    const [[stockAfter]] = await pool.execute('SELECT quantity FROM items WHERE id = ?', [acceptedItemId]);
+    const [[movementsAfter]] = await pool.execute(
+      'SELECT COUNT(*) AS total FROM inventory_movements WHERE item_id = ?', [acceptedItemId]
+    );
+    assert.equal(Number(stockAfter.quantity), Number(stockBefore.quantity), 'a GRN must not add stock twice');
+    assert.equal(Number(movementsAfter.total), Number(movementsBefore.total), 'a GRN must not create a second movement');
+
+    const [grnRows] = await pool.execute(
+      `SELECT supplier_id AS supplierId, supplied_by AS suppliedBy,
+         receiving_department AS receivingDepartment, received_by_name AS receivedByName,
+         verified_by_name AS verifiedByName, received_signature AS receivedSignature,
+         verified_signature AS verifiedSignature, DATE_FORMAT(grn_date, '%Y-%m-%d') AS grnDate
+        FROM goods_receipts WHERE id = ?`,
+      [grn.data.id]
+    );
+    assert.equal(Number(grnRows[0].supplierId), Number(context.supplier.id));
+    assert.match(grnRows[0].suppliedBy, new RegExp(context.supplier.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(grnRows[0].receivingDepartment, order.departmentName);
+    assert.equal(grnRows[0].receivedByName, 'QA Receiver');
+    assert.equal(grnRows[0].verifiedByName, 'QA Verifier');
+    assert.match(grnRows[0].receivedSignature, /^data:image\/webp;base64,/);
+    assert.match(grnRows[0].verifiedSignature, /^data:image\/webp;base64,/);
+    assert.equal(String(grnRows[0].grnDate).slice(0, 10), body.grnDate);
+
+    const [grnLines] = await pool.execute(
+      'SELECT item_id AS itemId, quantity, comment FROM goods_receipt_items WHERE goods_receipt_id = ?',
+      [grn.data.id]
+    );
+    assert.equal(Number(grnLines[0].itemId), acceptedItemId);
+    assert.equal(Number(grnLines[0].quantity), acceptedQuantity);
+    assert.equal(grnLines[0].comment, 'Verified against delivery note');
+
+    const register = await request('/goods-receipts', { user: users.procurement });
+    assert.equal(register.response.status, 200, register.data.message);
+    const recorded = register.data.goodsReceipts.find((row) => Number(row.id) === Number(grn.data.id));
+    assert.equal(recorded.supplier, context.supplier.name);
+    assert.equal(recorded.receivingDepartment, order.departmentName);
+
+    const duplicate = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement, body
+    });
+    assert.equal(duplicate.response.status, 409, duplicate.data.message);
+    assert.match(duplicate.data.message, /exceeds the ordered quantity/i);
+
+    const denied = await request('/goods-receipts/supplier-decision', {
+      method: 'POST', user: users.procurement,
+      body: { purchaseOrderId, decision: 'Denied', reason: 'Supplier cancelled the delivery' }
+    });
+    assert.equal(denied.response.status, 200, denied.data.message);
+    const afterDeny = await request('/goods-receipts/sent-suppliers', { user: users.procurement });
+    assert.equal(
+      afterDeny.data.sentSuppliers.some((entry) => entry.supplierName === context.supplier.name),
+      false,
+      'a denied purchase order must be removed from the sent-supplier workspace'
+    );
+    const deniedGrn = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement, body
+    });
+    assert.equal(deniedGrn.response.status, 409, deniedGrn.data.message);
+    assert.match(deniedGrn.data.message, /Allow this supplier/i);
+  } finally {
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('an allowed supplier can create a GRN before Storekeeper acceptance without adding stock', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  try {
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = '1';
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.grn.pending.${Date.now()}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = 'qa.grn.sender@hopehaven.test';
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+
+    const stamp = Date.now();
+    const itemName = `QA GRN Pending Item ${stamp}`;
+    const context = await createAwardedPurchaseOrder('POGRNP');
+    const purchaseOrderId = context.purchaseOrder.id;
+    await pool.execute(
+      `INSERT INTO purchase_order_items
+         (purchase_order_id, item_name, description, quantity, unit, unit_price, line_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [purchaseOrderId, itemName, 'Pending GRN fixture line', 3, 'piece', 20, 60]
+    );
+    const sent = await request(`/purchase-orders/${purchaseOrderId}/send-to-supplier`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(sent.response.status, 502, sent.data.message);
+    assert.equal(sent.data.deliveryQueued, true);
+
+    const [queued] = await pool.execute(
+      `SELECT id, purchase_order_item_id AS purchaseOrderItemId, item_name AS itemName
+         FROM purchase_order_delivery_items
+        WHERE purchase_order_id = ? AND item_name = ?`,
+      [purchaseOrderId, itemName]
+    );
+    assert.equal(queued.length, 1, 'the new line should be queued as pending');
+    const allowed = await request('/goods-receipts/supplier-decision', {
+      method: 'POST', user: users.procurement, body: { purchaseOrderId, decision: 'Allowed' }
+    });
+    assert.equal(allowed.response.status, 200, allowed.data.message);
+
+    const signature = await imageSignature();
+    const grn = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement,
+      body: {
+        purchaseOrderId,
+        receivedByName: 'QA Receiver',
+        verifiedByName: 'QA Verifier',
+        receivedBySignature: signature,
+        verifiedBySignature: signature,
+        grnDate: new Date().toISOString().slice(0, 10),
+        lines: [{ purchaseOrderItemId: Number(queued[0].purchaseOrderItemId), quantity: 3 }]
+      }
+    });
+    assert.equal(grn.response.status, 201, grn.data.message);
+    createdGoodsReceiptIds.push(Number(grn.data.id));
+
+    const [items] = await pool.execute(
+      'SELECT id, quantity FROM items WHERE name = ? AND unit = ?',
+      [itemName, 'piece']
+    );
+    assert.equal(items.length, 1, 'a catalogue item is resolved for the pending line');
+    createdItemIds.push(Number(items[0].id));
+    assert.equal(Number(items[0].quantity), 0, 'a GRN must not add stock before Storekeeper acceptance');
+    const [movements] = await pool.execute('SELECT COUNT(*) AS total FROM inventory_movements WHERE item_id = ?', [items[0].id]);
+    assert.equal(Number(movements[0].total), 0, 'the GRN must not create a stock movement');
+
+    const [delivery] = await pool.execute(
+      'SELECT status, inventory_item_id AS itemId FROM purchase_order_delivery_items WHERE id = ?',
+      [queued[0].id]
+    );
+    assert.equal(delivery[0].status, 'Pending', 'the Storekeeper decision is unchanged');
+    assert.equal(Number(delivery[0].itemId), Number(items[0].id));
+
+    const sentSuppliers = await request('/goods-receipts/sent-suppliers', { user: users.procurement });
+    const order = sentSuppliers.data.sentSuppliers
+      .find((entry) => entry.supplierName === context.supplier.name)
+      ?.purchaseOrders.find((entry) => entry.id === purchaseOrderId);
+    assert.equal(order?.grnDecision, 'Allowed');
+    assert.equal(order.lines.find((line) => line.itemName === itemName).outstandingQuantity, 0);
+  } finally {
+    for (const name of envNames) {
+      if (savedEnv[name] === undefined) delete process.env[name];
+      else process.env[name] = savedEnv[name];
+    }
+  }
+});
+
+test('an allowed supplier receives the Good Received Note PDF by email', async () => {
+  const envNames = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_SECURE', 'SMTP_REQUIRE_TLS', 'SMTP_USER', 'SMTP_PASS', 'SMTP_FROM', 'SMTP_FROM_NAME', 'APP_BASE_URL'];
+  const savedEnv = Object.fromEntries(envNames.map((name) => [name, process.env[name]]));
+  let relay = null;
+  try {
+    relay = await startTestSmtp();
+    process.env.SMTP_HOST = '127.0.0.1';
+    process.env.SMTP_PORT = String(relay.port);
+    process.env.SMTP_SECURE = 'false';
+    process.env.SMTP_REQUIRE_TLS = 'false';
+    process.env.SMTP_USER = `qa.grn.email.${Date.now()}@example.test`;
+    process.env.SMTP_PASS = 'QaLocalRelayPass!2026';
+    process.env.SMTP_FROM = 'qa.grn.sender@hopehaven.test';
+    process.env.SMTP_FROM_NAME = 'Hope Haven QA';
+    process.env.APP_BASE_URL = 'http://localhost:5173';
+
+    const context = await createAwardedPurchaseOrder('POGRNE');
+    const purchaseOrderId = context.purchaseOrder.id;
+    await pool.execute(
+      `INSERT INTO purchase_order_items
+         (purchase_order_id, item_name, description, quantity, unit, unit_price, line_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [purchaseOrderId, `QA GRN Email Item ${Date.now()}`, 'GRN email fixture line', 4, 'box', 15, 60]
+    );
+    const sent = await request(`/purchase-orders/${purchaseOrderId}/send-to-supplier`, {
+      method: 'POST', user: users.procurement, body: {}
+    });
+    assert.equal(sent.response.status, 200, sent.data.message);
+
+    const [queued] = await pool.execute(
+      `SELECT id, purchase_order_item_id AS purchaseOrderItemId, quantity
+         FROM purchase_order_delivery_items WHERE purchase_order_id = ? ORDER BY id`,
+      [purchaseOrderId]
+    );
+    const target = queued[queued.length - 1];
+    const accepted = await request(`/portal/stockkeeper/deliveries/${target.id}/accept`, {
+      method: 'POST', user: users.stockkeeper, body: { reason: 'Delivery verified' }
+    });
+    assert.equal(accepted.response.status, 201, accepted.data.message);
+    createdItemIds.push(Number(accepted.data.itemId));
+    createdMovementIds.push(Number(accepted.data.movementId));
+
+    const allowed = await request('/goods-receipts/supplier-decision', {
+      method: 'POST', user: users.procurement, body: { purchaseOrderId, decision: 'Allowed' }
+    });
+    assert.equal(allowed.response.status, 200, allowed.data.message);
+
+    const messageCountBeforeGrn = relay.messages.length;
+    const signature = await imageSignature();
+    const grn = await request('/goods-receipts/from-supplier', {
+      method: 'POST', user: users.procurement,
+      body: {
+        purchaseOrderId,
+        receivedByName: 'QA Receiver',
+        verifiedByName: 'QA Verifier',
+        receivedBySignature: signature,
+        verifiedBySignature: signature,
+        grnDate: new Date().toISOString().slice(0, 10),
+        lines: [{
+          purchaseOrderItemId: Number(target.purchaseOrderItemId),
+          quantity: Number(target.quantity),
+          comment: 'Delivered in good condition'
+        }]
+      }
+    });
+    assert.equal(grn.response.status, 201, grn.data.message);
+    createdGoodsReceiptIds.push(Number(grn.data.id));
+    assert.equal(grn.data.emailDelivery.ok, true, grn.data.message);
+    assert.equal(grn.data.emailDelivery.accepted, 1);
+    assert.equal(grn.data.emailRecipient.toLowerCase(), context.supplier.email.toLowerCase());
+    assert.equal(relay.messages.length - messageCountBeforeGrn, 1, 'only the GRN should be emailed');
+
+    const raw = relay.messages[relay.messages.length - 1];
+    const filename = `${grn.data.reference}.pdf`;
+    assert.ok(
+      raw.includes(`filename=${filename}`) || raw.includes(`filename="${filename}"`),
+      `email should attach ${filename}`
+    );
+    const pdf = attachmentBuffer(raw, filename);
+    assert.equal(pdf.subarray(0, 5).toString(), '%PDF-');
+    assertPdfIncludes(pdf, 'Goods Received Note', grn.data.reference);
+    assert.ok(pdf.includes(Buffer.from('/Subtype /Image')), 'the GRN PDF should embed both signature photos');
+    assert.ok(raw.includes('Good received note'));
   } finally {
     if (relay) await relay.close();
     for (const name of envNames) {

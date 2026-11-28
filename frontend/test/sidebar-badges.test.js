@@ -50,6 +50,22 @@ test('badge keeps existing colours and uses the scoped white count exception', (
   assert.match(badge, /aria-label=\{`\$\{Number\(count\)\} unread`\}/);
 });
 
+test('Email Inbox nav shows its unread email count as green text from the shared count map', () => {
+  assert.match(adminSidebar, /\{\s*name:\s*'Email Inbox',\s*icon:\s*Mail\s*\}/);
+  assert.match(
+    adminSidebar,
+    /<SidebarBadge count=\{counts\[name\]\} showText=\{name === 'Email Inbox'\} floating=\{collapsed\} \/>/
+  );
+  assert.match(badge, /showText = false/);
+  assert.match(badge, /data-testid="email-inbox-unread-text"/);
+  assert.match(badge, /pims-sidebar-unread-text/);
+  assert.match(badge, /\{label\} unread/);
+  assert.match(
+    read('../src/index.css'),
+    /\.pims-sidebar-unread-text \{\s*color: var\(--pims-reference\) !important;\s*\}/
+  );
+});
+
 test('loading a conversation never marks messages read; each message opens explicitly', () => {
   const messages = read('../src/components/portals/PortalMessages.jsx');
   assert.match(messages, /const unread = !mine && !message\.isRead/);

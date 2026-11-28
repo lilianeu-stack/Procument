@@ -96,49 +96,100 @@ async function indexExists(table, index) {
   return Boolean(rows[0]?.total);
 }
 
-// Departments form a two-level hierarchy: department -> subdepartment. Users
-// are assigned to subdepartments. Idempotent, so it is safe on every startup.
+// The only departments and subdepartments the application should expose.
+export const DEPARTMENT_HIERARCHY = Object.freeze({
+  Administration: ['Procurement'],
+  Education: [],
+  Facility: ['IT'],
+  Stores: ['StoreKeeper']
+});
+
+const LEGACY_DEPARTMENT_NAMES = Object.freeze({
+  Facilities: 'Facility',
+  'IT Department': 'IT',
+  'Store Keeper': 'StoreKeeper',
+  Storekeeper: 'StoreKeeper',
+  Procument: 'Procurement'
+});
+const DEFAULT_DEPARTMENT_REASSIGNMENT = 'Procurement';
+const DEPARTMENT_REFERENCE_TABLES = [
+  'users', 'requisitions', 'store_requests', 'items', 'inventory_movements', 'messages'
+];
+
+async function reassignDepartmentReferences(fromId, toId) {
+  if (!toId || fromId === toId) return;
+  for (const table of DEPARTMENT_REFERENCE_TABLES) {
+    await pool.execute(`UPDATE ${table} SET department_id = ? WHERE department_id = ?`, [toId, fromId]);
+  }
+}
+
+// Departments form a two-level hierarchy: department -> subdepartment. This
+// seeder is idempotent and also prunes departments outside the requested list.
+// Linked users and historical records are reassigned to Procurement, never
+// deleted.
 export async function seedDepartmentHierarchy() {
-  const findId = async (name) => {
-    const [rows] = await pool.execute('SELECT id FROM departments WHERE name = ? LIMIT 1', [name]);
-    return rows[0]?.id || null;
-  };
+  const currentRows = async () => (await pool.execute(
+    'SELECT id, name, parent_id AS parentId FROM departments ORDER BY id'
+  ))[0];
+  const named = (list, name) => list.find((row) => row.name === name);
 
-  const ensure = async (name, parentName = null) => {
-    const parentId = parentName ? await findId(parentName) : null;
-    const existingId = await findId(name);
-    if (!existingId) {
+  let departments = await currentRows();
+
+  // Keep existing records by renaming known legacy departments to their
+  // canonical names instead of creating duplicates.
+  for (const [legacyName, canonicalName] of Object.entries(LEGACY_DEPARTMENT_NAMES)) {
+    const legacy = named(departments, legacyName);
+    if (!legacy) continue;
+    const canonical = named(departments, canonicalName);
+    if (canonical && canonical.id !== legacy.id) {
+      await reassignDepartmentReferences(legacy.id, canonical.id);
+      await pool.execute('UPDATE departments SET parent_id = NULL WHERE parent_id = ?', [legacy.id]);
+      await pool.execute('DELETE FROM departments WHERE id = ?', [legacy.id]);
+    } else if (!canonical) {
+      await pool.execute('UPDATE departments SET name = ? WHERE id = ?', [canonicalName, legacy.id]);
+    }
+    departments = await currentRows();
+  }
+
+  // Ensure exactly the requested departments and subdepartments exist.
+  for (const [departmentName, subdepartments] of Object.entries(DEPARTMENT_HIERARCHY)) {
+    let department = named(departments, departmentName);
+    if (!department) {
       const [result] = await pool.execute(
-        'INSERT INTO departments (name, parent_id) VALUES (?, ?)', [name, parentId]
+        'INSERT INTO departments (name, parent_id) VALUES (?, NULL)', [departmentName]
       );
-      return result.insertId;
+      department = { id: result.insertId, name: departmentName, parentId: null };
+    } else if (department.parentId !== null) {
+      await pool.execute('UPDATE departments SET parent_id = NULL WHERE id = ?', [department.id]);
     }
-    if (parentName && parentId) {
-      // Only adopt legacy flat departments; never move a subdepartment that
-      // an administrator has already placed.
-      await pool.execute(
-        'UPDATE departments SET parent_id = ? WHERE id = ? AND parent_id IS NULL', [parentId, existingId]
-      );
+
+    for (const subdepartmentName of subdepartments) {
+      const subdepartment = named(departments, subdepartmentName);
+      if (!subdepartment) {
+        await pool.execute(
+          'INSERT INTO departments (name, parent_id) VALUES (?, ?)', [subdepartmentName, department.id]
+        );
+      } else if (subdepartment.parentId !== department.id) {
+        await pool.execute(
+          'UPDATE departments SET parent_id = ? WHERE id = ?', [department.id, subdepartment.id]
+        );
+      }
     }
-    return existingId;
-  };
+    departments = await currentRows();
+  }
 
-  for (const name of ['Administration', 'Education', 'Facilities', 'Finance']) await ensure(name);
-
-  // Keep existing records by converting the old flat departments into
-  // subdepartments instead of deleting them.
-  await ensure('Administration Office', 'Administration');
-  await ensure('Procurement', 'Administration');
-  await ensure('Stores', 'Facilities');
-
-  // IT lives inside Facilities.
-  const itId = await findId('IT');
-  const legacyItId = await findId('IT Department');
-  if (!itId && legacyItId) {
-    const facilitiesId = await findId('Facilities');
-    await pool.execute('UPDATE departments SET name = ?, parent_id = ? WHERE id = ?', ['IT', facilitiesId, legacyItId]);
-  } else {
-    await ensure('IT', 'Facilities');
+  // Remove anything else. Records stay attached to Procurement so no
+  // requisition, stock movement or message is silently lost.
+  const allowedNames = new Set([
+    ...Object.keys(DEPARTMENT_HIERARCHY),
+    ...Object.values(DEPARTMENT_HIERARCHY).flat()
+  ]);
+  const fallback = named(departments, DEFAULT_DEPARTMENT_REASSIGNMENT);
+  for (const department of departments) {
+    if (allowedNames.has(department.name)) continue;
+    await reassignDepartmentReferences(department.id, fallback?.id);
+    await pool.execute('UPDATE departments SET parent_id = NULL WHERE parent_id = ?', [department.id]);
+    await pool.execute('DELETE FROM departments WHERE id = ?', [department.id]);
   }
 }
 
@@ -293,6 +344,17 @@ export async function applySchemaMigrations() {
     { table: 'purchase_orders', column: 'supplier_pricing_status', ddl: "ALTER TABLE purchase_orders ADD COLUMN supplier_pricing_status VARCHAR(30) NOT NULL DEFAULT 'Not requested' AFTER status" },
     { table: 'goods_receipts', column: 'expected_at', ddl: 'ALTER TABLE goods_receipts ADD COLUMN expected_at DATETIME NULL AFTER received_by' },
     { table: 'goods_receipts', column: 'updated_at', ddl: 'ALTER TABLE goods_receipts ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER received_at' },
+    // Official Good Received Note form fields, populated from a sent PO.
+    { table: 'goods_receipts', column: 'supplier_id', ddl: 'ALTER TABLE goods_receipts ADD COLUMN supplier_id INT UNSIGNED NULL AFTER updated_at' },
+    { table: 'goods_receipts', column: 'supplied_by', ddl: 'ALTER TABLE goods_receipts ADD COLUMN supplied_by VARCHAR(190) NULL AFTER supplier_id' },
+    { table: 'goods_receipts', column: 'receiving_department', ddl: 'ALTER TABLE goods_receipts ADD COLUMN receiving_department VARCHAR(180) NULL AFTER supplied_by' },
+    { table: 'goods_receipts', column: 'received_by_name', ddl: 'ALTER TABLE goods_receipts ADD COLUMN received_by_name VARCHAR(150) NULL AFTER receiving_department' },
+    { table: 'goods_receipts', column: 'verified_by_name', ddl: 'ALTER TABLE goods_receipts ADD COLUMN verified_by_name VARCHAR(150) NULL AFTER received_by_name' },
+    // Signature photos are normalised to compact WebP data URLs before storage.
+    { table: 'goods_receipts', column: 'received_signature', ddl: 'ALTER TABLE goods_receipts ADD COLUMN received_signature LONGTEXT NULL AFTER verified_by_name' },
+    { table: 'goods_receipts', column: 'verified_signature', ddl: 'ALTER TABLE goods_receipts ADD COLUMN verified_signature LONGTEXT NULL AFTER received_signature' },
+    { table: 'goods_receipts', column: 'grn_date', ddl: 'ALTER TABLE goods_receipts ADD COLUMN grn_date DATE NULL AFTER verified_signature' },
+    { table: 'goods_receipt_items', column: 'comment', ddl: 'ALTER TABLE goods_receipt_items ADD COLUMN comment TEXT NULL AFTER quantity' },
     { table: 'invoices', column: 'invoice_date', ddl: 'ALTER TABLE invoices ADD COLUMN invoice_date DATE NULL AFTER status' },
     { table: 'invoices', column: 'due_date', ddl: 'ALTER TABLE invoices ADD COLUMN due_date DATE NULL AFTER invoice_date' },
     { table: 'invoices', column: 'submitted_at', ddl: 'ALTER TABLE invoices ADD COLUMN submitted_at DATETIME NULL AFTER reviewed_by' },
@@ -328,7 +390,8 @@ export async function applySchemaMigrations() {
     { table: 'requisitions', name: 'fk_req_forwarded_by', ddl: 'ALTER TABLE requisitions ADD CONSTRAINT fk_req_forwarded_by FOREIGN KEY (forwarded_by_supervisor) REFERENCES users(id) ON DELETE SET NULL' },
     { table: 'inventory_movements', name: 'fk_movement_requester', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE SET NULL' },
     { table: 'inventory_movements', name: 'fk_movement_department', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_department FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL' },
-    { table: 'inventory_movements', name: 'fk_movement_store_request', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE SET NULL' }
+    { table: 'inventory_movements', name: 'fk_movement_store_request', ddl: 'ALTER TABLE inventory_movements ADD CONSTRAINT fk_movement_store_request FOREIGN KEY (store_request_id) REFERENCES store_requests(id) ON DELETE SET NULL' },
+    { table: 'goods_receipts', name: 'fk_grn_supplier', ddl: 'ALTER TABLE goods_receipts ADD CONSTRAINT fk_grn_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL' }
   ];
   for (const key of foreignKeys) {
     if (!(await tableExists(key.table))) continue;
@@ -690,6 +753,55 @@ export async function applySchemaMigrations() {
       file_data LONGBLOB NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT fk_movement_attachment_movement FOREIGN KEY (movement_id) REFERENCES inventory_movements(id) ON DELETE RESTRICT
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_delivery_items (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      purchase_order_id INT UNSIGNED NOT NULL,
+      purchase_order_item_id INT UNSIGNED NOT NULL,
+      po_reference VARCHAR(30) NOT NULL,
+      supplier_name VARCHAR(190) NOT NULL,
+      supplier_email VARCHAR(190) NULL,
+      requisition_id INT UNSIGNED NULL,
+      requisition_reference VARCHAR(190) NULL,
+      department_id INT UNSIGNED NULL,
+      department_name VARCHAR(180) NULL,
+      item_name VARCHAR(180) NOT NULL,
+      description TEXT NULL,
+      quantity INT UNSIGNED NOT NULL,
+      unit VARCHAR(30) NOT NULL DEFAULT 'unit',
+      unit_price DECIMAL(12,4) NOT NULL DEFAULT 0,
+      line_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+      delivery_date DATE NULL,
+      status ENUM('Pending','Accepted','Rejected') NOT NULL DEFAULT 'Pending',
+      decision_reason TEXT NULL,
+      decided_by INT UNSIGNED NULL,
+      decided_by_name VARCHAR(150) NULL,
+      decided_at DATETIME NULL,
+      inventory_item_id INT UNSIGNED NULL,
+      inventory_movement_id BIGINT UNSIGNED NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT uq_po_delivery_item UNIQUE (purchase_order_item_id),
+      CONSTRAINT fk_po_delivery_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_delivery_order_item FOREIGN KEY (purchase_order_item_id) REFERENCES purchase_order_items(id) ON DELETE CASCADE,
+      CONSTRAINT fk_po_delivery_decided_by FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_po_delivery_inventory_item FOREIGN KEY (inventory_item_id) REFERENCES items(id) ON DELETE SET NULL,
+      CONSTRAINT fk_po_delivery_movement FOREIGN KEY (inventory_movement_id) REFERENCES inventory_movements(id) ON DELETE SET NULL,
+      INDEX idx_po_delivery_status (status, created_at),
+      INDEX idx_po_delivery_order (purchase_order_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS grn_supplier_decisions (
+      id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+      purchase_order_id INT UNSIGNED NOT NULL,
+      status ENUM('Allowed','Denied') NOT NULL,
+      reason TEXT NULL,
+      decided_by INT UNSIGNED NULL,
+      decided_by_name VARCHAR(150) NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      CONSTRAINT uq_grn_supplier_decision_order UNIQUE (purchase_order_id),
+      CONSTRAINT fk_grn_supplier_decision_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+      CONSTRAINT fk_grn_supplier_decision_user FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
     )`
   ];
   for (const ddl of tables) await pool.query(ddl);

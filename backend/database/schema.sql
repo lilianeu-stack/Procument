@@ -400,6 +400,64 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   CONSTRAINT fk_po_line_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
 );
 
+-- Storekeeper pre-delivery queue. One row is created for each purchase-order
+-- line when the signed official PO is sent to its supplier. Decisions are
+-- terminal: rejected lines never create stock, accepted lines create one stock
+-- receipt against the inventory catalogue.
+CREATE TABLE IF NOT EXISTS purchase_order_delivery_items (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  purchase_order_id INT UNSIGNED NOT NULL,
+  purchase_order_item_id INT UNSIGNED NOT NULL,
+  po_reference VARCHAR(30) NOT NULL,
+  supplier_name VARCHAR(190) NOT NULL,
+  supplier_email VARCHAR(190) NULL,
+  requisition_id INT UNSIGNED NULL,
+  requisition_reference VARCHAR(190) NULL,
+  department_id INT UNSIGNED NULL,
+  department_name VARCHAR(180) NULL,
+  item_name VARCHAR(180) NOT NULL,
+  description TEXT NULL,
+  quantity INT UNSIGNED NOT NULL,
+  unit VARCHAR(30) NOT NULL DEFAULT 'unit',
+  unit_price DECIMAL(12,4) NOT NULL DEFAULT 0,
+  line_total DECIMAL(12,2) NOT NULL DEFAULT 0,
+  delivery_date DATE NULL,
+  status ENUM('Pending','Accepted','Rejected') NOT NULL DEFAULT 'Pending',
+  decision_reason TEXT NULL,
+  decided_by INT UNSIGNED NULL,
+  decided_by_name VARCHAR(150) NULL,
+  decided_at DATETIME NULL,
+  inventory_item_id INT UNSIGNED NULL,
+  inventory_movement_id BIGINT UNSIGNED NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uq_po_delivery_item UNIQUE (purchase_order_item_id),
+  CONSTRAINT fk_po_delivery_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_po_delivery_order_item FOREIGN KEY (purchase_order_item_id) REFERENCES purchase_order_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_po_delivery_decided_by FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_po_delivery_inventory_item FOREIGN KEY (inventory_item_id) REFERENCES items(id) ON DELETE SET NULL,
+  CONSTRAINT fk_po_delivery_movement FOREIGN KEY (inventory_movement_id) REFERENCES inventory_movements(id) ON DELETE SET NULL,
+  INDEX idx_po_delivery_status (status, created_at),
+  INDEX idx_po_delivery_order (purchase_order_id)
+);
+
+-- Procurement's Allow/Deny gate for turning a sent purchase order into a GRN.
+-- Denied orders are hidden from the sent-supplier workspace; only Allowed
+-- orders can produce a Good Received Note for the supplier.
+CREATE TABLE IF NOT EXISTS grn_supplier_decisions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  purchase_order_id INT UNSIGNED NOT NULL,
+  status ENUM('Allowed','Denied') NOT NULL,
+  reason TEXT NULL,
+  decided_by INT UNSIGNED NULL,
+  decided_by_name VARCHAR(150) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT uq_grn_supplier_decision_order UNIQUE (purchase_order_id),
+  CONSTRAINT fk_grn_supplier_decision_order FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_grn_supplier_decision_user FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- One record per secure review link. It keeps the full send/view/decision/revoke
 -- history without creating a second Purchase Order or duplicating its financials.
 CREATE TABLE IF NOT EXISTS purchase_order_approval_requests (
@@ -535,8 +593,19 @@ CREATE TABLE IF NOT EXISTS goods_receipts (
   expected_at DATETIME NULL,
   received_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  -- Official Good Received Note form fields. Sent purchase orders populate
+  -- these from the supplier and requisition captured at send time.
+  supplier_id INT UNSIGNED NULL,
+  supplied_by VARCHAR(190) NULL,
+  receiving_department VARCHAR(180) NULL,
+  received_by_name VARCHAR(150) NULL,
+  verified_by_name VARCHAR(150) NULL,
+  received_signature LONGTEXT NULL,
+  verified_signature LONGTEXT NULL,
+  grn_date DATE NULL,
   CONSTRAINT fk_grn_po FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE SET NULL,
-  CONSTRAINT fk_grn_user FOREIGN KEY (received_by) REFERENCES users(id)
+  CONSTRAINT fk_grn_user FOREIGN KEY (received_by) REFERENCES users(id),
+  CONSTRAINT fk_grn_supplier FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS goods_receipt_items (
@@ -544,6 +613,7 @@ CREATE TABLE IF NOT EXISTS goods_receipt_items (
   goods_receipt_id INT UNSIGNED NOT NULL,
   item_id INT UNSIGNED NOT NULL,
   quantity INT UNSIGNED NOT NULL,
+  comment TEXT NULL,
   CONSTRAINT fk_grn_item_receipt FOREIGN KEY (goods_receipt_id) REFERENCES goods_receipts(id) ON DELETE CASCADE,
   CONSTRAINT fk_grn_item_catalog FOREIGN KEY (item_id) REFERENCES items(id)
 );
@@ -699,21 +769,19 @@ CREATE TABLE IF NOT EXISTS requisition_email_comments (
 );
 
 -- Departments form a two-level hierarchy: department -> subdepartment.
--- Users belong to a subdepartment. Seed the four required departments first.
+-- Only the requested departments are seeded; the startup seeder also prunes
+-- anything outside this list on an existing database.
 INSERT IGNORE INTO departments (name, parent_id) VALUES
-  ('Administration', NULL), ('Education', NULL), ('Facilities', NULL), ('Finance', NULL);
-
-INSERT IGNORE INTO departments (name, parent_id)
-SELECT 'Administration Office', id FROM departments WHERE name = 'Administration';
+  ('Administration', NULL), ('Education', NULL), ('Facility', NULL), ('Stores', NULL);
 
 INSERT IGNORE INTO departments (name, parent_id)
 SELECT 'Procurement', id FROM departments WHERE name = 'Administration';
 
 INSERT IGNORE INTO departments (name, parent_id)
-SELECT 'Stores', id FROM departments WHERE name = 'Facilities';
+SELECT 'IT', id FROM departments WHERE name = 'Facility';
 
 INSERT IGNORE INTO departments (name, parent_id)
-SELECT 'IT', id FROM departments WHERE name = 'Facilities';
+SELECT 'StoreKeeper', id FROM departments WHERE name = 'Stores';
 
 INSERT IGNORE INTO suppliers (id, name, contact_name, email, phone, rating) VALUES
   (1, 'Bright Office Supplies', 'Grace Niyonzima', 'sales@brightoffice.example', '+250 788 120 400', 4.8),

@@ -7,6 +7,15 @@ import {
   canAccessPage, PURCHASE_ORDERS_PAGE, RECEIVED_REQUESTS_PAGE
 } from '../utils/access.js';
 
+const PROCUREMENT_HIDDEN_METRICS = new Set([
+  'Rejected Requests',
+  'Under Review',
+  'Processing',
+  'Rejected',
+  'Draft RFQs',
+  'Awarded RFQs'
+]);
+
 function formatCount(value) {
   if (value === null || value === undefined || value === '') return '—';
   const number = Number(value);
@@ -154,6 +163,12 @@ export default function OverviewPage({ dashboard, role, loading, onNavigate }) {
       if (section.title === 'Suppliers') return canViewSuppliers;
       if (section.title === 'Stock Overview') return canViewStock;
       return true;
-    }).map((section) => <Section key={section.title} {...section} />)}
+    }).map((section) => <Section
+      key={section.title}
+      {...section}
+      metrics={role === 'procurement'
+        ? section.metrics.filter((metric) => !PROCUREMENT_HIDDEN_METRICS.has(metric.label))
+        : section.metrics}
+    />)}
   </div>;
 }

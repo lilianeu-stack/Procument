@@ -246,6 +246,12 @@ label:hover:where(:has(input, select, textarea), [class*='hover:bg-'], [class*='
   color: #FFFFFF !important;
 }
 
+/* The Email Inbox nav also names its unread count; this is the only text
+   opted into the selected green so the message count stays visible. */
+.pims-sidebar-unread-text {
+  color: var(--pims-reference) !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :where(
     a[href], button, summary,
@@ -499,4 +505,25 @@ input::placeholder, textarea::placeholder {
 #root [role='button'],
 #root [role='button'] * {
   color: #000000 !important;
+}
+
+/* Keep the unread Email Inbox count green while the global button text token
+   stays untouched. This scoped exception must follow the button rule above. */
+#root button .pims-sidebar-unread-text,
+#root [role='button'] .pims-sidebar-unread-text {
+  color: var(--pims-reference) !important;
+  -webkit-text-fill-color: var(--pims-reference) !important;
+}
+
+/* The notification bell card keeps its unread count and unread-item markers
+   green. These scoped exceptions also follow the global button text rule. */
+.pims-notification-unread-text,
+.pims-notification-unread-title,
+.pims-notification-unread-label,
+#root button .pims-notification-unread-title,
+#root button .pims-notification-unread-label,
+#root [role='button'] .pims-notification-unread-title,
+#root [role='button'] .pims-notification-unread-label {
+  color: var(--pims-reference) !important;
+  -webkit-text-fill-color: var(--pims-reference) !important;
 }

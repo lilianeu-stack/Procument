@@ -22,10 +22,10 @@ export function ErrorMessage({ children }) {
   return children ? <p role="alert" className="rounded-lg bg-white px-3 py-2 text-xs text-black">{children}</p> : null;
 }
 
-export function FormActions({ busy, close, label, busyLabel }) {
+export function FormActions({ busy, disabled = false, close, label, busyLabel }) {
   return <div className="flex justify-end gap-2 border-t border-subtle pt-4">
     <button type="button" onClick={close} className="rounded-lg border border-brand px-4 py-2 text-xs font-bold transition-colors hover:bg-accent-tint hover:border-accent-border hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus">Cancel</button>
-    <button disabled={busy} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:opacity-60">
+    <button disabled={busy || disabled} className="rounded-lg bg-brand px-4 py-2 text-xs font-bold text-black transition-colors hover:bg-accent-tint hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus disabled:opacity-60">
       {busy ? (busyLabel || 'Saving…') : label}
     </button>
   </div>;

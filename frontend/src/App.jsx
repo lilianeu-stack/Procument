@@ -22,6 +22,7 @@ import SupervisorStock from './components/portals/SupervisorStock.jsx';
 import StockKeeperDashboard from './components/portals/StockKeeperDashboard.jsx';
 import StockKeeperNotifications from './components/portals/StockKeeperNotifications.jsx';
 import StockKeeperBinCards from './components/portals/StockKeeperBinCards.jsx';
+import StockKeeperDisplayBeforeDelivery from './components/portals/StockKeeperDisplayBeforeDelivery.jsx';
 import ReceivedRequests from './components/portals/ReceivedRequests.jsx';
 import ProcurementDocumentView from './components/portals/ProcurementDocumentView.jsx';
 import SupplierRfqPage from './components/portals/SupplierRfqPage.jsx';
@@ -52,7 +53,7 @@ const initialData = {
   rfqs: [],
   quotations: [],
   purchaseOrders: [],
-  goodsReceipts: [],
+  goodsReceipts: [], grnSuppliers: [],
   invoices: [],
   storeRequests: [],
   users: [],
@@ -244,7 +245,7 @@ export default function App() {
       if (portal === 'admin') {
         const [
           dashboard, requisitions, receivedRequests, inventory, suppliers, rfqs, purchaseOrders,
-          goodsReceipts, invoices, storeRequests, notifications, committee,
+          goodsReceipts, grnSuppliers, invoices, storeRequests, notifications, committee,
           receivedRequestStats, rfqStats
         ] = await Promise.all([
           activePage === 'Overview' ? api('/dashboard') : Promise.resolve(null),
@@ -254,6 +255,9 @@ export default function App() {
             : Promise.resolve({ requisitions: [] }),
           api('/inventory'), api(filtered('/suppliers')),
           api(filtered('/rfqs')), api(filtered('/purchase-orders')), api(filtered('/goods-receipts')),
+          canAccessPage(user.role, 'Goods receipts')
+            ? api('/goods-receipts/sent-suppliers')
+            : Promise.resolve({ sentSuppliers: [] }),
           api(filtered('/invoices')), api(filtered('/store-requests')), api('/notifications'),
           canAccessPage(user.role, PROCUREMENT_COMMITTEE_PAGE)
             ? api('/procurement-committee')
@@ -293,7 +297,9 @@ export default function App() {
           items: inventory.items || [],
           suppliers: suppliers.suppliers || [], rfqs: rfqs.rfqs || [],
           purchaseOrders: purchaseOrders.purchaseOrders || [],
-          goodsReceipts: goodsReceipts.goodsReceipts || [], invoices: invoices.invoices || [],
+          goodsReceipts: goodsReceipts.goodsReceipts || [],
+          grnSuppliers: grnSuppliers.sentSuppliers || [],
+          invoices: invoices.invoices || [],
           storeRequests: storeRequests.storeRequests || [], notifications: notifications.notifications || [],
           committeeMembers: committee.members || [],
           users: users.users || [], departments: departments.departments || [],
@@ -447,6 +453,17 @@ export default function App() {
       getStockItems: (params = {}) => api(`/portal/stockkeeper/items${toQuery(params)}`),
       getBinCard: (id) => api(`/portal/stockkeeper/items/${id}`),
       getIssueRequests: () => api('/portal/stockkeeper/issue-requests'),
+      getPurchaseOrderDeliveries: (params = {}) => api(`/portal/stockkeeper/deliveries${toQuery(params)}`),
+      acceptPurchaseOrderDelivery: async (id, payload) => {
+        const result = await post(`/portal/stockkeeper/deliveries/${id}/accept`, payload);
+        await refreshSidebarCounts();
+        return result;
+      },
+      rejectPurchaseOrderDelivery: async (id, payload) => {
+        const result = await post(`/portal/stockkeeper/deliveries/${id}/reject`, payload);
+        await refreshSidebarCounts();
+        return result;
+      },
       getStockKeeperRequesters: (params = {}) => api(`/portal/stockkeeper/requesters${toQuery(params)}`),
       getRequesterDetails: (id) => api(`/portal/stockkeeper/requesters/${id}`),
       getRequesterHistory: (id, params = {}) => api(`/portal/stockkeeper/requesters/${id}/history${toQuery(params)}`),
@@ -576,7 +593,9 @@ export default function App() {
     onCreateRequisition: (form) => mutate('/requisitions', form),
     onRequisitionDecision: (id, decision) => mutate(`/requisitions/${id}/decision`, { decision }, 'PATCH'),
     onAddItem: (form) => mutate('/inventory/items', form),
-    onReceive: (form) => mutate('/goods-receipts', form),
+    onCreateSupplierGRN: (form) => mutate('/goods-receipts/from-supplier', form),
+    onSupplierDecision: (purchaseOrderId, decision, reason) =>
+      mutate('/goods-receipts/supplier-decision', { purchaseOrderId, decision, reason }),
     onCreateSupplier: (form) => mutate('/suppliers', form),
     onUpdateSupplier: (id, form) => mutate(`/suppliers/${id}`, form, 'PATCH'),
     onDeleteSupplier: (id) => mutate(`/suppliers/${id}`, {}, 'DELETE'),
@@ -751,6 +770,8 @@ export default function App() {
         portalApi={portalApi}
         onOpenNotification={openNotification}
       />;
+    } else if (activePage === 'Display before delivery') {
+      portalContent = <StockKeeperDisplayBeforeDelivery portalApi={portalApi} />;
     } else if (activePage === 'Bin Card') {
       portalContent = <StockKeeperBinCards
         portalApi={portalApi}

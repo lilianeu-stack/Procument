@@ -100,15 +100,17 @@ async function departmentExists(connection, id) {
 async function departmentDependencies(connection, departmentId) {
   const [[usage]] = await connection.execute(
     `SELECT
+      (SELECT COUNT(*) FROM departments WHERE parent_id = ?) AS children,
       (SELECT COUNT(*) FROM users WHERE department_id = ?) AS users,
       (SELECT COUNT(*) FROM requisitions WHERE department_id = ?) AS requisitions,
       (SELECT COUNT(*) FROM store_requests WHERE department_id = ?) AS storeRequests,
       (SELECT COUNT(*) FROM items WHERE department_id = ?) AS items,
       (SELECT COUNT(*) FROM inventory_movements WHERE department_id = ?) AS inventoryMovements,
       (SELECT COUNT(*) FROM messages WHERE department_id = ?) AS messages`,
-    [departmentId, departmentId, departmentId, departmentId, departmentId, departmentId]
+    [departmentId, departmentId, departmentId, departmentId, departmentId, departmentId, departmentId]
   );
   return {
+    children: Number(usage.children),
     users: Number(usage.users),
     requisitions: Number(usage.requisitions),
     storeRequests: Number(usage.storeRequests),
@@ -120,6 +122,7 @@ async function departmentDependencies(connection, departmentId) {
 
 function departmentDependencyMessage(usage) {
   const labels = {
+    children: 'subdepartment(s)',
     users: 'user(s)',
     requisitions: 'requisition(s)',
     storeRequests: 'store request(s)',
@@ -236,7 +239,9 @@ router.get('/audit-logs', async (req, res, next) => {
 router.get('/departments', async (_req, res, next) => {
   try {
     const [departments] = await pool.query(
-      `SELECT d.id, d.name, d.description, d.created_at AS createdAt,
+      `SELECT d.id, d.name, d.description, d.parent_id AS parentId, p.name AS parentName,
+        d.created_at AS createdAt,
+        (SELECT COUNT(*) FROM departments child WHERE child.parent_id = d.id) AS childCount,
         COUNT(u.id) AS userCount,
         COALESCE(SUM(u.active = TRUE), 0) AS activeUserCount,
         (SELECT COUNT(*) FROM requisitions r WHERE r.department_id = d.id) AS requisitionCount,
@@ -244,8 +249,11 @@ router.get('/departments', async (_req, res, next) => {
         (SELECT COUNT(*) FROM items i WHERE i.department_id = d.id) AS itemCount,
         (SELECT COUNT(*) FROM inventory_movements m WHERE m.department_id = d.id) AS stockMovementCount,
         (SELECT COUNT(*) FROM messages msg WHERE msg.department_id = d.id) AS messageCount
-       FROM departments d LEFT JOIN users u ON u.department_id = d.id
-       GROUP BY d.id ORDER BY d.name`
+       FROM departments d
+       LEFT JOIN departments p ON p.id = d.parent_id
+       LEFT JOIN users u ON u.department_id = d.id
+       GROUP BY d.id
+       ORDER BY COALESCE(d.parent_id, d.id), (d.parent_id IS NULL) DESC, d.name`
     );
     return res.json({ departments });
   } catch (error) { return next(error); }
@@ -284,13 +292,25 @@ router.get('/departments/:id/users', async (req, res, next) => {
 router.post('/departments', async (req, res, next) => {
   const name = text(req.body.name, 100);
   const description = text(req.body.description, 255) || null;
+  const parentId = req.body.parentId === undefined || req.body.parentId === null || req.body.parentId === ''
+    ? null : parseId(req.body.parentId);
   if (!name) return badRequest(res, 'Department name is required.');
+  if (req.body.parentId !== undefined && req.body.parentId !== null && req.body.parentId !== '' && !parentId) {
+    return badRequest(res, 'Invalid parent department.');
+  }
   try {
     const [existing] = await pool.execute('SELECT id FROM departments WHERE name = ? LIMIT 1', [name]);
     if (existing.length) return badRequest(res, 'A department with that name already exists.');
-    const [result] = await pool.execute('INSERT INTO departments (name, description) VALUES (?, ?)', [name, description]);
-    await writeAudit(pool, req.user.id, 'department_created', 'department', String(result.insertId), { name });
-    return res.status(201).json({ id: result.insertId, name, description });
+    if (parentId) {
+      const [[parent]] = await pool.execute('SELECT id, parent_id AS parentId FROM departments WHERE id = ? LIMIT 1', [parentId]);
+      if (!parent) return badRequest(res, 'The parent department does not exist.');
+      if (parent.parentId !== null) return badRequest(res, 'Subdepartments can only be created inside a top-level department.');
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO departments (name, description, parent_id) VALUES (?, ?, ?)', [name, description, parentId]
+    );
+    await writeAudit(pool, req.user.id, 'department_created', 'department', String(result.insertId), { name, parentId });
+    return res.status(201).json({ id: result.insertId, name, description, parentId });
   } catch (error) { return next(error); }
 });
 
@@ -298,13 +318,24 @@ router.patch('/departments/:id', async (req, res, next) => {
   const id = parseId(req.params.id);
   const name = req.body.name === undefined ? undefined : text(req.body.name, 100);
   const description = req.body.description === undefined ? undefined : (text(req.body.description, 255) || null);
+  let parentId;
+  if (req.body.parentId === undefined) parentId = undefined;
+  else if (req.body.parentId === null || req.body.parentId === '') parentId = null;
+  else parentId = parseId(req.body.parentId);
   if (!id) return badRequest(res, 'Invalid department identifier.');
-  if (name === undefined && description === undefined) return badRequest(res, 'No department changes were supplied.');
+  if (name === undefined && description === undefined && parentId === undefined) {
+    return badRequest(res, 'No department changes were supplied.');
+  }
   if (name === '') return badRequest(res, 'Department name is required.');
+  if (req.body.parentId !== undefined && req.body.parentId !== null && req.body.parentId !== '' && !parentId) {
+    return badRequest(res, 'Invalid parent department.');
+  }
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [existing] = await connection.execute('SELECT id, name, description FROM departments WHERE id = ? LIMIT 1 FOR UPDATE', [id]);
+    const [existing] = await connection.execute(
+      'SELECT id, name, description, parent_id AS parentId FROM departments WHERE id = ? LIMIT 1 FOR UPDATE', [id]
+    );
     if (!existing.length) {
       await connection.rollback();
       return res.status(404).json({ message: 'Department not found.' });
@@ -315,12 +346,39 @@ router.patch('/departments/:id', async (req, res, next) => {
       await connection.rollback();
       return badRequest(res, 'A department with that name already exists.');
     }
-    await connection.execute('UPDATE departments SET name = ?, description = ? WHERE id = ?', [
-      nextName, description === undefined ? existing[0].description : description, id
+    if (parentId !== undefined && parentId !== existing[0].parentId) {
+      if (parentId === id) {
+        await connection.rollback();
+        return badRequest(res, 'A department cannot be its own parent.');
+      }
+      if (parentId !== null) {
+        const [[parent]] = await connection.execute(
+          'SELECT id, parent_id AS parentId FROM departments WHERE id = ? LIMIT 1', [parentId]
+        );
+        if (!parent) {
+          await connection.rollback();
+          return badRequest(res, 'The parent department does not exist.');
+        }
+        if (parent.parentId !== null) {
+          await connection.rollback();
+          return badRequest(res, 'Subdepartments can only be created inside a top-level department.');
+        }
+        const usage = await departmentDependencies(connection, id);
+        if (usage.children > 0) {
+          await connection.rollback();
+          return badRequest(res, 'Move or delete its subdepartments before nesting this department.');
+        }
+      }
+    }
+    const nextParentId = parentId === undefined ? existing[0].parentId : parentId;
+    await connection.execute('UPDATE departments SET name = ?, description = ?, parent_id = ? WHERE id = ?', [
+      nextName, description === undefined ? existing[0].description : description, nextParentId, id
     ]);
-    await writeAudit(connection, req.user.id, 'department_updated', 'department', String(id), { from: existing[0].name, to: nextName });
+    await writeAudit(connection, req.user.id, 'department_updated', 'department', String(id), {
+      from: existing[0].name, to: nextName, parentId: nextParentId
+    });
     await connection.commit();
-    return res.json({ id, name: nextName });
+    return res.json({ id, name: nextName, parentId: nextParentId });
   } catch (error) {
     await connection.rollback();
     return next(error);
@@ -341,7 +399,13 @@ router.delete('/departments/:id', async (req, res, next) => {
       return res.status(404).json({ message: 'Department not found.' });
     }
     const usage = await departmentDependencies(connection, id);
-    const assigned = Object.values(usage).reduce((total, count) => total + count, 0);
+    if (usage.children > 0) {
+      await connection.rollback();
+      return badRequest(res, 'Move or delete the subdepartments before deleting this department.');
+    }
+    const assigned = Object.entries(usage)
+      .filter(([key]) => key !== 'children')
+      .reduce((total, [, count]) => total + count, 0);
     if (assigned > 0) {
       if (!reassignTo || reassignTo === id) {
         await connection.rollback();

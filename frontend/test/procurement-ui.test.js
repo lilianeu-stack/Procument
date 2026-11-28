@@ -288,6 +288,49 @@ test('procurement overview groups every live metric into its business section', 
   assert.doesNotMatch(overview, /Keep every request moving/);
 });
 
+test('Procurement dashboard hides the requested status cards only for Procurement users', () => {
+  const overview = source('../src/pages/OverviewPage.jsx');
+  for (const label of [
+    'Rejected Requests', 'Under Review', 'Processing', 'Rejected', 'Draft RFQs', 'Awarded RFQs'
+  ]) {
+    assert.match(overview, new RegExp(`'${label}'`));
+  }
+  assert.match(overview, /role === 'procurement'/);
+  assert.match(overview, /section\.metrics\.filter\(\(metric\) => !PROCUREMENT_HIDDEN_METRICS\.has\(metric\.label\)\)/);
+});
+
+test('Stock movements page hides its page header above the register controls', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+
+  assert.match(layout, /page !== 'Stock movements'/);
+  assert.match(layout, /Review recorded receipts, issues, and inventory balance changes/);
+});
+
+test('Goods receipts and Email Inbox hide their large page headers', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+  assert.match(layout, /page !== 'Goods receipts'/);
+  assert.match(layout, /page !== 'Email Inbox'/);
+});
+
+test('Stock overview hides its page header and has no Record receipt button', () => {
+  const layout = source('../src/components/layout/AppLayout.jsx');
+  const inventory = source('../src/pages/InventoryPage.jsx');
+  assert.match(layout, /page !== 'Stock overview'/);
+  assert.doesNotMatch(inventory, /Record receipt|recordReceiptButtonClass|canReceive/);
+});
+
+test('Procurement sidebar hides Goods receipts without hiding it for other roles', () => {
+  const sidebar = source('../src/components/layout/Sidebar.jsx');
+  assert.match(sidebar, /user\.role === 'procurement' && name === 'Goods receipts'/);
+  assert.match(sidebar, /canAccessPage\(user\.role, name\)/);
+});
+
+test('Invoices is absent from the shared sidebar for all roles', () => {
+  const sidebar = source('../src/components/layout/Sidebar.jsx');
+  assert.doesNotMatch(sidebar, /\{ name: 'Invoices', icon: BriefcaseBusiness \}/);
+  assert.doesNotMatch(sidebar, /name === 'Invoices'/);
+});
+
 test('received-request and RFQ registers keep their tools without top summary cards', () => {
   const received = source('../src/components/portals/ReceivedRequests.jsx');
   const rfqs = source('../src/pages/RfqsPage.jsx');
@@ -458,4 +501,23 @@ test('date range filter can show only From and To inputs', () => {
   assert.match(simpleBlock, /label="To"/);
   assert.doesNotMatch(simpleBlock, /Preset/);
   assert.doesNotMatch(simpleBlock, /Clear dates/);
+});
+
+test('Goods receipts page exposes only the role-gated supplier Create GRN action', () => {
+  const page = source('../src/pages/GoodsReceiptsPage.jsx');
+  const form = source('../src/components/ui/GoodsReceiptForm.jsx');
+  const pageCard = source('../src/components/ui/PageCard.jsx');
+  const inventory = source('../src/pages/InventoryPage.jsx');
+
+  assert.match(page, /Create GRN/);
+  assert.match(page, /\['admin', 'storekeeper', 'procurement'\]\.includes\(user\?\.role\)/);
+  assert.match(page, /onClick=\{\(\) => openSupplierGRN\(order\)\}/);
+  assert.doesNotMatch(page, /Receipt register/);
+  assert.doesNotMatch(page, /<GoodsReceiptForm/);
+  assert.match(form, /itemId: Number\(form\.itemId\), quantity: Number\(form\.quantity\)/);
+  assert.match(form, /FormActions busy=\{busy\} disabled=\{!items\.length\}/);
+  assert.match(pageCard, /disabled=\{busy \|\| disabled\}/);
+  // Stock receipts stay on the purchase-order workflow; Stock overview no
+  // longer exposes a second stock-moving form.
+  assert.doesNotMatch(inventory, /GoodsReceiptForm|onReceive|Record receipt/);
 });

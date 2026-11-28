@@ -807,7 +807,7 @@ export default function PurchaseOrdersPage({
       const accepted = Number(response?.emailDelivery?.accepted) || 0;
       const failed = Number(response?.emailDelivery?.failed) || 0;
       setNotice(failed && !accepted
-        ? 'The official purchase order was not delivered. Check the email delivery status and try again.'
+        ? `${response.deliveryQueued ? 'Items were queued for Storekeeper review, but ' : ''}the official purchase order was not delivered. Check the email delivery status and try again.`
         : response.message || `Official purchase order ${order?.reference || ''} sent to the registered supplier.`);
       await refreshDetail(id);
       return response;

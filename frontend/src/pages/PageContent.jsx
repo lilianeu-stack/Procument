@@ -113,7 +113,7 @@ export default function PageContent({
           dateFilter={dateFilter} onDateFilterChange={onDateFilterChange}
         />;
   } else if (page === 'Stock overview' || page === 'Stock movements') {
-    content = <InventoryPage page={page} items={data.items} movements={data.movements} user={data.user} search={data.search} query={query} onAddItem={actions.onAddItem} onReceive={actions.onReceive} />;
+    content = <InventoryPage page={page} items={data.items} movements={data.movements} user={data.user} search={data.search} query={query} onAddItem={actions.onAddItem} />;
   } else if (page === 'Suppliers') {
     content = <SuppliersPage
       suppliers={data.suppliers} user={data.user} search={data.search}
@@ -160,7 +160,12 @@ export default function PageContent({
       onRevokeApproval={actions.revokePurchaseOrderApproval}
       sendPurchaseOrderToSupplier={actions.sendPurchaseOrderToSupplier} />;
   } else if (page === 'Goods receipts') {
-    content = <GoodsReceiptsPage receipts={data.goodsReceipts} />;
+    content = <GoodsReceiptsPage
+      user={data.user}
+      sentSuppliers={data.grnSuppliers}
+      onCreateSupplierGRN={actions.onCreateSupplierGRN}
+      onSupplierDecision={actions.onSupplierDecision}
+    />;
   } else if (page === 'Invoices') {
     content = <InvoicesPage invoices={data.invoices} orders={data.purchaseOrders} user={data.user} onCreate={actions.onCreateInvoice} onDecision={actions.onInvoiceDecision} />;
   } else if (page === 'Store requests') {

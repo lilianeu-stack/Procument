@@ -740,14 +740,18 @@ const RECORD_QUERIES = {
     sql: `
       SELECT g.id, g.reference, g.source, g.expected_at AS expectedAt,
         g.received_at AS receivedAt, u.name AS receivedBy,
-        p.reference AS purchaseOrder
+        g.supplied_by AS suppliedBy, g.receiving_department AS receivingDepartment,
+        g.received_by_name AS receivedByName, g.verified_by_name AS verifiedByName,
+        g.received_signature AS receivedSignature, g.verified_signature AS verifiedSignature,
+        g.grn_date AS grnDate, p.reference AS purchaseOrder
       FROM goods_receipts g JOIN users u ON u.id = g.received_by
       LEFT JOIN purchase_orders p ON p.id = g.purchase_order_id
       WHERE g.id = ?`,
     itemsSql: `
-      SELECT i.name AS Item, i.sku AS SKU, gi.quantity AS Quantity, i.unit AS Unit
+      SELECT gi.quantity AS Quantity, i.unit AS Unit,
+        i.name AS 'Description item received', gi.comment AS Comment
       FROM goods_receipt_items gi JOIN items i ON i.id = gi.item_id
-      WHERE gi.goods_receipt_id = ? ORDER BY i.name`,
+      WHERE gi.goods_receipt_id = ? ORDER BY gi.id`,
     auditSql: `
       SELECT a.action AS Action, COALESCE(u.name, 'System') AS Actor,
         a.created_at AS 'Timestamp', a.previous_status AS 'Previous status',
@@ -811,7 +815,8 @@ function recordMeta(row, definition) {
     currency: 'Currency', awardComment: 'Award comment'
   };
   return Object.entries(row)
-    .filter(([key, value]) => !['id', 'requesterId', 'requesterDepartmentId', 'supervisorDepartmentId'].includes(key))
+    .filter(([key, value]) => !['id', 'requesterId', 'requesterDepartmentId', 'supervisorDepartmentId',
+      'preparedSignature', 'approvedSignature', 'receivedSignature', 'verifiedSignature'].includes(key))
     .filter(([, value]) => value !== null && value !== undefined && value !== '')
     .map(([key, value]) => ({ label: labelMap[key] || key.replace(/([A-Z])/g, ' $1'), value: displayValue(value) }));
 }
@@ -1201,6 +1206,129 @@ async function drawPurchaseOrderDocument(doc, record) {
   );
 }
 
+function grnPhone(value) {
+  const parts = documentValue(value).split('·').map((part) => part.trim()).filter(Boolean);
+  return parts.find((part) => /^[+\d][\d\s()-]{6,}$/.test(part)) || '';
+}
+
+function grnSupplierLines(value) {
+  const parts = documentValue(value).split('·').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return '';
+  const phone = grnPhone(value);
+  const email = parts.find((part) => part.includes('@'));
+  const name = parts[0];
+  const contact = parts.slice(1).find((part) =>
+    part !== phone && part !== email && !part.includes('@') && !/^[+\d][\d\s()-]{6,}$/.test(part));
+  const address = parts.filter((part) => ![name, contact, phone, email].includes(part)).join(', ');
+  return [name, [contact, phone].filter(Boolean).join(' · '), email, address]
+    .filter(Boolean).join('\n');
+}
+
+function drawWrappedField(doc, label, value, x, y, width, minHeight = 36) {
+  doc.font('Helvetica-Bold').fontSize(9).fillColor(THEME.navy)
+    .text(label, x, y, { width, lineBreak: false });
+  const valueY = y + 13;
+  const text = documentValue(value);
+  if (text) {
+    doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
+      .text(text, x, valueY, { width });
+  }
+  const used = text ? Math.max(0, doc.y - valueY) : 0;
+  return Math.max(minHeight, 13 + used + 8);
+}
+
+function drawGoodsReceiptTable(doc, rows, y, pageStart) {
+  const margin = 40;
+  const width = doc.page.width - 80;
+  const columns = [
+    { key: 'quantity', label: 'Quantity', weight: 0.8, align: 'center' },
+    { key: 'unit', label: 'Unit', weight: 0.8, align: 'center' },
+    { key: 'description', label: 'Description item received', weight: 2.6 },
+    { key: 'comment', label: 'Comment', weight: 1.8 }
+  ];
+  const totalWeight = columns.reduce((sum, column) => sum + column.weight, 0);
+  const widths = columns.map((column) => width * column.weight / totalWeight);
+
+  function drawHeader(currentY) {
+    doc.save().rect(margin, currentY, width, 24).fill(THEME.stripeStrong).restore();
+    let x = margin;
+    columns.forEach((column, index) => {
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(THEME.navy)
+        .text(column.label, x + 5, currentY + 7, {
+          width: widths[index] - 10, align: column.align || 'left', lineBreak: false, ellipsis: true
+        });
+      x += widths[index];
+    });
+    return currentY + 24;
+  }
+
+  let currentY = drawHeader(y);
+  rows.forEach((values, index) => {
+    doc.font('Helvetica').fontSize(9);
+    const heights = columns.map((column, columnIndex) =>
+      doc.heightOfString(documentValue(values[column.key]) || '—', { width: widths[columnIndex] - 10 }));
+    const rowHeight = Math.max(26, ...heights.map((height) => height + 12));
+    if (currentY + rowHeight > doc.page.height - 56) {
+      doc.addPage();
+      currentY = drawHeader(pageStart(doc));
+    }
+    if (index % 2 === 1) doc.save().rect(margin, currentY, width, rowHeight).fill(THEME.stripe).restore();
+    let x = margin;
+    columns.forEach((column, columnIndex) => {
+      doc.font('Helvetica').fontSize(9).fillColor(THEME.navy)
+        .text(documentValue(values[column.key]) || '—', x + 5, currentY + 6, {
+          width: widths[columnIndex] - 10, align: column.align || 'left', lineBreak: true
+        });
+      x += widths[columnIndex];
+    });
+    doc.moveTo(margin, currentY + rowHeight).lineTo(margin + width, currentY + rowHeight)
+      .strokeColor(THEME.rule).stroke();
+    currentY += rowHeight;
+  });
+  return currentY + 12;
+}
+
+async function drawGoodsReceiptDocument(doc, record) {
+  const row = record.row;
+  const pageStart = officialPageStart(record, 'GOOD RECEIVED NOTE');
+  const startY = pageStart(doc);
+  const usable = doc.page.width - 80;
+  const leftWidth = usable * 0.34;
+  const rightWidth = usable - leftWidth - 20;
+  const secondColumnX = 40 + leftWidth + 20;
+
+  const leftHeight = drawWrappedField(
+    doc, 'Receiving Department:', row.receivingDepartment, 40, startY, leftWidth
+  );
+  const rightHeight = drawWrappedField(
+    doc, 'Supplied by:', grnSupplierLines(row.suppliedBy), secondColumnX, startY, rightWidth
+  );
+  const detailY = startY + Math.max(leftHeight, rightHeight) + 6;
+  drawWrappedField(doc, 'Tel. No.:', grnPhone(row.suppliedBy), 40, detailY, leftWidth, 24);
+  drawWrappedField(doc, 'Date:', documentDate(row.grnDate), secondColumnX, detailY, rightWidth, 24);
+  let y = detailY + 32;
+
+  doc.moveTo(40, y - 8).lineTo(doc.page.width - 40, y - 8).strokeColor(THEME.rule).stroke();
+
+  const itemRows = record.items.map((item) => ({
+    quantity: documentValue(item.Quantity),
+    unit: documentValue(item.Unit) || 'unit',
+    description: documentValue(item['Description item received']),
+    comment: documentValue(item.Comment)
+  }));
+  y = drawGoodsReceiptTable(doc, itemRows, y, pageStart);
+
+  y = ensureSpace(doc, y, 120, pageStart);
+  const signatureWidth = (doc.page.width - 100) / 2;
+  const signatureX = 40 + signatureWidth + 20;
+  await drawSignatureField(
+    doc, 'Received by:', row.receivedByName, row.receivedSignature, 40, y, signatureWidth
+  );
+  await drawSignatureField(
+    doc, 'Verified by:', row.verifiedByName, row.verifiedSignature, signatureX, y, signatureWidth
+  );
+}
+
 async function drawGenericRecordDocument(doc, record) {
   drawBrand(doc);
   let y = 116;
@@ -1304,6 +1432,7 @@ export async function renderRecordPdf(record) {
 
   if (record.type === 'requisition') drawRequisitionDocument(doc, record);
   else if (record.type === 'purchaseOrder') await drawPurchaseOrderDocument(doc, record);
+  else if (record.type === 'goodsReceipt') await drawGoodsReceiptDocument(doc, record);
   else await drawGenericRecordDocument(doc, record);
   recordFooter(doc);
   doc.end();

@@ -106,6 +106,68 @@ async function notifyProcurement(connection, requisitionId, title, body) {
   }
 }
 
+const DELIVERY_PAGE_LINK = '#/stockkeeper/Display%20before%20delivery';
+
+// Sending the signed official purchase order is the handoff point: from here
+// the Storekeeper owns each ordered line until it is accepted into stock or
+// explicitly rejected. INSERT IGNORE makes resends safe and preserves any
+// decision already recorded by the Storekeeper.
+async function queuePurchaseOrderDelivery(connection, purchaseOrderId, user) {
+  const [lines] = await connection.execute(
+    `SELECT poi.id AS purchaseOrderItemId, poi.item_name AS itemName, poi.description,
+        poi.quantity, poi.unit, poi.unit_price AS unitPrice, poi.line_total AS lineTotal,
+        p.id AS purchaseOrderId, p.reference AS poReference, p.delivery_date AS deliveryDate,
+        s.name AS supplierName, s.email AS supplierEmail,
+        r.id AS requisitionId, r.reference AS requisitionReference,
+        r.department_id AS departmentId, d.name AS departmentName
+       FROM purchase_order_items poi
+       JOIN purchase_orders p ON p.id = poi.purchase_order_id
+       JOIN suppliers s ON s.id = p.supplier_id
+       JOIN rfqs f ON f.id = p.rfq_id
+       JOIN requisitions r ON r.id = f.requisition_id
+       LEFT JOIN departments d ON d.id = r.department_id
+      WHERE poi.purchase_order_id = ?
+      ORDER BY poi.id`,
+    [purchaseOrderId]
+  );
+  for (const line of lines) {
+    await connection.execute(
+      `INSERT IGNORE INTO purchase_order_delivery_items
+         (purchase_order_id, purchase_order_item_id, po_reference, supplier_name,
+          supplier_email, requisition_id, requisition_reference, department_id,
+          department_name, item_name, description, quantity, unit, unit_price,
+          line_total, delivery_date, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending')`,
+      [
+        line.purchaseOrderId, line.purchaseOrderItemId, line.poReference,
+        line.supplierName, line.supplierEmail || null, line.requisitionId || null,
+        line.requisitionReference || null, line.departmentId || null, line.departmentName || null,
+        line.itemName, line.description || null, line.quantity, line.unit,
+        line.unitPrice, line.lineTotal, line.deliveryDate || null
+      ]
+    );
+  }
+  await writeAudit(connection, user.id, 'purchase_order_delivery_queued', 'purchase_order', purchaseOrderId, {
+    reference: lines[0]?.poReference || null,
+    lines: lines.length
+  });
+  const [storekeepers] = await connection.execute(
+    "SELECT id FROM users WHERE role = 'storekeeper' AND active = TRUE"
+  );
+  const reference = lines[0]?.poReference || `PO-${purchaseOrderId}`;
+  for (const storekeeper of storekeepers) {
+    await createNotification(
+      connection,
+      storekeeper.id,
+      'Purchase order ready for delivery review',
+      `${reference} has been sent to ${lines[0]?.supplierName || 'the supplier'}. Review ${lines.length} item${lines.length === 1 ? '' : 's'} before accepting them into stock.`,
+      DELIVERY_PAGE_LINK,
+      'purchase_order_delivery'
+    );
+  }
+  return lines.length;
+}
+
 function emailErrorDetails(delivery) {
   if (!delivery || delivery.ok) return null;
   return JSON.stringify({
@@ -408,6 +470,22 @@ protectedRouter.post('/purchase-orders/:id/send-to-supplier', allowRoles(...proc
       deliveryDate: record.row.deliveryDate ? String(record.row.deliveryDate).slice(0, 10) : '',
       message
     });
+
+    // The send action itself is the handoff to the Storekeeper queue. Queue the
+    // lines before attempting delivery so an offline/unconfigured email provider
+    // cannot block the internal pre-delivery workflow.
+    const deliveryConnection = await pool.getConnection();
+    try {
+      await deliveryConnection.beginTransaction();
+      await queuePurchaseOrderDelivery(deliveryConnection, purchaseOrderId, req.user);
+      await deliveryConnection.commit();
+    } catch (error) {
+      await deliveryConnection.rollback();
+      throw error;
+    } finally {
+      deliveryConnection.release();
+    }
+
     const result = await sendEmail({
       ...email,
       attachments: [{ filename, contentType: 'application/pdf', content: pdf }]
@@ -422,15 +500,18 @@ protectedRouter.post('/purchase-orders/:id/send-to-supplier', allowRoles(...proc
     if (!result.ok) {
       return res.status(result.reason === 'not_configured' ? 503 : 502).json({
         message: result.error?.message || 'Email provider could not accept the purchase order.',
-        emailDelivery: { total: 1, accepted: 0, failed: result.reason === 'not_configured' ? 0 : 1, skipped: result.reason === 'not_configured' ? 1 : 0 }
+        emailDelivery: { total: 1, accepted: 0, failed: result.reason === 'not_configured' ? 0 : 1, skipped: result.reason === 'not_configured' ? 1 : 0 },
+        deliveryQueued: true
       });
     }
+
     return res.json({
       message: `Official purchase order ${record.reference} sent to ${supplierEmail}.`,
       status: result.status,
       recipientEmail: supplierEmail,
       providerMessageId: result.providerMessageId || null,
-      emailDelivery: { total: 1, accepted: 1, failed: 0, skipped: 0 }
+      emailDelivery: { total: 1, accepted: 1, failed: 0, skipped: 0 },
+      deliveryQueued: true
     });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ message: error.message });

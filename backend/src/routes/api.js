@@ -72,6 +72,7 @@ const SIDEBAR_PAGES = {
   departmentMessages: 'Department Messages',
   notifications: 'Notifications',
   stockNotifications: 'Notification',
+  displayBeforeDelivery: 'Display before delivery',
   binCard: 'Bin Card'
 };
 
@@ -92,7 +93,9 @@ function sidebarPagesForRole(role) {
   if (role === 'requestor') {
     return [SIDEBAR_PAGES.requesterRequests, SIDEBAR_PAGES.messages, SIDEBAR_PAGES.notifications];
   }
-  if (role === 'storekeeper') return [SIDEBAR_PAGES.stockNotifications, SIDEBAR_PAGES.binCard];
+  if (role === 'storekeeper') {
+    return [SIDEBAR_PAGES.stockNotifications, SIDEBAR_PAGES.displayBeforeDelivery, SIDEBAR_PAGES.binCard];
+  }
   return [];
 }
 
@@ -170,6 +173,7 @@ router.get('/sidebar-counts', async (req, res, next) => {
            AND n.link NOT LIKE '#/requester/Messages%'
            AND n.link NOT LIKE '#/supervisor/Department%20Messages%'
            AND n.link NOT LIKE '#/supervisor/Department Messages%'
+           AND n.link NOT LIKE '#/stockkeeper/Display%20before%20delivery%'
          THEN 1 ELSE 0 END), 0) AS general,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/Requests%' THEN 1 ELSE 0 END), 0) AS receivedRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/admin/RFQs%' THEN 1 ELSE 0 END), 0) AS rfqs,
@@ -183,6 +187,7 @@ router.get('/sidebar-counts', async (req, res, next) => {
          COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/My%20Procurement%20Requests%'
            OR n.link LIKE '#/requester/My Procurement Requests%' THEN 1 ELSE 0 END), 0) AS requesterRequests,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/requester/Messages%request=%' THEN 1 ELSE 0 END), 0) AS requesterRequestMessages,
+         COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Display%20before%20delivery%' THEN 1 ELSE 0 END), 0) AS displayBeforeDelivery,
          COALESCE(SUM(CASE WHEN n.link LIKE '#/stockkeeper/Bin%20Card%' THEN 1 ELSE 0 END), 0) AS binCard
        FROM notifications n
        WHERE n.is_read = FALSE AND (n.user_id = ? OR n.user_id IS NULL)`,
@@ -207,6 +212,7 @@ router.get('/sidebar-counts', async (req, res, next) => {
       [SIDEBAR_PAGES.supervisorRequests]: Number(notificationRow?.supervisorRequests) || 0,
       [SIDEBAR_PAGES.requesterRequests]: (Number(notificationRow?.requesterRequests) || 0)
         + (Number(notificationRow?.requesterRequestMessages) || 0),
+      [SIDEBAR_PAGES.displayBeforeDelivery]: Number(notificationRow?.displayBeforeDelivery) || 0,
       [SIDEBAR_PAGES.binCard]: Number(notificationRow?.binCard) || 0
     };
     const counts = {};

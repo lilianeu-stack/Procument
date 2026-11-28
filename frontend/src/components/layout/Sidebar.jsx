@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowDownToLine, Boxes, BriefcaseBusiness, ChevronLeft, ChevronRight,
+  Activity, ArrowDownToLine, Boxes, ChevronLeft, ChevronRight,
   FileText, Inbox, LayoutDashboard, Mail, ShoppingCart, Truck, UserRound, Users
 } from 'lucide-react';
 import BrandLogo from '../ui/BrandLogo.jsx';
@@ -16,7 +16,6 @@ const groups = [
     { name: 'Email Inbox', icon: Mail },
     { name: PURCHASE_ORDERS_PAGE, icon: ShoppingCart },
     { name: 'Goods receipts', icon: ArrowDownToLine },
-    { name: 'Invoices', icon: BriefcaseBusiness },
     { name: 'Suppliers', icon: Truck }
   ] },
   { section: 'INVENTORY', links: [
@@ -44,7 +43,10 @@ export default function Sidebar({ user, page, counts = {}, open, collapsed, onNa
       </div>
       <nav aria-label="Main navigation" className="scrollbar-hide flex-1 space-y-6 overflow-y-auto px-1">
         {groups.map((group) => {
-          const links = group.links.filter(({ name }) => canAccessPage(user.role, name));
+          const links = group.links.filter(({ name }) =>
+            !(user.role === 'procurement' && name === 'Goods receipts') &&
+            canAccessPage(user.role, name)
+          );
           if (!links.length) return null;
           return <div key={group.section}>
             <div className={`mb-2 px-3 text-[9px] font-extrabold tracking-[.16em] text-black ${collapsed ? 'lg:hidden' : ''}`}>{group.section}</div>
@@ -53,7 +55,7 @@ export default function Sidebar({ user, page, counts = {}, open, collapsed, onNa
                 aria-label={name} aria-current={page === name ? 'page' : undefined} title={collapsed ? name : undefined}
                 className={`relative flex min-h-10 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[12px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand ${collapsed ? 'lg:justify-center lg:px-0' : ''} ${page === name ? 'bg-reference text-black shadow-sm' : 'text-black hover:bg-hover hover:text-black'}`}>
                 <Icon size={17} strokeWidth={1.8} /><span className={`flex-1 ${collapsed ? 'lg:hidden' : ''}`}>{name}</span>
-                <SidebarBadge count={counts[name]} floating={collapsed} />
+                <SidebarBadge count={counts[name]} showText={name === 'Email Inbox'} floating={collapsed} />
                 {page === name && !Number(counts[name]) && <span className={`h-1.5 w-1.5 rounded-full bg-success ${collapsed ? 'lg:hidden' : ''}`} aria-hidden="true" />}
               </button>)}
             </div>
